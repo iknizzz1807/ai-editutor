@@ -1,0 +1,142 @@
+<!-- src/app/components/user-list/user-list.component.html -->
+
+<div class="user-list">
+  <div class="user-list__header">
+    <h2>Users ({{ total$ | async }})</h2>
+
+    <div class="user-list__filters">
+      <input
+        type="search"
+        placeholder="Search users..."
+        [(ngModel)]="searchInput"
+        (input)="handleSearch()"
+        class="user-list__search"
+      />
+
+      <select [(ngModel)]="roleFilter" (change)="handleRoleFilter()" class="user-list__filter">
+        <option value="">All roles</option>
+        <option value="admin">Admin</option>
+        <option value="moderator">Moderator</option>
+        <option value="user">User</option>
+        <option value="guest">Guest</option>
+      </select>
+
+      <select [(ngModel)]="statusFilter" (change)="handleStatusFilter()" class="user-list__filter">
+        <option value="">All statuses</option>
+        <option value="active">Active</option>
+        <option value="inactive">Inactive</option>
+        <option value="suspended">Suspended</option>
+        <option value="pending">Pending</option>
+      </select>
+
+      <button (click)="handleClearFilters()" class="btn btn--secondary">
+        Clear Filters
+      </button>
+    </div>
+  </div>
+
+  <ng-container *ngIf="selectedIds.size > 0 && (isAdmin$ | async)">
+    <div class="user-list__bulk-actions">
+      <span>{{ selectedIds.size }} selected</span>
+      <button class="btn btn--danger">Delete Selected</button>
+    </div>
+  </ng-container>
+
+  <ng-container *ngIf="error$ | async as error">
+    <div class="user-list__error">
+      {{ error }}
+      <button (click)="userService.fetchUsers().subscribe()">Retry</button>
+    </div>
+  </ng-container>
+
+  <ng-container *ngIf="isLoading$ | async; else content">
+    <div class="user-list__loading">Loading...</div>
+  </ng-container>
+
+  <ng-template #content>
+    <ng-container *ngIf="users$ | async as users">
+      <table *ngIf="users.length > 0; else empty" class="user-table">
+        <thead>
+          <tr>
+            <th *ngIf="isAdmin$ | async">
+              <input
+                type="checkbox"
+                [checked]="selectedIds.size === users.length"
+                (change)="selectAll(users)"
+              />
+            </th>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let user of users; trackBy: trackByUserId">
+            <td *ngIf="isAdmin$ | async">
+              <input
+                type="checkbox"
+                [checked]="selectedIds.has(user.id)"
+                (change)="toggleSelection(user.id)"
+              />
+            </td>
+            <td>{{ user.fullName || user.username }}</td>
+            <td>{{ user.email }}</td>
+            <td>
+              <span [class]="'badge badge--' + user.role">{{ user.role }}</span>
+            </td>
+            <td>
+              <span [class]="'badge badge--' + user.status">{{ user.status }}</span>
+            </td>
+            <td>
+              <a [routerLink]="['/users', user.id]" class="btn btn--sm">View</a>
+              <ng-container *ngIf="isAdmin$ | async">
+                <a [routerLink]="['/users', user.id, 'edit']" class="btn btn--sm">Edit</a>
+                <button (click)="handleDelete(user)" class="btn btn--sm btn--danger">
+                  Delete
+                </button>
+              </ng-container>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <ng-template #empty>
+        <div class="user-list__empty">No users found</div>
+      </ng-template>
+    </ng-container>
+  </ng-template>
+
+  <ng-container *ngIf="{ page: page$ | async, totalPages: totalPages$ | async } as pagination">
+    <div *ngIf="pagination.totalPages! > 1" class="pagination">
+      <button
+        [disabled]="pagination.page === 1"
+        (click)="handlePageChange(pagination.page! - 1)"
+        class="pagination__btn"
+      >
+        Previous
+      </button>
+
+      <ng-container *ngFor="let p of getPageNumbers(pagination.page!, pagination.totalPages!)">
+        <span *ngIf="p === '...'" class="pagination__ellipsis">...</span>
+        <button
+          *ngIf="p !== '...'"
+          [class.active]="p === pagination.page"
+          (click)="handlePageChange(p)"
+          class="pagination__btn"
+        >
+          {{ p }}
+        </button>
+      </ng-container>
+
+      <button
+        [disabled]="pagination.page === pagination.totalPages"
+        (click)="handlePageChange(pagination.page! + 1)"
+        class="pagination__btn"
+      >
+        Next
+      </button>
+    </div>
+  </ng-container>
+</div>
