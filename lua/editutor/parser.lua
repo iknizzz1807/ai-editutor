@@ -1,5 +1,5 @@
--- codementor/parser.lua
--- Comment parsing for mentor triggers
+-- editutor/parser.lua
+-- Comment parsing for tutor triggers
 
 local M = {}
 

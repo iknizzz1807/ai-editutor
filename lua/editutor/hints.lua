@@ -1,11 +1,11 @@
--- codementor/hints.lua
+-- editutor/hints.lua
 -- Incremental hints system - progressive assistance
 
 local M = {}
 
-local config = require("codementor.config")
-local prompts = require("codementor.prompts")
-local provider = require("codementor.provider")
+local config = require("editutor.config")
+local prompts = require("editutor.prompts")
+local provider = require("editutor.provider")
 
 -- Store hint sessions (question -> hint state)
 -- Each session tracks hint level and previous responses

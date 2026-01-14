@@ -1,13 +1,13 @@
-# CLAUDE.md - AI Code Mentor Development Guide
+# CLAUDE.md - AI EduTutor Development Guide
 
 ## Project Overview
 
-**AI Code Mentor** is a Neovim plugin that acts as a personal coding mentor - teaching developers through explanation rather than generating code automatically.
+**AI EduTutor** is a Neovim plugin that acts as a personal coding mentor - teaching developers through explanation rather than generating code automatically.
 
 ### Core Philosophy
 > "Teach a person to fish, don't fish for them."
 
-Unlike GitHub Copilot which writes code for you, AI Code Mentor **explains concepts** so you can write better code yourself.
+Unlike GitHub Copilot which writes code for you, AI EduTutor **explains concepts** so you can write better code yourself.
 
 ---
 
@@ -16,71 +16,39 @@ Unlike GitHub Copilot which writes code for you, AI Code Mentor **explains conce
 ```
 ai-tutor/
 ├── lua/
-│   └── codementor/
-│       ├── init.lua              # Plugin entry point
+│   └── editutor/
+│       ├── init.lua              # Plugin entry point (v0.3.0)
 │       ├── config.lua            # Configuration management
 │       ├── parser.lua            # Comment parsing (// Q:, // S:, etc.)
 │       ├── context.lua           # Context extraction via Tree-sitter
-│       ├── provider.lua          # LLM API abstraction (Claude, OpenAI, Ollama)
-│       ├── ui.lua                # Floating window rendering (nui.nvim)
-│       ├── modes/
-│       │   ├── question.lua      # Q: Direct question mode
-│       │   ├── socratic.lua      # S: Socratic questioning mode
-│       │   ├── review.lua        # R: Code review mode
-│       │   ├── debug.lua         # D: Debug assistance mode
-│       │   └── explain.lua       # E: Deep explanation mode
-│       ├── hints.lua             # Incremental hints system
-│       ├── knowledge.lua         # Knowledge tracking & storage
-│       └── rag/
-│           ├── chunker.lua       # AST-based code chunking
-│           ├── embedder.lua      # Embedding generation interface
-│           ├── search.lua        # Hybrid search (BM25 + vector)
-│           └── retrieval.lua     # Two-stage retrieval
+│       ├── prompts.lua           # Pedagogical prompt templates
+│       ├── provider.lua          # LLM API (Claude, OpenAI, Ollama) + Streaming
+│       ├── ui.lua                # Floating window + streaming display
+│       ├── hints.lua             # Incremental hints (4 levels)
+│       ├── knowledge.lua         # Knowledge tracking (SQLite/JSON fallback)
+│       ├── rag.lua               # RAG integration (calls Python CLI)
+│       └── health.lua            # :checkhealth editutor
 ├── python/
-│   └── codementor_cli/
-│       ├── __init__.py
-│       ├── cli.py                # CLI entry point
-│       ├── indexer.py            # Codebase indexing
-│       ├── chunker.py            # AST chunking (astchunk)
-│       ├── embedder.py           # sentence-transformers
-│       └── db.py                 # LanceDB operations
+│   ├── pyproject.toml            # Package configuration
+│   └── editutor_cli/
+│       ├── __init__.py           # Package init (v0.1.0)
+│       ├── cli.py                # CLI commands (index, query, status, clear)
+│       ├── indexer.py            # LanceDB indexing with file hashing
+│       ├── chunker.py            # AST-based chunking (Tree-sitter)
+│       ├── embedder.py           # sentence-transformers embeddings
+│       └── search.py             # Hybrid search (BM25 + vector + RRF)
 ├── plugin/
-│   └── codementor.lua            # Lazy loading entry
+│   └── editutor.lua            # Lazy loading entry
 ├── doc/
-│   └── codementor.txt            # Vim help documentation
-├── tests/
-│   └── ...
+│   └── editutor.txt            # Vim help documentation
 ├── research/                     # Reference implementations (cloned repos)
-│   ├── core/                     # Core plugin architecture
-│   │   ├── gp.nvim/              # Popup, streaming, multi-provider
-│   │   ├── wtf.nvim/             # Explanation-first architecture
-│   │   ├── backseat.nvim/        # Code review/teaching pattern
-│   │   ├── ChatGPT.nvim/         # Built-in explain actions
-│   │   ├── codecompanion.nvim/   # Workspaces, slash commands
-│   │   └── gen.nvim/             # Local Ollama support
-│   ├── rag/                      # RAG implementations
-│   │   ├── VectorCode/           # Neovim RAG (CLI + Plugin)
-│   │   ├── continue/             # Enterprise indexing, hybrid search
-│   │   ├── code-graph-rag/       # Knowledge graph approach
-│   │   ├── SeaGOAT/              # Local-first semantic search
-│   │   └── semantic-code-search/ # Simple CLI semantic search
-│   ├── chunking/                 # AST-based chunking
-│   │   ├── astchunk/             # Python AST chunking
-│   │   └── code-chunk/           # TypeScript AST chunker
-│   ├── ui/                       # UI components
-│   │   ├── nui.nvim/             # Floating windows, popups
-│   │   └── render-markdown.nvim/ # Markdown rendering
-│   ├── backend/                  # LLM integration
-│   │   ├── lsp-ai/               # Rust LLM server
-│   │   ├── llm.nvim/             # OpenAI-compatible API
-│   │   └── lancedb/              # Embedded vector database
-│   ├── reference/                # Concepts & patterns
-│   │   ├── AiComments/           # Comment syntax convention
-│   │   ├── vscode-extension-samples/ # VS Code tutor samples
-│   │   ├── avante.nvim/          # Cursor-like IDE
-│   │   └── CopilotChat.nvim/     # GitHub Copilot chat
-│   └── tools/                    # AST search tools
-│       └── ast-grep/             # Tree-sitter structural search
+│   ├── core/                     # gp.nvim, wtf.nvim, backseat.nvim, etc.
+│   ├── rag/                      # VectorCode, continue, SeaGOAT, etc.
+│   ├── chunking/                 # astchunk, code-chunk
+│   ├── ui/                       # nui.nvim, render-markdown.nvim
+│   ├── backend/                  # lsp-ai, llm.nvim, lancedb
+│   ├── reference/                # AiComments, vscode-extension-samples
+│   └── tools/                    # ast-grep
 ├── README.md
 └── CLAUDE.md                     # This file
 ```
@@ -170,36 +138,52 @@ research/ui/nui.nvim/lua/nui/
 
 ### Development
 ```bash
-# Run tests
-nvim --headless -c "PlenaryBustedDirectory tests/ {minimal_init = 'tests/minimal_init.lua'}"
-
 # Lint Lua
 luacheck lua/
 
 # Format Lua
 stylua lua/
 
-# Python CLI (from python/ directory)
+# Python CLI installation (from python/ directory)
 pip install -e .
-codementor-cli index /path/to/project
-codementor-cli query "How does authentication work?"
+
+# Index codebase
+editutor-cli index /path/to/project
+
+# Search codebase
+editutor-cli query "How does authentication work?" --hybrid
+
+# Check index status
+editutor-cli status
 ```
 
 ### Plugin Usage (in Neovim)
 ```vim
-" Trigger mentor on current comment
-<leader>ma    " Mentor Ask
+" Core commands
+<leader>ma           " Ask (normal)
+<leader>ms           " Ask (streaming)
+:EduTutorHint      " Progressive hints
 
-" Quick actions
-<leader>mq    " Quick question (Q mode)
-<leader>ms    " Socratic mode
-<leader>mr    " Review current function
-<leader>md    " Debug assistance
-<leader>me    " Explain concept
+" Mode commands
+:EduTutorQuestion  " Q mode
+:EduTutorSocratic  " S mode
+:EduTutorReview    " R mode
+:EduTutorDebug     " D mode
+:EduTutorExplain   " E mode
 
-" Knowledge
-<leader>mk    " Search knowledge base
-<leader>mx    " Export knowledge to markdown
+" Knowledge commands
+:EduTutorHistory   " Show Q&A history
+:EduTutorSearch    " Search knowledge base
+:EduTutorExport    " Export to markdown
+:EduTutorStats     " Show statistics
+
+" RAG commands
+:EduTutorIndex     " Index codebase
+:EduTutorRAG       " Ask with codebase context
+:EduTutorRAGStatus " Show RAG status
+
+" Health check
+:checkhealth editutor
 ```
 
 ---
@@ -288,31 +272,35 @@ rich>=13.0.0
 
 ## Development Phases
 
-### Phase 1: MVP (Current)
-- [ ] Comment parsing (`// Q:` detection)
-- [ ] Basic context collection (current buffer + 50 lines)
-- [ ] Claude API integration
-- [ ] Floating window response
-- [ ] Single keybinding `<leader>ma`
+### Phase 1: MVP ✅ COMPLETE
+- [x] Comment parsing (`// Q:` detection)
+- [x] Basic context collection (current buffer + 50 lines)
+- [x] Claude API integration
+- [x] Floating window response
+- [x] Single keybinding `<leader>ma`
 
-### Phase 2: Multi-Mode
-- [ ] 5 interaction modes (Q/S/R/D/E)
-- [ ] Incremental hints system
-- [ ] Basic knowledge tracking (SQLite)
-- [ ] Mode-specific prompts
+### Phase 2: Multi-Mode ✅ COMPLETE
+- [x] 5 interaction modes (Q/S/R/D/E)
+- [x] Incremental hints system (4 levels)
+- [x] Knowledge tracking (JSON fallback, SQLite optional)
+- [x] Mode-specific pedagogical prompts
+- [x] Knowledge search and export
 
-### Phase 3: RAG
-- [ ] Python CLI for indexing
-- [ ] AST-based chunking
-- [ ] LanceDB vector storage
-- [ ] Hybrid search
-- [ ] Two-stage retrieval
+### Phase 3: RAG ✅ COMPLETE
+- [x] Python CLI for indexing (editutor-cli)
+- [x] AST-based chunking (Tree-sitter)
+- [x] LanceDB vector storage
+- [x] Hybrid search (BM25 + semantic + RRF)
+- [x] Neovim integration (:EduTutorRAG)
+- [x] Streaming response support
 
-### Phase 4: Polish
-- [ ] Knowledge export to Markdown
+### Phase 4: Polish (In Progress)
+- [x] Knowledge export to Markdown
+- [x] Health check (:checkhealth editutor)
 - [ ] Obsidian integration
 - [ ] Team sharing
 - [ ] Vietnamese language support
+- [ ] nui.nvim enhanced UI
 
 ---
 
@@ -379,7 +367,7 @@ Question: {user_question}
 ### Issue: LLM API timeout
 ```lua
 -- Increase timeout in config
-require('codementor').setup({
+require('editutor').setup({
   provider = {
     timeout = 30000,  -- 30 seconds
   }
@@ -389,7 +377,7 @@ require('codementor').setup({
 ### Issue: RAG index outdated
 ```bash
 # Re-index codebase
-codementor-cli index --force /path/to/project
+editutor-cli index --force /path/to/project
 ```
 
 ---

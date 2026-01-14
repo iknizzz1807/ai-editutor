@@ -1,0 +1,349 @@
+*editutor.txt*  AI EduTutor - Learn to code better with AI guidance
+
+==============================================================================
+CONTENTS                                                    *editutor-contents*
+
+    1. Introduction .......................... |editutor-introduction|
+    2. Requirements .......................... |editutor-requirements|
+    3. Installation .......................... |editutor-installation|
+    4. Configuration ......................... |editutor-configuration|
+    5. Usage ................................. |editutor-usage|
+    6. Modes ................................. |editutor-modes|
+    7. Incremental Hints ..................... |editutor-hints|
+    8. Knowledge Tracking .................... |editutor-knowledge|
+    9. RAG (Codebase Search) ................. |editutor-rag|
+   10. Commands .............................. |editutor-commands|
+   11. Keymaps ............................... |editutor-keymaps|
+   12. API ................................... |editutor-api|
+   13. Health Check .......................... |editutor-health|
+
+==============================================================================
+1. INTRODUCTION                                         *editutor-introduction*
+
+EduTutor is a Neovim plugin that acts as your personal coding mentor. Unlike
+code generation tools like GitHub Copilot, EduTutor explains concepts and
+guides your learning instead of writing code for you.
+
+Philosophy: "Teach a person to fish, don't fish for them."
+
+Features:
+  - 5 learning modes (Question, Socratic, Review, Debug, Explain)
+  - Incremental hints (4 levels from subtle to complete)
+  - Knowledge tracking (save and search Q&A history)
+  - RAG integration (codebase-aware responses)
+  - Streaming responses (real-time display)
+  - Multiple LLM providers (Claude, OpenAI, Ollama)
+
+==============================================================================
+2. REQUIREMENTS                                         *editutor-requirements*
+
+Required:
+  - Neovim 0.9.0+
+  - plenary.nvim (for HTTP requests)
+  - An API key for Claude/OpenAI (or local Ollama)
+
+Optional:
+  - nvim-treesitter (for better context extraction)
+  - nui.nvim (for enhanced UI)
+  - sqlite.lua (for enhanced knowledge storage)
+  - editutor-cli (for RAG features)
+
+==============================================================================
+3. INSTALLATION                                         *editutor-installation*
+
+Using lazy.nvim: >lua
+    {
+      "your-username/editutor",
+      dependencies = {
+        "nvim-lua/plenary.nvim",
+        "nvim-treesitter/nvim-treesitter",
+      },
+      config = function()
+        require("editutor").setup({
+          provider = "claude",
+          api_key = os.getenv("ANTHROPIC_API_KEY"),
+        })
+      end,
+    }
+<
+
+For RAG support (codebase search):
+>bash
+    cd path/to/editutor
+    pip install -e python/
+<
+
+==============================================================================
+4. CONFIGURATION                                       *editutor-configuration*
+
+Default configuration: >lua
+    require("editutor").setup({
+      -- LLM Provider: "claude" | "openai" | "ollama"
+      provider = "claude",
+      model = "claude-sonnet-4-20250514",
+
+      -- Behavior
+      default_mode = "question",
+      context_lines = 50,
+      include_imports = true,
+      language = "English",
+      stream = false, -- Enable streaming by default
+
+      -- UI
+      ui = {
+        width = 80,
+        height = 20,
+        border = "rounded",
+        max_width = 120,
+      },
+
+      -- Keymaps
+      keymaps = {
+        ask = "<leader>ma",
+        stream = "<leader>ms",
+        close = "q",
+        copy = "y",
+        next_hint = "n",
+      },
+    })
+<
+
+Provider-specific models:
+  Claude: "claude-sonnet-4-20250514", "claude-opus-4-20250514"
+  OpenAI: "gpt-4o", "gpt-4o-mini"
+  Ollama: "llama3.2", "codellama", etc.
+
+==============================================================================
+5. USAGE                                                       *editutor-usage*
+
+1. Write a comment with a mentor prefix: >
+    // Q: What is the time complexity of this algorithm?
+<
+
+2. Press <leader>ma (or your configured keymap)
+
+3. Read the explanation in the floating window
+
+4. Press 'q' to close, 'y' to copy
+
+For streaming responses: Press <leader>ms or :EduTutorStream
+
+==============================================================================
+6. MODES                                                       *editutor-modes*
+
+EduTutor supports 5 interaction modes:
+
+*Q:* Question Mode                                          *editutor-question*
+    Direct answers with explanations
+    Example: // Q: What does this regex do?
+
+*S:* Socratic Mode                                          *editutor-socratic*
+    Guided discovery through questions
+    Example: // S: Why might a mutex be better here?
+
+*R:* Review Mode                                              *editutor-review*
+    Code review with security, performance, best practices
+    Example: // R: Review this function
+
+*D:* Debug Mode                                                *editutor-debug*
+    Guided debugging process
+    Example: // D: This returns nil sometimes, why?
+
+*E:* Explain Mode                                            *editutor-explain*
+    Deep concept explanations
+    Example: // E: Explain closures in JavaScript
+
+==============================================================================
+7. INCREMENTAL HINTS                                          *editutor-hints*
+
+The hints system provides progressive assistance in 4 levels:
+
+  Level 1: Subtle hint - Points in the right direction
+  Level 2: Clearer hint - Narrows down the problem
+  Level 3: Strong hint - Almost reveals the answer
+  Level 4: Full solution - Complete explanation
+
+Usage:
+  1. Write your question comment
+  2. Run :EduTutorHint
+  3. Press 'n' in popup to get next hint level
+
+This approach encourages learning by giving you progressively more help
+rather than immediate complete answers.
+
+==============================================================================
+8. KNOWLEDGE TRACKING                                      *editutor-knowledge*
+
+EduTutor automatically saves all Q&A pairs for future reference.
+
+Commands:
+  :EduTutorHistory     Show recent Q&A history
+  :EduTutorSearch      Search knowledge base
+  :EduTutorExport      Export to markdown file
+  :EduTutorStats       Show statistics
+
+Knowledge is stored in:
+  - SQLite (if sqlite.lua is installed)
+  - JSON file fallback (~/.local/share/nvim/editutor_knowledge.json)
+
+Export example: >
+    :EduTutorExport ~/my_learnings.md
+<
+
+==============================================================================
+9. RAG (CODEBASE SEARCH)                                        *editutor-rag*
+
+RAG (Retrieval Augmented Generation) allows EduTutor to search your
+codebase for relevant context when answering questions.
+
+Setup:
+>bash
+    pip install -e python/   # From editutor directory
+<
+
+Commands:
+  :EduTutorIndex [path]   Index codebase (default: current directory)
+  :EduTutorRAG            Ask with codebase context
+  :EduTutorRAGStatus      Show index statistics
+
+How it works:
+  1. Index parses your code using Tree-sitter AST
+  2. Creates semantic embeddings with sentence-transformers
+  3. Stores in LanceDB vector database
+  4. Searches using hybrid (BM25 + semantic) search
+  5. Relevant code chunks are included in LLM context
+
+Example workflow:
+>
+    :EduTutorIndex              " Index current project
+    // Q: How does the auth system work?
+    :EduTutorRAG                " Ask with codebase context
+<
+
+==============================================================================
+10. COMMANDS                                                *editutor-commands*
+
+Core Commands:
+  :EduTutorAsk            Ask about current mentor comment
+  :EduTutorStream         Ask with streaming response
+  :EduTutorHint           Ask with incremental hints
+  :EduTutorClose          Close popup window
+  :EduTutorModes          Show available modes
+
+Mode Commands:
+  :EduTutorQuestion       Force Question mode
+  :EduTutorSocratic       Force Socratic mode
+  :EduTutorReview         Force Review mode
+  :EduTutorDebug          Force Debug mode
+  :EduTutorExplain        Force Explain mode
+
+Knowledge Commands:
+  :EduTutorHistory        Show Q&A history
+  :EduTutorSearch [query] Search knowledge base
+  :EduTutorExport [path]  Export to markdown
+  :EduTutorStats          Show statistics
+
+RAG Commands:
+  :EduTutorIndex [path]   Index codebase
+  :EduTutorRAG            Ask with codebase context
+  :EduTutorRAGStatus      Show RAG index status
+
+==============================================================================
+11. KEYMAPS                                                  *editutor-keymaps*
+
+Default keymaps (configurable):
+
+Normal mode:
+    <leader>ma    Ask mentor about current comment
+    <leader>ms    Ask with streaming response
+
+Popup window:
+    q             Close popup
+    <Esc>         Close popup
+    y             Copy content to clipboard
+    n             Next hint (in hint mode)
+    j/k           Navigate (with wrap)
+    <C-d>/<C-u>   Scroll half page
+    <C-c>         Cancel streaming
+
+==============================================================================
+12. API                                                          *editutor-api*
+
+Lua API: >lua
+    local editutor = require("editutor")
+
+    -- Setup
+    editutor.setup(opts)
+
+    -- Ask about current comment
+    editutor.ask()
+    editutor.ask_stream()
+
+    -- Ask with incremental hints
+    editutor.ask_with_hints()
+
+    -- Ask with specific mode
+    editutor.ask_mode("question")
+    editutor.ask_mode("socratic")
+    editutor.ask_mode("review")
+    editutor.ask_mode("debug")
+    editutor.ask_mode("explain")
+
+    -- RAG functions
+    editutor.index_codebase(path)
+    editutor.ask_with_rag()
+    editutor.show_rag_status()
+
+    -- Knowledge functions
+    editutor.show_history()
+    editutor.search_knowledge(query)
+    editutor.export_knowledge(path)
+    editutor.show_stats()
+
+    -- Utilities
+    editutor.show_modes()
+    editutor.version()
+<
+
+UI API: >lua
+    local ui = require("editutor.ui")
+
+    ui.show(content, mode, question, opts)
+    ui.show_loading(message)
+    ui.start_stream(mode, question, job_id)
+    ui.append_stream(chunk)
+    ui.finish_stream(success, error_msg)
+    ui.close()
+    ui.is_open()
+<
+
+Knowledge API: >lua
+    local knowledge = require("editutor.knowledge")
+
+    knowledge.save({ mode, question, answer, language, filepath, tags })
+    knowledge.get_recent(limit)
+    knowledge.search(query, limit)
+    knowledge.get_stats()
+    knowledge.export_markdown(filepath)
+<
+
+==============================================================================
+13. HEALTH CHECK                                              *editutor-health*
+
+Run health check to verify setup:
+>
+    :checkhealth editutor
+<
+
+This checks:
+  - Neovim version
+  - Required dependencies (plenary.nvim)
+  - Optional dependencies (nui.nvim, sqlite.lua)
+  - Tree-sitter availability
+  - Provider configuration
+  - API key setup
+  - RAG CLI installation
+  - Knowledge database status
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:

@@ -1,5 +1,5 @@
 """
-CodeMentor CLI - Main entry point
+EduTutor CLI - Main entry point
 
 Commands:
 - index: Index a codebase for semantic search
@@ -18,25 +18,25 @@ from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from codementor_cli import __version__
-from codementor_cli.indexer import Indexer
-from codementor_cli.search import Searcher
+from editutor_cli import __version__
+from editutor_cli.indexer import Indexer
+from editutor_cli.search import Searcher
 
 console = Console()
 
 
 def get_default_db_path() -> Path:
     """Get default database path."""
-    return Path.home() / ".codementor" / "vectors"
+    return Path.home() / ".editutor" / "vectors"
 
 
 @click.group()
-@click.version_option(version=__version__, prog_name="codementor-cli")
+@click.version_option(version=__version__, prog_name="editutor-cli")
 def main():
-    """CodeMentor CLI - RAG system for AI Code Mentor.
+    """EduTutor CLI - RAG system for AI EduTutor.
 
     Index your codebase and perform semantic search to enhance
-    AI Code Mentor's understanding of your project.
+    AI EduTutor's understanding of your project.
     """
     pass
 
@@ -59,9 +59,9 @@ def index(
     PATH: Directory to index
 
     Examples:
-        codementor-cli index /path/to/project
-        codementor-cli index . --exclude node_modules --exclude .git
-        codementor-cli index . --include "*.py" --include "*.js"
+        editutor-cli index /path/to/project
+        editutor-cli index . --exclude node_modules --exclude .git
+        editutor-cli index . --include "*.py" --include "*.js"
     """
     project_path = Path(path).resolve()
     db = Path(db_path) if db_path else get_default_db_path()
@@ -130,14 +130,14 @@ def query(
     QUERY: Natural language query
 
     Examples:
-        codementor-cli query "How does authentication work?"
-        codementor-cli query "database connection" --top-k 10
-        codementor-cli query "error handling" --json
+        editutor-cli query "How does authentication work?"
+        editutor-cli query "database connection" --top-k 10
+        editutor-cli query "error handling" --json
     """
     db = Path(db_path) if db_path else get_default_db_path()
 
     if not db.exists():
-        console.print("[bold red]Error:[/] No index found. Run 'codementor-cli index' first.")
+        console.print("[bold red]Error:[/] No index found. Run 'editutor-cli index' first.")
         sys.exit(1)
 
     try:
@@ -201,7 +201,7 @@ def status(db_path: Optional[str]):
     db = Path(db_path) if db_path else get_default_db_path()
 
     if not db.exists():
-        console.print("[yellow]No index found.[/] Run 'codementor-cli index' first.")
+        console.print("[yellow]No index found.[/] Run 'editutor-cli index' first.")
         return
 
     try:

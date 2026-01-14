@@ -1,9 +1,9 @@
--- codementor/context.lua
--- Context extraction for mentor queries using Tree-sitter
+-- editutor/context.lua
+-- Context extraction for tutor queries using Tree-sitter
 
 local M = {}
 
-local config = require("codementor.config")
+local config = require("editutor.config")
 
 ---@class CodeContext
 ---@field language string Programming language

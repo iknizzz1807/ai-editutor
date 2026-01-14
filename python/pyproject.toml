@@ -3,14 +3,14 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "codementor-cli"
+name = "editutor-cli"
 version = "0.1.0"
-description = "RAG CLI for AI Code Mentor - codebase indexing and semantic search"
+description = "RAG CLI for AI EduTutor - codebase indexing and semantic search"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.9"
 authors = [
-    {name = "AI Code Mentor"}
+    {name = "AI EduTutor"}
 ]
 keywords = ["rag", "code", "search", "embedding", "neovim"]
 classifiers = [
@@ -46,11 +46,11 @@ dev = [
 ]
 
 [project.scripts]
-codementor-cli = "codementor_cli.cli:main"
+editutor-cli = "editutor_cli.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/your-username/ai-code-mentor"
-Repository = "https://github.com/your-username/ai-code-mentor"
+Homepage = "https://github.com/your-username/ai-editutor"
+Repository = "https://github.com/your-username/ai-editutor"
 
 [tool.setuptools.packages.find]
 where = ["."]

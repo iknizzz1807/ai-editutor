@@ -1,9 +1,9 @@
--- codementor/knowledge.lua
+-- editutor/knowledge.lua
 -- Knowledge tracking - save and search Q&A history
 
 local M = {}
 
-local config = require("codementor.config")
+local config = require("editutor.config")
 
 -- Database state
 local db = nil
@@ -17,7 +17,7 @@ local function get_db_path()
   end
 
   local data_dir = vim.fn.stdpath("data")
-  db_path = data_dir .. "/codementor/knowledge.db"
+  db_path = data_dir .. "/editutor/knowledge.db"
 
   -- Ensure directory exists
   local dir = vim.fn.fnamemodify(db_path, ":h")
@@ -75,7 +75,7 @@ local json_path = nil
 ---@return string|nil error
 function M._init_json_storage()
   local data_dir = vim.fn.stdpath("data")
-  json_path = data_dir .. "/codementor/knowledge.json"
+  json_path = data_dir .. "/editutor/knowledge.json"
 
   -- Ensure directory exists
   local dir = vim.fn.fnamemodify(json_path, ":h")
@@ -125,7 +125,7 @@ end
 function M.save(entry)
   local ok, err = init_db()
   if not ok then
-    vim.notify("[CodeMentor] Knowledge tracking disabled: " .. (err or "unknown error"), vim.log.levels.WARN)
+    vim.notify("[EduTutor] Knowledge tracking disabled: " .. (err or "unknown error"), vim.log.levels.WARN)
     return false
   end
 
@@ -359,11 +359,11 @@ function M.get_stats()
 end
 
 ---Export knowledge base to markdown
----@param filepath? string Output path (default: ~/codementor_export.md)
+---@param filepath? string Output path (default: ~/editutor_export.md)
 ---@return boolean success
 ---@return string|nil error
 function M.export_markdown(filepath)
-  filepath = filepath or (os.getenv("HOME") .. "/codementor_export.md")
+  filepath = filepath or (os.getenv("HOME") .. "/editutor_export.md")
 
   local ok, _ = init_db()
   if not ok then
@@ -377,7 +377,7 @@ function M.export_markdown(filepath)
   end
 
   local lines = {
-    "# Code Mentor Knowledge Base",
+    "# EduTutor Knowledge Base",
     "",
     string.format("Exported: %s", os.date("%Y-%m-%d %H:%M:%S")),
     string.format("Total entries: %d", #entries),

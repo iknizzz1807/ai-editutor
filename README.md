@@ -1,10 +1,10 @@
-# AI Code Mentor
+# AI EduTutor
 
-> **"GitHub Copilot writes code for you. AI Code Mentor teaches you to write better code."**
+> **"GitHub Copilot writes code for you. AI EduTutor teaches you to write better code."**
 
 A Neovim plugin that acts as your personal coding mentor - explaining concepts, guiding your thinking, and helping you truly understand code rather than just generating it.
 
-## Why AI Code Mentor?
+## Why AI EduTutor?
 
 | Problem | Solution |
 |---------|----------|
@@ -73,7 +73,7 @@ A Neovim plugin that acts as your personal coding mentor - explaining concepts, 
     "nvim-treesitter/nvim-treesitter",
   },
   config = function()
-    require("codementor").setup({
+    require("editutor").setup({
       provider = "claude",  -- or "openai", "ollama"
       api_key = os.getenv("ANTHROPIC_API_KEY"),
     })
@@ -83,10 +83,10 @@ A Neovim plugin that acts as your personal coding mentor - explaining concepts, 
 
 ### Python CLI (for RAG features)
 ```bash
-pip install codementor-cli
+pip install editutor-cli
 
 # Index your codebase
-codementor-cli index /path/to/your/project
+editutor-cli index /path/to/your/project
 ```
 
 ## Quick Start
@@ -122,7 +122,7 @@ codementor-cli index /path/to/your/project
 ## Configuration
 
 ```lua
-require("codementor").setup({
+require("editutor").setup({
   -- LLM Provider
   provider = "claude",  -- "claude" | "openai" | "ollama"
   api_key = os.getenv("ANTHROPIC_API_KEY"),
@@ -136,17 +136,17 @@ require("codementor").setup({
   context_lines = 50,         -- Lines of context around question
   include_imports = true,     -- Include file imports in context
 
-  -- RAG (requires codementor-cli)
+  -- RAG (requires editutor-cli)
   rag = {
     enabled = false,          -- Enable codebase-wide search
-    db_path = "~/.codementor/vectors",
+    db_path = "~/.editutor/vectors",
     top_k = 5,                -- Number of relevant chunks
   },
 
   -- Knowledge Tracking
   knowledge = {
     enabled = true,
-    db_path = "~/.codementor/knowledge.db",
+    db_path = "~/.editutor/knowledge.db",
     auto_save = true,
   },
 
@@ -190,8 +190,8 @@ require("codementor").setup({
 
 ```
 ai-tutor/
-├── lua/codementor/           # Neovim plugin (Lua)
-├── python/codementor_cli/    # RAG CLI (Python)
+├── lua/editutor/           # Neovim plugin (Lua)
+├── python/editutor_cli/    # RAG CLI (Python)
 ├── research/                 # Reference implementations
 │   ├── core/                 # gp.nvim, wtf.nvim, etc.
 │   ├── rag/                  # VectorCode, continue, etc.
@@ -206,7 +206,7 @@ ai-tutor/
 
 ## Comparison with Other Tools
 
-| Feature | Copilot | ChatGPT | AI Code Mentor |
+| Feature | Copilot | ChatGPT | AI EduTutor |
 |---------|---------|---------|----------------|
 | Code generation | Yes | Yes | No (by design) |
 | In-editor | Yes | No | Yes |

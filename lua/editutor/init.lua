@@ -1,19 +1,20 @@
--- codementor/init.lua
--- AI Code Mentor - A Neovim plugin that teaches you to code better
+-- editutor/init.lua
+-- AI EduTutor - A Neovim plugin that teaches you to code better
 
 local M = {}
 
-local config = require("codementor.config")
-local parser = require("codementor.parser")
-local context = require("codementor.context")
-local prompts = require("codementor.prompts")
-local provider = require("codementor.provider")
-local ui = require("codementor.ui")
-local hints = require("codementor.hints")
-local knowledge = require("codementor.knowledge")
+local config = require("editutor.config")
+local parser = require("editutor.parser")
+local context = require("editutor.context")
+local prompts = require("editutor.prompts")
+local provider = require("editutor.provider")
+local ui = require("editutor.ui")
+local hints = require("editutor.hints")
+local knowledge = require("editutor.knowledge")
+local rag = require("editutor.rag")
 
-M._name = "CodeMentor"
-M._version = "0.2.0"
+M._name = "EduTutor"
+M._version = "0.3.0"
 M._setup_called = false
 
 ---Setup the plugin
@@ -31,64 +32,81 @@ function M.setup(opts)
   -- Check provider on setup
   local ready, err = provider.check_provider()
   if not ready then
-    vim.notify("[CodeMentor] Warning: " .. (err or "Provider not ready"), vim.log.levels.WARN)
+    vim.notify("[EduTutor] Warning: " .. (err or "Provider not ready"), vim.log.levels.WARN)
   end
 end
 
 ---Create user commands
 function M._create_commands()
-  vim.api.nvim_create_user_command("CodeMentorAsk", function()
+  vim.api.nvim_create_user_command("EduTutorAsk", function()
     M.ask()
-  end, { desc = "Ask Code Mentor about the current comment" })
+  end, { desc = "Ask EduTutor about the current comment" })
 
-  vim.api.nvim_create_user_command("CodeMentorHint", function()
+  vim.api.nvim_create_user_command("EduTutorHint", function()
     M.ask_with_hints()
   end, { desc = "Ask with incremental hints" })
 
-  vim.api.nvim_create_user_command("CodeMentorQuestion", function()
+  vim.api.nvim_create_user_command("EduTutorQuestion", function()
     M.ask_mode("question")
   end, { desc = "Ask in Question mode" })
 
-  vim.api.nvim_create_user_command("CodeMentorSocratic", function()
+  vim.api.nvim_create_user_command("EduTutorSocratic", function()
     M.ask_mode("socratic")
   end, { desc = "Ask in Socratic mode" })
 
-  vim.api.nvim_create_user_command("CodeMentorReview", function()
+  vim.api.nvim_create_user_command("EduTutorReview", function()
     M.ask_mode("review")
   end, { desc = "Review current function" })
 
-  vim.api.nvim_create_user_command("CodeMentorDebug", function()
+  vim.api.nvim_create_user_command("EduTutorDebug", function()
     M.ask_mode("debug")
   end, { desc = "Debug assistance" })
 
-  vim.api.nvim_create_user_command("CodeMentorExplain", function()
+  vim.api.nvim_create_user_command("EduTutorExplain", function()
     M.ask_mode("explain")
   end, { desc = "Explain concept" })
 
-  vim.api.nvim_create_user_command("CodeMentorClose", function()
+  vim.api.nvim_create_user_command("EduTutorClose", function()
     ui.close()
-  end, { desc = "Close mentor popup" })
+  end, { desc = "Close tutor popup" })
 
-  vim.api.nvim_create_user_command("CodeMentorModes", function()
+  vim.api.nvim_create_user_command("EduTutorStream", function()
+    M.ask_stream()
+  end, { desc = "Ask with streaming response" })
+
+  vim.api.nvim_create_user_command("EduTutorModes", function()
     M.show_modes()
   end, { desc = "Show available modes" })
 
   -- Knowledge commands
-  vim.api.nvim_create_user_command("CodeMentorHistory", function()
+  vim.api.nvim_create_user_command("EduTutorHistory", function()
     M.show_history()
   end, { desc = "Show Q&A history" })
 
-  vim.api.nvim_create_user_command("CodeMentorSearch", function(opts)
+  vim.api.nvim_create_user_command("EduTutorSearch", function(opts)
     M.search_knowledge(opts.args)
   end, { nargs = "?", desc = "Search knowledge base" })
 
-  vim.api.nvim_create_user_command("CodeMentorExport", function(opts)
+  vim.api.nvim_create_user_command("EduTutorExport", function(opts)
     M.export_knowledge(opts.args)
   end, { nargs = "?", desc = "Export knowledge to markdown" })
 
-  vim.api.nvim_create_user_command("CodeMentorStats", function()
+  vim.api.nvim_create_user_command("EduTutorStats", function()
     M.show_stats()
   end, { desc = "Show knowledge stats" })
+
+  -- RAG commands
+  vim.api.nvim_create_user_command("EduTutorIndex", function(opts)
+    M.index_codebase(opts.args ~= "" and opts.args or nil)
+  end, { nargs = "?", desc = "Index codebase for RAG" })
+
+  vim.api.nvim_create_user_command("EduTutorRAG", function()
+    M.ask_with_rag()
+  end, { desc = "Ask with codebase context (RAG)" })
+
+  vim.api.nvim_create_user_command("EduTutorRAGStatus", function()
+    M.show_rag_status()
+  end, { desc = "Show RAG index status" })
 end
 
 ---Setup keymaps
@@ -97,7 +115,12 @@ function M._setup_keymaps()
 
   -- Main ask keymap
   if keymaps.ask then
-    vim.keymap.set("n", keymaps.ask, M.ask, { desc = "Code Mentor: Ask" })
+    vim.keymap.set("n", keymaps.ask, M.ask, { desc = "EduTutor: Ask" })
+  end
+
+  -- Streaming keymap
+  if keymaps.stream then
+    vim.keymap.set("n", keymaps.stream, M.ask_stream, { desc = "EduTutor: Ask (Stream)" })
   end
 end
 
@@ -107,7 +130,7 @@ function M.ask()
   local query = parser.find_query()
 
   if not query then
-    vim.notify("[CodeMentor] No mentor comment found near cursor.\nUse // Q: your question", vim.log.levels.WARN)
+    vim.notify("[EduTutor] No mentor comment found near cursor.\nUse // Q: your question", vim.log.levels.WARN)
     return
   end
 
@@ -129,13 +152,13 @@ function M.ask()
   provider.query_async(system_prompt, user_prompt, function(response, err)
     if err then
       ui.close()
-      vim.notify("[CodeMentor] Error: " .. err, vim.log.levels.ERROR)
+      vim.notify("[EduTutor] Error: " .. err, vim.log.levels.ERROR)
       return
     end
 
     if not response then
       ui.close()
-      vim.notify("[CodeMentor] No response received", vim.log.levels.ERROR)
+      vim.notify("[EduTutor] No response received", vim.log.levels.ERROR)
       return
     end
 
@@ -153,12 +176,71 @@ function M.ask()
   end)
 end
 
+---Ask with streaming response
+function M.ask_stream()
+  local query = parser.find_query()
+
+  if not query then
+    vim.notify("[EduTutor] No mentor comment found near cursor.\nUse // Q: your question", vim.log.levels.WARN)
+    return
+  end
+
+  local mode = query.mode_name or config.options.default_mode
+  local ctx = context.extract(nil, query.line)
+
+  -- Build prompts
+  local system_prompt = prompts.get_system_prompt(mode)
+  local context_formatted = context.format_for_prompt(ctx)
+  local user_prompt = prompts.build_user_prompt(query.question, context_formatted, mode)
+
+  -- Start streaming UI
+  local job_id
+  ui.start_stream(mode, query.question, nil)
+
+  -- Stream response
+  job_id = provider.query_stream(
+    system_prompt,
+    user_prompt,
+    -- On each chunk
+    function(chunk)
+      ui.append_stream(chunk)
+    end,
+    -- On done
+    function(full_response, err)
+      if err then
+        ui.finish_stream(false, err)
+        return
+      end
+
+      ui.finish_stream(true, nil)
+
+      -- Save to knowledge base
+      local content = ui.get_stream_content()
+      if content and content ~= "" then
+        knowledge.save({
+          mode = mode,
+          question = query.question,
+          answer = content,
+          language = ctx.language,
+          filepath = ctx.filepath,
+          tags = { "stream" },
+        })
+      end
+    end
+  )
+
+  -- Store job_id for cancellation (update UI state)
+  if job_id and ui.is_open() then
+    -- The UI already handles cancellation via the job_id passed to start_stream
+  end
+end
+
 ---Ask with incremental hints system
 function M.ask_with_hints()
   local query = parser.find_query()
 
   if not query then
-    vim.notify("[CodeMentor] No mentor comment found near cursor.\nUse // Q: your question", vim.log.levels.WARN)
+    vim.notify("[EduTutor] No mentor comment found near cursor.\nUse // Q: your question", vim.log.levels.WARN)
     return
   end
 
@@ -176,13 +258,13 @@ function M.ask_with_hints()
     hints.request_next_hint(session, function(response, level, has_more, err)
       if err then
         ui.close()
-        vim.notify("[CodeMentor] Error: " .. err, vim.log.levels.ERROR)
+        vim.notify("[EduTutor] Error: " .. err, vim.log.levels.ERROR)
         return
       end
 
       if not response then
         ui.close()
-        vim.notify("[CodeMentor] No response received", vim.log.levels.ERROR)
+        vim.notify("[EduTutor] No response received", vim.log.levels.ERROR)
         return
       end
 
@@ -259,13 +341,13 @@ function M._process_query(query, mode_override)
   provider.query_async(system_prompt, user_prompt, function(response, err)
     if err then
       ui.close()
-      vim.notify("[CodeMentor] Error: " .. err, vim.log.levels.ERROR)
+      vim.notify("[EduTutor] Error: " .. err, vim.log.levels.ERROR)
       return
     end
 
     if not response then
       ui.close()
-      vim.notify("[CodeMentor] No response received", vim.log.levels.ERROR)
+      vim.notify("[EduTutor] No response received", vim.log.levels.ERROR)
       return
     end
 
@@ -303,13 +385,13 @@ function M._process_question(question, mode, line)
   provider.query_async(system_prompt, user_prompt, function(response, err)
     if err then
       ui.close()
-      vim.notify("[CodeMentor] Error: " .. err, vim.log.levels.ERROR)
+      vim.notify("[EduTutor] Error: " .. err, vim.log.levels.ERROR)
       return
     end
 
     if not response then
       ui.close()
-      vim.notify("[CodeMentor] No response received", vim.log.levels.ERROR)
+      vim.notify("[EduTutor] No response received", vim.log.levels.ERROR)
       return
     end
 
@@ -330,7 +412,7 @@ end
 ---Show available modes
 function M.show_modes()
   local help = {
-    "AI Code Mentor - Available Modes",
+    "AI EduTutor - Available Modes",
     "================================",
     "",
     "Write a comment with one of these prefixes, then press " .. (config.options.keymaps.ask or "<leader>ma"),
@@ -350,7 +432,7 @@ function M.show_modes()
   table.insert(help, "  // E: Explain closures in JavaScript")
   table.insert(help, "")
   table.insert(help, "Incremental Hints:")
-  table.insert(help, "  Use :CodeMentorHint to get progressive hints (level 1-4)")
+  table.insert(help, "  Use :EduTutorHint to get progressive hints (level 1-4)")
   table.insert(help, "  Press 'n' in the popup to get the next hint level")
 
   ui.show(table.concat(help, "\n"), nil, nil)
@@ -361,12 +443,12 @@ function M.show_history()
   local entries = knowledge.get_recent(20)
 
   if #entries == 0 then
-    vim.notify("[CodeMentor] No history found", vim.log.levels.INFO)
+    vim.notify("[EduTutor] No history found", vim.log.levels.INFO)
     return
   end
 
   local lines = {
-    "Code Mentor - Recent History",
+    "EduTutor - Recent History",
     "============================",
     "",
   }
@@ -380,8 +462,8 @@ function M.show_history()
   end
 
   table.insert(lines, "---")
-  table.insert(lines, "Use :CodeMentorSearch <query> to search")
-  table.insert(lines, "Use :CodeMentorExport to export to markdown")
+  table.insert(lines, "Use :EduTutorSearch <query> to search")
+  table.insert(lines, "Use :EduTutorExport to export to markdown")
 
   ui.show(table.concat(lines, "\n"), nil, nil)
 end
@@ -401,7 +483,7 @@ function M.search_knowledge(query)
   local results = knowledge.search(query)
 
   if #results == 0 then
-    vim.notify("[CodeMentor] No results found for: " .. query, vim.log.levels.INFO)
+    vim.notify("[EduTutor] No results found for: " .. query, vim.log.levels.INFO)
     return
   end
 
@@ -435,10 +517,10 @@ function M.export_knowledge(filepath)
   local success, err = knowledge.export_markdown(filepath)
 
   if success then
-    local path = filepath or (os.getenv("HOME") .. "/codementor_export.md")
-    vim.notify("[CodeMentor] Exported to: " .. path, vim.log.levels.INFO)
+    local path = filepath or (os.getenv("HOME") .. "/editutor_export.md")
+    vim.notify("[EduTutor] Exported to: " .. path, vim.log.levels.INFO)
   else
-    vim.notify("[CodeMentor] Export failed: " .. (err or "unknown error"), vim.log.levels.ERROR)
+    vim.notify("[EduTutor] Export failed: " .. (err or "unknown error"), vim.log.levels.ERROR)
   end
 end
 
@@ -447,7 +529,7 @@ function M.show_stats()
   local stats = knowledge.get_stats()
 
   local lines = {
-    "Code Mentor - Statistics",
+    "EduTutor - Statistics",
     "========================",
     "",
     string.format("Total Q&A entries: %d", stats.total),
@@ -473,6 +555,147 @@ end
 ---@return string
 function M.version()
   return M._version
+end
+
+-- =============================================================================
+-- RAG Functions
+-- =============================================================================
+
+---Index codebase for RAG
+---@param path? string Path to index
+function M.index_codebase(path)
+  path = path or vim.fn.getcwd()
+
+  if not rag.is_available() then
+    vim.notify("[EduTutor] RAG CLI not available.\nInstall with: pip install -e python/", vim.log.levels.ERROR)
+    return
+  end
+
+  vim.notify("[EduTutor] Indexing " .. path .. "...", vim.log.levels.INFO)
+
+  rag.index(path, {}, function(stats, err)
+    if err then
+      vim.notify("[EduTutor] Indexing error: " .. err, vim.log.levels.ERROR)
+      return
+    end
+
+    vim.notify(
+      string.format("[EduTutor] Indexed %d files, created %d chunks",
+        stats.files_processed or 0,
+        stats.chunks_created or 0),
+      vim.log.levels.INFO
+    )
+  end)
+end
+
+---Ask with RAG context (codebase-aware)
+function M.ask_with_rag()
+  local query = parser.find_query()
+
+  if not query then
+    vim.notify("[EduTutor] No mentor comment found near cursor.\nUse // Q: your question", vim.log.levels.WARN)
+    return
+  end
+
+  if not rag.is_available() then
+    vim.notify("[EduTutor] RAG not available, falling back to normal ask", vim.log.levels.WARN)
+    M.ask()
+    return
+  end
+
+  local mode = query.mode_name or config.options.default_mode
+  local ctx = context.extract(nil, query.line)
+
+  ui.show_loading("Searching codebase...")
+
+  -- Get RAG context
+  rag.get_context(query.question, function(rag_context, rag_err)
+    if rag_err then
+      vim.notify("[EduTutor] RAG search failed: " .. rag_err, vim.log.levels.WARN)
+    end
+
+    -- Build enhanced prompt with RAG context
+    local system_prompt = prompts.get_system_prompt(mode)
+    local context_formatted = context.format_for_prompt(ctx)
+
+    -- Add RAG context if available
+    local full_context = context_formatted
+    if rag_context and rag_context ~= "" then
+      full_context = full_context .. "\n\n" .. rag_context
+    end
+
+    local user_prompt = prompts.build_user_prompt(query.question, full_context, mode)
+
+    ui.show_loading("Thinking with codebase context...")
+
+    -- Query LLM
+    provider.query_async(system_prompt, user_prompt, function(response, err)
+      if err then
+        ui.close()
+        vim.notify("[EduTutor] Error: " .. err, vim.log.levels.ERROR)
+        return
+      end
+
+      if not response then
+        ui.close()
+        vim.notify("[EduTutor] No response received", vim.log.levels.ERROR)
+        return
+      end
+
+      -- Save to knowledge base
+      knowledge.save({
+        mode = mode,
+        question = query.question,
+        answer = response,
+        language = ctx.language,
+        filepath = ctx.filepath,
+        tags = { "rag" },
+      })
+
+      -- Show response
+      ui.show(response, mode .. "+RAG", query.question)
+    end)
+  end)
+end
+
+---Show RAG index status
+function M.show_rag_status()
+  if not rag.is_available() then
+    vim.notify("[EduTutor] RAG CLI not available", vim.log.levels.WARN)
+    return
+  end
+
+  rag.status(function(stats, err)
+    if err then
+      vim.notify("[EduTutor] " .. err, vim.log.levels.ERROR)
+      return
+    end
+
+    local lines = {
+      "EduTutor - RAG Status",
+      "========================",
+      "",
+      string.format("Total chunks: %s", stats.total_chunks or "N/A"),
+      string.format("Total files: %s", stats.total_files or "N/A"),
+      string.format("Database size: %s", stats.db_size or "N/A"),
+      string.format("Last updated: %s", stats.last_updated or "N/A"),
+      "",
+    }
+
+    if stats.by_language then
+      table.insert(lines, "By Language:")
+      for lang, count in pairs(stats.by_language) do
+        table.insert(lines, string.format("  %s: %d", lang, count))
+      end
+    end
+
+    table.insert(lines, "")
+    table.insert(lines, "Commands:")
+    table.insert(lines, "  :EduTutorIndex [path] - Index codebase")
+    table.insert(lines, "  :EduTutorRAG - Ask with codebase context")
+
+    ui.show(table.concat(lines, "\n"), nil, nil)
+  end)
 end
 
 return M

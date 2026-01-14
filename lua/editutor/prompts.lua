@@ -1,9 +1,9 @@
--- codementor/prompts.lua
+-- editutor/prompts.lua
 -- Pedagogical prompt templates for different modes
 
 local M = {}
 
-local config = require("codementor.config")
+local config = require("editutor.config")
 
 -- Base system prompt for all modes
 M.BASE_SYSTEM = [[You are an expert coding mentor helping a developer learn and understand code.

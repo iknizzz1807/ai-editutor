@@ -1,9 +1,9 @@
--- codementor/ui.lua
--- Floating window UI for mentor responses
+-- editutor/ui.lua
+-- Floating window UI for tutor responses
 
 local M = {}
 
-local config = require("codementor.config")
+local config = require("editutor.config")
 
 -- Track current popup state
 local state = {
@@ -154,7 +154,7 @@ function M.show(content, mode, question, opts)
   M.close()
 
   -- Build title
-  local title = "Code Mentor"
+  local title = "EduTutor"
   if mode then
     title = title .. " [" .. mode:upper() .. "]"
   end
@@ -230,7 +230,7 @@ function M.show_loading(message)
   -- Close existing popup
   M.close()
 
-  local buf, win = create_popup(loading_content, "Code Mentor")
+  local buf, win = create_popup(loading_content, "EduTutor")
   if buf and win then
     state.popup_buf = buf
     state.popup_win = win
@@ -264,6 +264,182 @@ end
 ---@return boolean
 function M.is_open()
   return state.popup_win ~= nil and vim.api.nvim_win_is_valid(state.popup_win)
+end
+
+-- =============================================================================
+-- Streaming Support
+-- =============================================================================
+
+-- State for streaming
+local stream_state = {
+  header_lines = {},   -- Lines before content (question, separator)
+  content = "",        -- Accumulated content
+  mode = nil,          -- Mode name
+  question = nil,      -- Original question
+  job_id = nil,        -- Streaming job ID for cancellation
+}
+
+---Start streaming mode - show initial window with header
+---@param mode string|nil Mode name for title
+---@param question string|nil Original question
+---@param job_id number|nil Job ID for cancellation
+function M.start_stream(mode, question, job_id)
+  -- Close existing popup
+  M.close()
+
+  -- Reset stream state
+  stream_state.content = ""
+  stream_state.mode = mode
+  stream_state.question = question
+  stream_state.job_id = job_id
+
+  -- Build header
+  local header = {}
+
+  if question then
+    table.insert(header, "**Question:** " .. question)
+    table.insert(header, "")
+    table.insert(header, "---")
+    table.insert(header, "")
+  end
+
+  stream_state.header_lines = header
+
+  -- Build title
+  local title = "EduTutor"
+  if mode then
+    title = title .. " [" .. mode:upper() .. "]"
+  end
+  title = title .. " (streaming...)"
+
+  -- Initial content with cursor indicator
+  local initial = vim.list_extend({}, header)
+  table.insert(initial, "")
+  table.insert(initial, "")
+  table.insert(initial, "---")
+  table.insert(initial, "*`<C-c>` cancel | `q` close*")
+
+  -- Create popup
+  local buf, win = create_popup(initial, title)
+  if not buf or not win then
+    return false
+  end
+
+  state.popup_buf = buf
+  state.popup_win = win
+
+  -- Setup cancel keymap
+  local cancel = function()
+    if stream_state.job_id then
+      local provider = require("editutor.provider")
+      provider.cancel_stream(stream_state.job_id)
+      stream_state.job_id = nil
+      vim.notify("[EduTutor] Stream cancelled", vim.log.levels.INFO)
+    end
+    M.close()
+  end
+
+  vim.keymap.set("n", "<C-c>", cancel, { buffer = buf, silent = true })
+  vim.keymap.set("n", "q", cancel, { buffer = buf, silent = true })
+  vim.keymap.set("n", "<Esc>", cancel, { buffer = buf, silent = true })
+
+  return true
+end
+
+---Append text to streaming content
+---@param chunk string Text chunk to append
+function M.append_stream(chunk)
+  if not state.popup_buf or not vim.api.nvim_buf_is_valid(state.popup_buf) then
+    return
+  end
+
+  stream_state.content = stream_state.content .. chunk
+
+  -- Rebuild content
+  local lines = vim.list_extend({}, stream_state.header_lines)
+
+  -- Add content
+  for line in stream_state.content:gmatch("[^\n]*") do
+    table.insert(lines, line)
+  end
+
+  -- Add cursor indicator
+  table.insert(lines, "")
+  table.insert(lines, "---")
+  table.insert(lines, "*streaming... `<C-c>` cancel*")
+
+  -- Update buffer
+  vim.api.nvim_set_option_value("modifiable", true, { buf = state.popup_buf })
+  vim.api.nvim_buf_set_lines(state.popup_buf, 0, -1, false, lines)
+  vim.api.nvim_set_option_value("modifiable", false, { buf = state.popup_buf })
+
+  -- Scroll to bottom if window is valid
+  if state.popup_win and vim.api.nvim_win_is_valid(state.popup_win) then
+    local line_count = vim.api.nvim_buf_line_count(state.popup_buf)
+    pcall(vim.api.nvim_win_set_cursor, state.popup_win, { line_count, 0 })
+  end
+end
+
+---Finish streaming and show final content
+---@param success boolean Whether streaming completed successfully
+---@param error_msg string|nil Error message if failed
+function M.finish_stream(success, error_msg)
+  if not state.popup_buf or not vim.api.nvim_buf_is_valid(state.popup_buf) then
+    return
+  end
+
+  stream_state.job_id = nil
+
+  if not success then
+    -- Show error
+    local lines = vim.list_extend({}, stream_state.header_lines)
+    table.insert(lines, "")
+    table.insert(lines, "**Error:** " .. (error_msg or "Unknown error"))
+    table.insert(lines, "")
+    table.insert(lines, "---")
+    table.insert(lines, "*`q` close*")
+
+    vim.api.nvim_set_option_value("modifiable", true, { buf = state.popup_buf })
+    vim.api.nvim_buf_set_lines(state.popup_buf, 0, -1, false, lines)
+    vim.api.nvim_set_option_value("modifiable", false, { buf = state.popup_buf })
+    return
+  end
+
+  -- Final content
+  local lines = vim.list_extend({}, stream_state.header_lines)
+
+  for line in stream_state.content:gmatch("[^\n]*") do
+    table.insert(lines, line)
+  end
+
+  table.insert(lines, "")
+  table.insert(lines, "---")
+  table.insert(lines, "*`q` close | `y` copy*")
+
+  vim.api.nvim_set_option_value("modifiable", true, { buf = state.popup_buf })
+  vim.api.nvim_buf_set_lines(state.popup_buf, 0, -1, false, lines)
+  vim.api.nvim_set_option_value("modifiable", false, { buf = state.popup_buf })
+
+  -- Update title
+  if state.popup_win and vim.api.nvim_win_is_valid(state.popup_win) then
+    local title = "EduTutor"
+    if stream_state.mode then
+      title = title .. " [" .. stream_state.mode:upper() .. "]"
+    end
+    pcall(vim.api.nvim_win_set_config, state.popup_win, {
+      title = " " .. title .. " ",
+      title_pos = "center",
+    })
+  end
+
+  -- Setup final keymaps
+  setup_keymaps(state.popup_buf, false)
+end
+
+---Get current stream content (for saving to knowledge base)
+---@return string content
+function M.get_stream_content()
+  return stream_state.content
 end
 
 return M

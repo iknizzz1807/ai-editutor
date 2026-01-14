@@ -1,9 +1,9 @@
--- codementor/config.lua
--- Configuration management for AI Code Mentor
+-- editutor/config.lua
+-- Configuration management for AI EduTutor
 
 local M = {}
 
----@class CodementorConfig
+---@class EditutorConfig
 ---@field provider string LLM provider ("claude" | "openai" | "ollama")
 ---@field api_key string|function API key or function returning key
 ---@field model string Model identifier
@@ -11,23 +11,23 @@ local M = {}
 ---@field context_lines number Lines of context around question
 ---@field include_imports boolean Include file imports in context
 ---@field language string Language for explanations
----@field ui CodementorUIConfig UI configuration
----@field keymaps CodementorKeymaps Keymap configuration
----@field providers table<string, CodementorProvider> Provider configurations
+---@field ui EditutorUIConfig UI configuration
+---@field keymaps EditutorKeymaps Keymap configuration
+---@field providers table<string, EditutorProvider> Provider configurations
 
----@class CodementorUIConfig
+---@class EditutorUIConfig
 ---@field width number|string Window width
 ---@field height number|string Window height
 ---@field border string Border style
 ---@field max_width number Maximum window width
 
----@class CodementorKeymaps
+---@class EditutorKeymaps
 ---@field ask string Trigger mentor ask
 ---@field close string Close popup
 ---@field copy string Copy answer
 ---@field next_hint string Get next hint level
 
----@class CodementorProvider
+---@class EditutorProvider
 ---@field name string Provider name
 ---@field url string API endpoint URL
 ---@field model string Default model
@@ -47,6 +47,7 @@ M.defaults = {
   context_lines = 50,
   include_imports = true,
   language = "English",
+  stream = false, -- Enable streaming by default
 
   -- UI
   ui = {
@@ -59,6 +60,7 @@ M.defaults = {
   -- Keymaps
   keymaps = {
     ask = "<leader>ma",
+    stream = "<leader>ms",
     close = "q",
     copy = "y",
     next_hint = "n",
@@ -193,7 +195,7 @@ function M.setup(opts)
   end
 end
 
----@return CodementorProvider|nil
+---@return EditutorProvider|nil
 function M.get_provider()
   local provider_id = M.options.provider
   return M.options.providers[provider_id]
