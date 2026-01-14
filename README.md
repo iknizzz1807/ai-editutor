@@ -1,10 +1,10 @@
-# AI EduTutor
+# ai-editutor
 
-> **"GitHub Copilot writes code for you. AI EduTutor teaches you to write better code."**
+> **"GitHub Copilot writes code for you. ai-editutor teaches you to write better code."**
 
 A Neovim plugin that acts as your personal coding mentor - explaining concepts, guiding your thinking, and helping you truly understand code rather than just generating it.
 
-## Why AI EduTutor?
+## Why ai-editutor?
 
 | Problem | Solution |
 |---------|----------|
@@ -72,7 +72,7 @@ A Neovim plugin that acts as your personal coding mentor - explaining concepts, 
 ### lazy.nvim
 ```lua
 {
-  "your-username/ai-code-mentor",
+  "your-username/ai-editutor",
   dependencies = {
     "nvim-lua/plenary.nvim",
     "MunifTanjim/nui.nvim",
@@ -212,7 +212,7 @@ ai-tutor/
 
 ## Comparison with Other Tools
 
-| Feature | Copilot | ChatGPT | AI EduTutor |
+| Feature | Copilot | ChatGPT | ai-editutor |
 |---------|---------|---------|----------------|
 | Code generation | Yes | Yes | No (by design) |
 | In-editor | Yes | No | Yes |

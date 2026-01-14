@@ -1,5 +1,5 @@
 -- editutor/init.lua
--- AI EduTutor - A Neovim plugin that teaches you to code better
+-- ai-editutor - A Neovim plugin that teaches you to code better
 
 local M = {}
 
@@ -23,13 +23,13 @@ M._messages = {
     thinking = "Thinking about: ",
     error = "Error: ",
     no_response = "No response received",
-    modes_title = "AI EduTutor - Available Modes",
+    modes_title = "ai-editutor - Available Modes",
     modes_instruction = "Write a comment with one of these prefixes, then press ",
     examples = "Examples:",
     hints_title = "Incremental Hints:",
     hints_instruction = "Use :EduTutorHint to get progressive hints (level 1-4)",
     hints_next = "Press 'n' in the popup to get the next hint level",
-    history_title = "EduTutor - Recent History",
+    history_title = "ai-editutor - Recent History",
     history_empty = "No history found",
     history_language = "Language",
     search_prompt = "Search knowledge: ",
@@ -38,7 +38,7 @@ M._messages = {
     search_empty = "No results found for: ",
     export_success = "Exported to: ",
     export_failed = "Export failed: ",
-    stats_title = "EduTutor - Statistics",
+    stats_title = "ai-editutor - Statistics",
     stats_total = "Total Q&A entries",
     stats_by_mode = "By Mode:",
     stats_by_language = "By Language:",
@@ -52,13 +52,13 @@ M._messages = {
     thinking = "Đang suy nghĩ về: ",
     error = "Lỗi: ",
     no_response = "Không nhận được phản hồi",
-    modes_title = "AI EduTutor - Các Chế Độ",
+    modes_title = "ai-editutor - Các Chế Độ",
     modes_instruction = "Viết comment với một trong các tiền tố sau, rồi nhấn ",
     examples = "Ví dụ:",
     hints_title = "Gợi Ý Từng Bước:",
     hints_instruction = "Dùng :EduTutorHint để nhận gợi ý từng bước (cấp 1-4)",
     hints_next = "Nhấn 'n' trong popup để nhận gợi ý tiếp theo",
-    history_title = "EduTutor - Lịch Sử Gần Đây",
+    history_title = "ai-editutor - Lịch Sử Gần Đây",
     history_empty = "Không có lịch sử",
     history_language = "Ngôn ngữ",
     search_prompt = "Tìm kiếm kiến thức: ",
@@ -67,7 +67,7 @@ M._messages = {
     search_empty = "Không tìm thấy kết quả cho: ",
     export_success = "Đã xuất ra: ",
     export_failed = "Xuất thất bại: ",
-    stats_title = "EduTutor - Thống Kê",
+    stats_title = "ai-editutor - Thống Kê",
     stats_total = "Tổng số Q&A",
     stats_by_mode = "Theo Chế Độ:",
     stats_by_language = "Theo Ngôn Ngữ:",
@@ -102,7 +102,7 @@ function M.setup(opts)
   -- Check provider on setup
   local ready, err = provider.check_provider()
   if not ready then
-    vim.notify("[EduTutor] Warning: " .. (err or "Provider not ready"), vim.log.levels.WARN)
+    vim.notify("[ai-editutor] Warning: " .. (err or "Provider not ready"), vim.log.levels.WARN)
   end
 end
 
@@ -110,7 +110,7 @@ end
 function M._create_commands()
   vim.api.nvim_create_user_command("EduTutorAsk", function()
     M.ask()
-  end, { desc = "Ask EduTutor about the current comment" })
+  end, { desc = "Ask ai-editutor about the current comment" })
 
   vim.api.nvim_create_user_command("EduTutorHint", function()
     M.ask_with_hints()
@@ -183,12 +183,12 @@ function M._setup_keymaps()
 
   -- Main ask keymap
   if keymaps.ask then
-    vim.keymap.set("n", keymaps.ask, M.ask, { desc = "EduTutor: Ask" })
+    vim.keymap.set("n", keymaps.ask, M.ask, { desc = "ai-editutor: Ask" })
   end
 
   -- Streaming keymap
   if keymaps.stream then
-    vim.keymap.set("n", keymaps.stream, M.ask_stream, { desc = "EduTutor: Ask (Stream)" })
+    vim.keymap.set("n", keymaps.stream, M.ask_stream, { desc = "ai-editutor: Ask (Stream)" })
   end
 end
 
@@ -199,7 +199,7 @@ function M.ask()
   local query = parser.find_query()
 
   if not query then
-    vim.notify("[EduTutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
+    vim.notify("[ai-editutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
     return
   end
 
@@ -213,7 +213,7 @@ function M.ask()
   context.extract_with_lsp(function(context_formatted, has_lsp)
     -- Warn if no LSP
     if not has_lsp then
-      vim.notify("[EduTutor] " .. M._msg("lsp_not_available"), vim.log.levels.WARN)
+      vim.notify("[ai-editutor] " .. M._msg("lsp_not_available"), vim.log.levels.WARN)
     end
 
     -- Build prompts
@@ -227,13 +227,13 @@ function M.ask()
     provider.query_async(system_prompt, user_prompt, function(response, err)
       if err then
         ui.close()
-        vim.notify("[EduTutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
+        vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
         return
       end
 
       if not response then
         ui.close()
-        vim.notify("[EduTutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
+        vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
         return
       end
 
@@ -260,7 +260,7 @@ function M.ask_stream()
   local query = parser.find_query()
 
   if not query then
-    vim.notify("[EduTutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
+    vim.notify("[ai-editutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
     return
   end
 
@@ -273,7 +273,7 @@ function M.ask_stream()
   context.extract_with_lsp(function(context_formatted, has_lsp)
     -- Warn if no LSP
     if not has_lsp then
-      vim.notify("[EduTutor] " .. M._msg("lsp_not_available"), vim.log.levels.WARN)
+      vim.notify("[ai-editutor] " .. M._msg("lsp_not_available"), vim.log.levels.WARN)
     end
 
     -- Build prompts
@@ -330,7 +330,7 @@ function M.ask_with_hints()
   local query = parser.find_query()
 
   if not query then
-    vim.notify("[EduTutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
+    vim.notify("[ai-editutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
     return
   end
 
@@ -343,7 +343,7 @@ function M.ask_with_hints()
   context.extract_with_lsp(function(context_formatted, has_lsp)
     -- Warn if no LSP
     if not has_lsp then
-      vim.notify("[EduTutor] " .. M._msg("lsp_not_available"), vim.log.levels.WARN)
+      vim.notify("[ai-editutor] " .. M._msg("lsp_not_available"), vim.log.levels.WARN)
     end
 
     -- Get or create hint session
@@ -356,13 +356,13 @@ function M.ask_with_hints()
       hints.request_next_hint(session, function(response, level, has_more, err)
         if err then
           ui.close()
-          vim.notify("[EduTutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
+          vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
           return
         end
 
         if not response then
           ui.close()
-          vim.notify("[EduTutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
+          vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
           return
         end
 
@@ -442,13 +442,13 @@ function M._process_query(query, mode_override)
   provider.query_async(system_prompt, user_prompt, function(response, err)
     if err then
       ui.close()
-      vim.notify("[EduTutor] Error: " .. err, vim.log.levels.ERROR)
+      vim.notify("[ai-editutor] Error: " .. err, vim.log.levels.ERROR)
       return
     end
 
     if not response then
       ui.close()
-      vim.notify("[EduTutor] No response received", vim.log.levels.ERROR)
+      vim.notify("[ai-editutor] No response received", vim.log.levels.ERROR)
       return
     end
 
@@ -486,13 +486,13 @@ function M._process_question(question, mode, line)
   provider.query_async(system_prompt, user_prompt, function(response, err)
     if err then
       ui.close()
-      vim.notify("[EduTutor] Error: " .. err, vim.log.levels.ERROR)
+      vim.notify("[ai-editutor] Error: " .. err, vim.log.levels.ERROR)
       return
     end
 
     if not response then
       ui.close()
-      vim.notify("[EduTutor] No response received", vim.log.levels.ERROR)
+      vim.notify("[ai-editutor] No response received", vim.log.levels.ERROR)
       return
     end
 
@@ -576,7 +576,7 @@ function M.show_history()
   local entries = knowledge.get_recent(20)
 
   if #entries == 0 then
-    vim.notify("[EduTutor] " .. M._msg("history_empty"), vim.log.levels.INFO)
+    vim.notify("[ai-editutor] " .. M._msg("history_empty"), vim.log.levels.INFO)
     return
   end
 
@@ -616,7 +616,7 @@ function M.search_knowledge(query)
   local results = knowledge.search(query)
 
   if #results == 0 then
-    vim.notify("[EduTutor] " .. M._msg("search_empty") .. query, vim.log.levels.INFO)
+    vim.notify("[ai-editutor] " .. M._msg("search_empty") .. query, vim.log.levels.INFO)
     return
   end
 
@@ -651,9 +651,9 @@ function M.export_knowledge(filepath)
 
   if success then
     local path = filepath or (os.getenv("HOME") .. "/editutor_export.md")
-    vim.notify("[EduTutor] " .. M._msg("export_success") .. path, vim.log.levels.INFO)
+    vim.notify("[ai-editutor] " .. M._msg("export_success") .. path, vim.log.levels.INFO)
   else
-    vim.notify("[EduTutor] " .. M._msg("export_failed") .. (err or "unknown error"), vim.log.levels.ERROR)
+    vim.notify("[ai-editutor] " .. M._msg("export_failed") .. (err or "unknown error"), vim.log.levels.ERROR)
   end
 end
 
@@ -703,7 +703,7 @@ function M.set_language(lang)
     local available = prompts.get_available_languages()
 
     local lines = {
-      "EduTutor - Language Settings",
+      "ai-editutor - Language Settings",
       "============================",
       "",
       string.format("Current language: %s", current),
@@ -741,7 +741,7 @@ function M.set_language(lang)
   local normalized = valid_langs[lang]
   if not normalized then
     vim.notify(
-      string.format("[EduTutor] Invalid language: %s. Use 'English' or 'Vietnamese'.", lang),
+      string.format("[ai-editutor] Invalid language: %s. Use 'English' or 'Vietnamese'.", lang),
       vim.log.levels.ERROR
     )
     return
@@ -755,7 +755,7 @@ function M.set_language(lang)
     ["Vietnamese"] = "Đã chuyển sang tiếng Việt",
   }
 
-  vim.notify("[EduTutor] " .. messages[normalized], vim.log.levels.INFO)
+  vim.notify("[ai-editutor] " .. messages[normalized], vim.log.levels.INFO)
 end
 
 ---Get current language

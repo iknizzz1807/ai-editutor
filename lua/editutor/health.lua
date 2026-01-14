@@ -11,7 +11,7 @@ local error = health.error or health.report_error
 local info = health.info or health.report_info
 
 function M.check()
-  start("EduTutor Core")
+  start("ai-editutor Core")
 
   -- Check Neovim version
   local nvim_version = vim.version()
@@ -24,7 +24,7 @@ function M.check()
   -- Check plugin version
   local editutor_ok, editutor = pcall(require, "editutor")
   if editutor_ok then
-    ok(string.format("EduTutor version: %s", editutor._version or "unknown"))
+    ok(string.format("ai-editutor version: %s", editutor._version or "unknown"))
   end
 
   -- Check plenary.nvim
@@ -61,7 +61,7 @@ function M.check()
   end
 
   -- Provider checks
-  start("EduTutor LLM Provider")
+  start("ai-editutor LLM Provider")
 
   local config = require("editutor.config")
   local provider = config.get_provider()
@@ -110,7 +110,7 @@ function M.check()
   end
 
   -- LSP Context checks
-  start("EduTutor LSP Context")
+  start("ai-editutor LSP Context")
 
   local lsp_context_ok, lsp_context = pcall(require, "editutor.lsp_context")
   if not lsp_context_ok then
@@ -141,7 +141,7 @@ function M.check()
   end
 
   -- Knowledge tracking checks
-  start("EduTutor Knowledge Tracking")
+  start("ai-editutor Knowledge Tracking")
 
   local knowledge_ok, knowledge = pcall(require, "editutor.knowledge")
   if not knowledge_ok then
@@ -170,11 +170,11 @@ function M.check()
   end
 
   -- Summary
-  start("EduTutor Quick Start")
+  start("ai-editutor Quick Start")
   info("Available modes: Q (Question), S (Socratic), R (Review), D (Debug), E (Explain)")
   info("Example: // Q: What does this function do?")
-  info("Keymap: <leader>ma (or run :EduTutorAsk)")
-  info("Help: :EduTutorModes or :h editutor")
+  info("Keymap: <leader>ma (or run :ai-editutorAsk)")
+  info("Help: :ai-editutorModes or :h editutor")
 end
 
 return M

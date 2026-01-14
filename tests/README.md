@@ -1,6 +1,6 @@
-# EduTutor Tests
+# ai-editutor Tests
 
-Unit tests for the AI EduTutor Neovim plugin.
+Unit tests for the ai-editutor Neovim plugin.
 
 ## Requirements
 

@@ -154,7 +154,7 @@ function M.show(content, mode, question, opts)
   M.close()
 
   -- Build title
-  local title = "EduTutor"
+  local title = "ai-editutor"
   if mode then
     title = title .. " [" .. mode:upper() .. "]"
   end
@@ -230,7 +230,7 @@ function M.show_loading(message)
   -- Close existing popup
   M.close()
 
-  local buf, win = create_popup(loading_content, "EduTutor")
+  local buf, win = create_popup(loading_content, "ai-editutor")
   if buf and win then
     state.popup_buf = buf
     state.popup_win = win
@@ -306,7 +306,7 @@ function M.start_stream(mode, question, job_id)
   stream_state.header_lines = header
 
   -- Build title
-  local title = "EduTutor"
+  local title = "ai-editutor"
   if mode then
     title = title .. " [" .. mode:upper() .. "]"
   end
@@ -334,7 +334,7 @@ function M.start_stream(mode, question, job_id)
       local provider = require("editutor.provider")
       provider.cancel_stream(stream_state.job_id)
       stream_state.job_id = nil
-      vim.notify("[EduTutor] Stream cancelled", vim.log.levels.INFO)
+      vim.notify("[ai-editutor] Stream cancelled", vim.log.levels.INFO)
     end
     M.close()
   end
@@ -422,7 +422,7 @@ function M.finish_stream(success, error_msg)
 
   -- Update title
   if state.popup_win and vim.api.nvim_win_is_valid(state.popup_win) then
-    local title = "EduTutor"
+    local title = "ai-editutor"
     if stream_state.mode then
       title = title .. " [" .. stream_state.mode:upper() .. "]"
     end

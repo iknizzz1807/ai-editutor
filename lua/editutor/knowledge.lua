@@ -125,7 +125,7 @@ end
 function M.save(entry)
   local ok, err = init_db()
   if not ok then
-    vim.notify("[EduTutor] Knowledge tracking disabled: " .. (err or "unknown error"), vim.log.levels.WARN)
+    vim.notify("[ai-editutor] Knowledge tracking disabled: " .. (err or "unknown error"), vim.log.levels.WARN)
     return false
   end
 
@@ -377,7 +377,7 @@ function M.export_markdown(filepath)
   end
 
   local lines = {
-    "# EduTutor Knowledge Base",
+    "# ai-editutor Knowledge Base",
     "",
     string.format("Exported: %s", os.date("%Y-%m-%d %H:%M:%S")),
     string.format("Total entries: %d", #entries),

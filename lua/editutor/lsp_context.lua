@@ -1,5 +1,5 @@
 -- editutor/lsp_context.lua
--- LSP-based context extraction for AI EduTutor
+-- LSP-based context extraction for ai-editutor
 -- Extracts definitions and references from project files (not libraries)
 
 local M = {}

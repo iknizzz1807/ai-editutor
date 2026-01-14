@@ -1,13 +1,13 @@
-# CLAUDE.md - AI EduTutor Development Guide
+# CLAUDE.md - ai-editutor Development Guide
 
 ## Project Overview
 
-**AI EduTutor** is a Neovim plugin that acts as a personal coding mentor - teaching developers through explanation rather than generating code automatically.
+**ai-editutor** is a Neovim plugin that acts as a personal coding mentor - teaching developers through explanation rather than generating code automatically.
 
 ### Core Philosophy
 > "Teach a person to fish, don't fish for them."
 
-Unlike GitHub Copilot which writes code for you, AI EduTutor **explains concepts** so you can write better code yourself.
+Unlike GitHub Copilot which writes code for you, ai-editutor **explains concepts** so you can write better code yourself.
 
 ---
 
@@ -349,7 +349,7 @@ require('editutor').setup({
 
 ### Issue: No external context appearing
 ```lua
--- EduTutor will warn if LSP is unavailable
+-- ai-editutor will warn if LSP is unavailable
 -- Check :checkhealth editutor for LSP status
 -- External definitions only come from PROJECT files
 -- Library paths (node_modules, etc.) are excluded

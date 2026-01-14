@@ -1,5 +1,5 @@
 #!/bin/bash
-# Simple test runner for EduTutor
+# Simple test runner for ai-editutor
 # Usage: ./tests/run_tests.sh [test_file]
 
 set -e
@@ -16,7 +16,7 @@ if [ -n "$1" ]; then
         -c "PlenaryBustedFile $1"
 else
     # Run all tests
-    echo "Running all EduTutor tests..."
+    echo "Running all ai-editutor tests..."
     echo "=============================="
     nvim --headless -u tests/minimal_init.lua \
         -c "PlenaryBustedDirectory tests/ {minimal_init = 'tests/minimal_init.lua', sequential = true}"

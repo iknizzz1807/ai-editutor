@@ -1,5 +1,5 @@
 -- editutor/config.lua
--- Configuration management for AI EduTutor
+-- Configuration management for ai-editutor
 
 local M = {}
 

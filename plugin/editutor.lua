@@ -1,5 +1,5 @@
 -- plugin/editutor.lua
--- AI EduTutor - Plugin entry point for lazy loading
+-- ai-editutor - Plugin entry point for lazy loading
 
 if vim.g.loaded_editutor then
   return
@@ -9,7 +9,7 @@ vim.g.loaded_editutor = true
 -- Defer loading until setup() is called
 -- This allows users to configure the plugin in their lazy.nvim spec
 
--- Create the EduTutor command that triggers lazy loading
+-- Create the main command that triggers lazy loading
 vim.api.nvim_create_user_command("EduTutor", function(opts)
   local editutor = require("editutor")
 
@@ -38,14 +38,14 @@ vim.api.nvim_create_user_command("EduTutor", function(opts)
   elseif subcommand == "close" then
     require("editutor.ui").close()
   elseif subcommand == "version" then
-    vim.notify("EduTutor v" .. editutor.version(), vim.log.levels.INFO)
+    vim.notify("ai-editutor v" .. editutor.version(), vim.log.levels.INFO)
   else
-    vim.notify("Unknown EduTutor command: " .. subcommand, vim.log.levels.ERROR)
+    vim.notify("Unknown command: " .. subcommand, vim.log.levels.ERROR)
   end
 end, {
   nargs = "?",
   complete = function()
     return { "ask", "question", "socratic", "review", "debug", "explain", "modes", "close", "version" }
   end,
-  desc = "AI EduTutor commands",
+  desc = "ai-editutor commands",
 })

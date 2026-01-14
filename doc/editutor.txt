@@ -1,4 +1,4 @@
-*editutor.txt*  AI EduTutor - Learn to code better with AI guidance
+*editutor.txt*  ai-editutor - Learn to code better with AI guidance
 
 ==============================================================================
 CONTENTS                                                    *editutor-contents*
@@ -20,8 +20,8 @@ CONTENTS                                                    *editutor-contents*
 ==============================================================================
 1. INTRODUCTION                                         *editutor-introduction*
 
-EduTutor is a Neovim plugin that acts as your personal coding mentor. Unlike
-code generation tools like GitHub Copilot, EduTutor explains concepts and
+ai-editutor is a Neovim plugin that acts as your personal coding mentor. Unlike
+code generation tools like GitHub Copilot, ai-editutor explains concepts and
 guides your learning instead of writing code for you.
 
 Philosophy: "Teach a person to fish, don't fish for them."
@@ -135,7 +135,7 @@ For streaming responses: Press <leader>ms or :EduTutorStream
 ==============================================================================
 6. MODES                                                       *editutor-modes*
 
-EduTutor supports 5 interaction modes:
+ai-editutor supports 5 interaction modes:
 
 *Q:* Question Mode                                          *editutor-question*
     Direct answers with explanations
@@ -178,7 +178,7 @@ rather than immediate complete answers.
 ==============================================================================
 8. KNOWLEDGE TRACKING                                      *editutor-knowledge*
 
-EduTutor automatically saves all Q&A pairs for future reference.
+ai-editutor automatically saves all Q&A pairs for future reference.
 
 Commands:
   :EduTutorHistory     Show recent Q&A history
@@ -197,7 +197,7 @@ Export example: >
 ==============================================================================
 9. LSP CONTEXT                                           *editutor-lsp-context*
 
-EduTutor automatically gathers context from your project using LSP
+ai-editutor automatically gathers context from your project using LSP
 (Language Server Protocol). When you ask a question, it:
 
   1. Extracts code around your cursor (configurable lines)
@@ -242,7 +242,7 @@ LSP Setup Tips:                                          *editutor-lsp-setup*
   Check LSP status with `:LspInfo`
 
 Fallback Behavior:                                       *editutor-lsp-fallback*
-  When LSP is not available, EduTutor:
+  When LSP is not available, ai-editutor:
   - Shows a warning notification
   - Falls back to current file context + Tree-sitter
   - Still provides helpful answers, just with less external context

@@ -2,7 +2,7 @@
 
 # Run all tests
 test:
-	@echo "Running EduTutor tests..."
+	@echo "Running ai-editutor tests..."
 	@nvim --headless -u tests/minimal_init.lua \
 		-c "PlenaryBustedDirectory tests/ {minimal_init = 'tests/minimal_init.lua', sequential = true}"
 
@@ -15,7 +15,7 @@ test-file:
 
 # Run tests with verbose output
 test-verbose:
-	@echo "Running EduTutor tests (verbose)..."
+	@echo "Running ai-editutor tests (verbose)..."
 	@nvim --headless -u tests/minimal_init.lua \
 		-c "lua require('plenary.test_harness').test_directory('tests/', {minimal_init = 'tests/minimal_init.lua', sequential = true})"
 
@@ -35,7 +35,7 @@ health:
 
 # Help
 help:
-	@echo "EduTutor Development Commands"
+	@echo "ai-editutor Development Commands"
 	@echo "=============================="
 	@echo ""
 	@echo "Testing:"
