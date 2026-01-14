@@ -58,12 +58,11 @@ M.defaults = {
     max_width = 120,
   },
 
-  -- RAG (Retrieval Augmented Generation)
-  rag = {
-    enabled = true,
-    auto_reindex = true, -- Auto-reindex files on save
-    auto_reindex_notify = false, -- Show notification on reindex (DEBUG level)
-    db_path = nil, -- Uses ~/.editutor/vectors by default
+  -- Context extraction (LSP-based)
+  context = {
+    lines_around_cursor = 100, -- Lines to include around cursor (50 above + 50 below)
+    external_context_lines = 30, -- Lines to include around each external definition
+    max_external_symbols = 20, -- Max number of external definitions to fetch
   },
 
   -- Keymaps

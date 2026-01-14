@@ -109,37 +109,35 @@ function M.check()
     })
   end
 
-  -- RAG system checks
-  start("EduTutor RAG System")
+  -- LSP Context checks
+  start("EduTutor LSP Context")
 
-  local rag_ok, rag = pcall(require, "editutor.rag")
-  if not rag_ok then
-    warn("RAG module not loaded")
+  local lsp_context_ok, lsp_context = pcall(require, "editutor.lsp_context")
+  if not lsp_context_ok then
+    warn("LSP context module not loaded")
   else
-    if rag.is_available() then
-      ok("editutor-cli is installed and available")
+    -- Check if LSP is available for current buffer
+    if lsp_context.is_available() then
+      ok("LSP is available for current buffer")
 
-      -- Check RAG index status
-      local cwd = vim.fn.getcwd()
-      local db_path = vim.fn.expand("~/.editutor/vectors")
-      if vim.fn.isdirectory(db_path) == 1 then
-        ok("RAG database exists at ~/.editutor/vectors")
-      else
-        info("No RAG index found. Run :EduTutorIndex to index your codebase")
+      -- List connected LSP clients
+      local clients = vim.lsp.get_clients({ bufnr = 0 })
+      for _, client in ipairs(clients) do
+        info(string.format("  LSP client: %s", client.name))
       end
     else
-      info("editutor-cli not installed (RAG features disabled)", {
-        "Install RAG support: pip install -e python/",
-        "Or: pip install editutor-cli",
+      warn("No LSP client attached to current buffer", {
+        "Install an LSP server for your language",
+        "Lua: lua-language-server",
+        "Python: pyright or pylsp",
+        "TypeScript: typescript-language-server",
+        "Context will fallback to Tree-sitter only",
       })
     end
-  end
 
-  -- Check Python
-  if vim.fn.executable("python3") == 1 or vim.fn.executable("python") == 1 then
-    ok("Python is available")
-  else
-    warn("Python not found (required for RAG features)")
+    -- Check project root detection
+    local project_root = lsp_context.get_project_root()
+    ok(string.format("Project root: %s", project_root))
   end
 
   -- Knowledge tracking checks

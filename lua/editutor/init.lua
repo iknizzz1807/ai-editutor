@@ -11,13 +11,10 @@ local provider = require("editutor.provider")
 local ui = require("editutor.ui")
 local hints = require("editutor.hints")
 local knowledge = require("editutor.knowledge")
-local rag = require("editutor.rag")
 
 M._name = "EduTutor"
-M._version = "0.5.0"
+M._version = "0.6.0"
 M._setup_called = false
-M._augroup = nil
-M._index_debounce = {} -- Track pending index operations
 
 -- UI Messages for internationalization
 M._messages = {
@@ -45,16 +42,10 @@ M._messages = {
     stats_total = "Total Q&A entries",
     stats_by_mode = "By Mode:",
     stats_by_language = "By Language:",
-    rag_not_available = "RAG CLI not available.\nInstall with: pip install -e python/",
-    rag_indexing = "Indexing ",
-    rag_indexed = "Indexed %d files, created %d chunks",
-    rag_searching = "Searching codebase...",
-    rag_thinking = "Thinking with codebase context...",
-    rag_status_title = "EduTutor - RAG Status",
     getting_hint = "Getting next hint...",
-    auto_reindex_enabled = "Auto-reindex enabled for this project",
-    auto_reindex_disabled = "Auto-reindex disabled",
-    file_reindexed = "Reindexed: ",
+    lsp_context = "Gathering context from LSP...",
+    lsp_not_available = "LSP not available - using current file context only",
+    lsp_found_defs = "Found %d related definitions",
   },
   vi = {
     no_comment = "Không tìm thấy comment mentor gần con trỏ.\nSử dụng // Q: câu hỏi của bạn",
@@ -80,16 +71,10 @@ M._messages = {
     stats_total = "Tổng số Q&A",
     stats_by_mode = "Theo Chế Độ:",
     stats_by_language = "Theo Ngôn Ngữ:",
-    rag_not_available = "RAG CLI không khả dụng.\nCài đặt với: pip install -e python/",
-    rag_indexing = "Đang index ",
-    rag_indexed = "Đã index %d files, tạo %d chunks",
-    rag_searching = "Đang tìm kiếm trong codebase...",
-    rag_thinking = "Đang suy nghĩ với ngữ cảnh codebase...",
-    rag_status_title = "EduTutor - Trạng Thái RAG",
     getting_hint = "Đang lấy gợi ý tiếp theo...",
-    auto_reindex_enabled = "Đã bật auto-reindex cho project này",
-    auto_reindex_disabled = "Đã tắt auto-reindex",
-    file_reindexed = "Đã reindex: ",
+    lsp_context = "Đang thu thập context từ LSP...",
+    lsp_not_available = "LSP không khả dụng - chỉ sử dụng context file hiện tại",
+    lsp_found_defs = "Tìm thấy %d definitions liên quan",
   },
 }
 
@@ -114,86 +99,11 @@ function M.setup(opts)
   -- Setup keymaps
   M._setup_keymaps()
 
-  -- Setup auto-reindex
-  M._setup_auto_reindex()
-
   -- Check provider on setup
   local ready, err = provider.check_provider()
   if not ready then
     vim.notify("[EduTutor] Warning: " .. (err or "Provider not ready"), vim.log.levels.WARN)
   end
-end
-
----Setup auto-reindex on file save
-function M._setup_auto_reindex()
-  -- Create augroup
-  M._augroup = vim.api.nvim_create_augroup("EduTutor", { clear = true })
-
-  -- Check if auto_reindex is enabled in config
-  if not config.options.rag or not config.options.rag.auto_reindex then
-    return
-  end
-
-  -- Auto-reindex on BufWritePost
-  vim.api.nvim_create_autocmd("BufWritePost", {
-    group = M._augroup,
-    pattern = "*",
-    callback = function(ev)
-      M._on_file_save(ev.file)
-    end,
-    desc = "EduTutor: Auto-reindex on save",
-  })
-end
-
----Handle file save event for auto-reindex
----@param filepath string Path of saved file
-function M._on_file_save(filepath)
-  -- Check if RAG is available
-  if not rag.is_available() then
-    return
-  end
-
-  -- Get absolute path
-  local abs_path = vim.fn.fnamemodify(filepath, ":p")
-
-  -- Debounce: skip if already pending
-  if M._index_debounce[abs_path] then
-    return
-  end
-
-  -- Check if file extension is indexable
-  local ext = vim.fn.fnamemodify(filepath, ":e")
-  local indexable_exts = {
-    "lua", "py", "js", "ts", "jsx", "tsx", "go", "rs", "rb", "java",
-    "c", "cpp", "h", "hpp", "cs", "php", "swift", "kt", "scala", "ex", "exs",
-  }
-  local is_indexable = false
-  for _, e in ipairs(indexable_exts) do
-    if ext == e then
-      is_indexable = true
-      break
-    end
-  end
-
-  if not is_indexable then
-    return
-  end
-
-  -- Mark as pending
-  M._index_debounce[abs_path] = true
-
-  -- Debounce delay (500ms)
-  vim.defer_fn(function()
-    -- Clear debounce
-    M._index_debounce[abs_path] = nil
-
-    -- Index the file
-    rag.index_file(abs_path, function(success, err)
-      if success and config.options.rag.auto_reindex_notify then
-        vim.notify("[EduTutor] " .. M._msg("file_reindexed") .. vim.fn.fnamemodify(filepath, ":t"), vim.log.levels.DEBUG)
-      end
-    end)
-  end, 500)
 end
 
 ---Create user commands
@@ -255,23 +165,6 @@ function M._create_commands()
     M.show_stats()
   end, { desc = "Show knowledge stats" })
 
-  -- RAG commands
-  vim.api.nvim_create_user_command("EduTutorIndex", function(opts)
-    M.index_codebase(opts.args ~= "" and opts.args or nil)
-  end, { nargs = "?", desc = "Index codebase for RAG" })
-
-  vim.api.nvim_create_user_command("EduTutorRAG", function()
-    M.ask_with_rag()
-  end, { desc = "Ask with codebase context (RAG)" })
-
-  vim.api.nvim_create_user_command("EduTutorRAGStatus", function()
-    M.show_rag_status()
-  end, { desc = "Show RAG index status" })
-
-  vim.api.nvim_create_user_command("EduTutorAutoReindex", function()
-    M.toggle_auto_reindex()
-  end, { desc = "Toggle auto-reindex on file save" })
-
   -- Language command
   vim.api.nvim_create_user_command("EduTutorLang", function(opts)
     M.set_language(opts.args ~= "" and opts.args or nil)
@@ -300,6 +193,7 @@ function M._setup_keymaps()
 end
 
 ---Main ask function - detect and respond to mentor comments
+---Uses LSP to gather context from related project files
 function M.ask()
   -- Find query at or near cursor
   local query = parser.find_query()
@@ -312,125 +206,25 @@ function M.ask()
   -- Get mode from query
   local mode = query.mode_name or config.options.default_mode
 
-  -- Extract context
-  local ctx = context.extract(nil, query.line)
+  -- Show loading while gathering context
+  ui.show_loading(M._msg("lsp_context"))
 
-  -- Build prompts
-  local system_prompt = prompts.get_system_prompt(mode)
-  local context_formatted = context.format_for_prompt(ctx)
-  local user_prompt = prompts.build_user_prompt(query.question, context_formatted, mode)
-
-  -- Show loading
-  ui.show_loading(M._msg("thinking") .. query.question:sub(1, 50) .. "...")
-
-  -- Query LLM
-  provider.query_async(system_prompt, user_prompt, function(response, err)
-    if err then
-      ui.close()
-      vim.notify("[EduTutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
-      return
+  -- Extract context with LSP (async)
+  context.extract_with_lsp(function(context_formatted, has_lsp)
+    -- Warn if no LSP
+    if not has_lsp then
+      vim.notify("[EduTutor] " .. M._msg("lsp_not_available"), vim.log.levels.WARN)
     end
 
-    if not response then
-      ui.close()
-      vim.notify("[EduTutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
-      return
-    end
+    -- Build prompts
+    local system_prompt = prompts.get_system_prompt(mode)
+    local user_prompt = prompts.build_user_prompt(query.question, context_formatted, mode)
 
-    -- Save to knowledge base
-    knowledge.save({
-      mode = mode,
-      question = query.question,
-      answer = response,
-      language = ctx.language,
-      filepath = ctx.filepath,
-    })
+    -- Update loading message
+    ui.show_loading(M._msg("thinking") .. query.question:sub(1, 50) .. "...")
 
-    -- Show response
-    ui.show(response, mode, query.question)
-  end)
-end
-
----Ask with streaming response
-function M.ask_stream()
-  local query = parser.find_query()
-
-  if not query then
-    vim.notify("[EduTutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
-    return
-  end
-
-  local mode = query.mode_name or config.options.default_mode
-  local ctx = context.extract(nil, query.line)
-
-  -- Build prompts
-  local system_prompt = prompts.get_system_prompt(mode)
-  local context_formatted = context.format_for_prompt(ctx)
-  local user_prompt = prompts.build_user_prompt(query.question, context_formatted, mode)
-
-  -- Start streaming UI
-  local job_id
-  ui.start_stream(mode, query.question, nil)
-
-  -- Stream response
-  job_id = provider.query_stream(
-    system_prompt,
-    user_prompt,
-    -- On each chunk
-    function(chunk)
-      ui.append_stream(chunk)
-    end,
-    -- On done
-    function(full_response, err)
-      if err then
-        ui.finish_stream(false, err)
-        return
-      end
-
-      ui.finish_stream(true, nil)
-
-      -- Save to knowledge base
-      local content = ui.get_stream_content()
-      if content and content ~= "" then
-        knowledge.save({
-          mode = mode,
-          question = query.question,
-          answer = content,
-          language = ctx.language,
-          filepath = ctx.filepath,
-          tags = { "stream" },
-        })
-      end
-    end
-  )
-
-  -- Store job_id for cancellation (update UI state)
-  if job_id and ui.is_open() then
-    -- The UI already handles cancellation via the job_id passed to start_stream
-  end
-end
-
----Ask with incremental hints system
-function M.ask_with_hints()
-  local query = parser.find_query()
-
-  if not query then
-    vim.notify("[EduTutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
-    return
-  end
-
-  local mode = query.mode_name or config.options.default_mode
-  local ctx = context.extract(nil, query.line)
-  local context_formatted = context.format_for_prompt(ctx)
-
-  -- Get or create hint session
-  local session = hints.get_session(query.question, mode, context_formatted)
-
-  -- Function to request and show next hint
-  local function show_next_hint()
-    ui.show_loading(M._msg("getting_hint"))
-
-    hints.request_next_hint(session, function(response, level, has_more, err)
+    -- Query LLM
+    provider.query_async(system_prompt, user_prompt, function(response, err)
       if err then
         ui.close()
         vim.notify("[EduTutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
@@ -443,29 +237,161 @@ function M.ask_with_hints()
         return
       end
 
-      -- Save to knowledge if final hint
-      if level == hints.MAX_LEVEL then
-        knowledge.save({
-          mode = mode,
-          question = query.question,
-          answer = response,
-          language = ctx.language,
-          filepath = ctx.filepath,
-          tags = { "hint", "level-" .. level },
-        })
-      end
-
-      -- Show response with hint info
-      ui.show(response, mode, query.question, {
-        hint_level = level,
-        has_more_hints = has_more,
-        hint_callback = has_more and show_next_hint or nil,
+      -- Save to knowledge base
+      local filepath = vim.api.nvim_buf_get_name(0)
+      local lang = vim.bo.filetype
+      knowledge.save({
+        mode = mode,
+        question = query.question,
+        answer = response,
+        language = lang,
+        filepath = filepath,
       })
+
+      -- Show response
+      ui.show(response, mode, query.question)
     end)
+  end)
+end
+
+---Ask with streaming response
+---Uses LSP to gather context from related project files
+function M.ask_stream()
+  local query = parser.find_query()
+
+  if not query then
+    vim.notify("[EduTutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
+    return
   end
 
-  -- Start with first hint
-  show_next_hint()
+  local mode = query.mode_name or config.options.default_mode
+
+  -- Show loading while gathering context
+  ui.show_loading(M._msg("lsp_context"))
+
+  -- Extract context with LSP (async)
+  context.extract_with_lsp(function(context_formatted, has_lsp)
+    -- Warn if no LSP
+    if not has_lsp then
+      vim.notify("[EduTutor] " .. M._msg("lsp_not_available"), vim.log.levels.WARN)
+    end
+
+    -- Build prompts
+    local system_prompt = prompts.get_system_prompt(mode)
+    local user_prompt = prompts.build_user_prompt(query.question, context_formatted, mode)
+
+    -- Start streaming UI
+    ui.start_stream(mode, query.question, nil)
+
+    -- Stream response
+    local job_id = provider.query_stream(
+      system_prompt,
+      user_prompt,
+      -- On each chunk
+      function(chunk)
+        ui.append_stream(chunk)
+      end,
+      -- On done
+      function(full_response, err)
+        if err then
+          ui.finish_stream(false, err)
+          return
+        end
+
+        ui.finish_stream(true, nil)
+
+        -- Save to knowledge base
+        local content = ui.get_stream_content()
+        local filepath = vim.api.nvim_buf_get_name(0)
+        local lang = vim.bo.filetype
+        if content and content ~= "" then
+          knowledge.save({
+            mode = mode,
+            question = query.question,
+            answer = content,
+            language = lang,
+            filepath = filepath,
+            tags = { "stream" },
+          })
+        end
+      end
+    )
+
+    -- Store job_id for cancellation (update UI state)
+    if job_id and ui.is_open() then
+      -- The UI already handles cancellation via the job_id passed to start_stream
+    end
+  end)
+end
+
+---Ask with incremental hints system
+---Uses LSP to gather context from related project files
+function M.ask_with_hints()
+  local query = parser.find_query()
+
+  if not query then
+    vim.notify("[EduTutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
+    return
+  end
+
+  local mode = query.mode_name or config.options.default_mode
+
+  -- Show loading while gathering context
+  ui.show_loading(M._msg("lsp_context"))
+
+  -- Extract context with LSP (async)
+  context.extract_with_lsp(function(context_formatted, has_lsp)
+    -- Warn if no LSP
+    if not has_lsp then
+      vim.notify("[EduTutor] " .. M._msg("lsp_not_available"), vim.log.levels.WARN)
+    end
+
+    -- Get or create hint session
+    local session = hints.get_session(query.question, mode, context_formatted)
+
+    -- Function to request and show next hint
+    local function show_next_hint()
+      ui.show_loading(M._msg("getting_hint"))
+
+      hints.request_next_hint(session, function(response, level, has_more, err)
+        if err then
+          ui.close()
+          vim.notify("[EduTutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
+          return
+        end
+
+        if not response then
+          ui.close()
+          vim.notify("[EduTutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
+          return
+        end
+
+        -- Save to knowledge if final hint
+        if level == hints.MAX_LEVEL then
+          local filepath = vim.api.nvim_buf_get_name(0)
+          local lang = vim.bo.filetype
+          knowledge.save({
+            mode = mode,
+            question = query.question,
+            answer = response,
+            language = lang,
+            filepath = filepath,
+            tags = { "hint", "level-" .. level },
+          })
+        end
+
+        -- Show response with hint info
+        ui.show(response, mode, query.question, {
+          hint_level = level,
+          has_more_hints = has_more,
+          hint_callback = has_more and show_next_hint or nil,
+        })
+      end)
+    end
+
+    -- Start with first hint
+    show_next_hint()
+  end)
 end
 
 ---Ask with a specific mode override
@@ -762,223 +688,6 @@ end
 ---@return string
 function M.version()
   return M._version
-end
-
--- =============================================================================
--- RAG Functions
--- =============================================================================
-
----Index codebase for RAG
----@param path? string Path to index
-function M.index_codebase(path)
-  path = path or vim.fn.getcwd()
-
-  if not rag.is_available() then
-    vim.notify("[EduTutor] " .. M._msg("rag_not_available"), vim.log.levels.ERROR)
-    return
-  end
-
-  vim.notify("[EduTutor] " .. M._msg("rag_indexing") .. path .. "...", vim.log.levels.INFO)
-
-  rag.index(path, {}, function(stats, err)
-    if err then
-      vim.notify("[EduTutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
-      return
-    end
-
-    vim.notify(
-      string.format("[EduTutor] " .. M._msg("rag_indexed"),
-        stats.files_processed or 0,
-        stats.chunks_created or 0),
-      vim.log.levels.INFO
-    )
-  end)
-end
-
----Ask with RAG context (codebase-aware)
-function M.ask_with_rag()
-  local query = parser.find_query()
-
-  if not query then
-    vim.notify("[EduTutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
-    return
-  end
-
-  if not rag.is_available() then
-    vim.notify("[EduTutor] " .. M._msg("rag_not_available"), vim.log.levels.WARN)
-    M.ask()
-    return
-  end
-
-  local mode = query.mode_name or config.options.default_mode
-  local ctx = context.extract(nil, query.line)
-
-  ui.show_loading(M._msg("rag_searching"))
-
-  -- Get RAG context
-  rag.get_context(query.question, function(rag_context, rag_err)
-    if rag_err then
-      vim.notify("[EduTutor] RAG search failed: " .. rag_err, vim.log.levels.WARN)
-    end
-
-    -- Build enhanced prompt with RAG context
-    local system_prompt = prompts.get_system_prompt(mode)
-    local context_formatted = context.format_for_prompt(ctx)
-
-    -- Add RAG context if available
-    local full_context = context_formatted
-    if rag_context and rag_context ~= "" then
-      full_context = full_context .. "\n\n" .. rag_context
-    end
-
-    local user_prompt = prompts.build_user_prompt(query.question, full_context, mode)
-
-    ui.show_loading(M._msg("rag_thinking"))
-
-    -- Query LLM
-    provider.query_async(system_prompt, user_prompt, function(response, err)
-      if err then
-        ui.close()
-        vim.notify("[EduTutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
-        return
-      end
-
-      if not response then
-        ui.close()
-        vim.notify("[EduTutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
-        return
-      end
-
-      -- Save to knowledge base
-      knowledge.save({
-        mode = mode,
-        question = query.question,
-        answer = response,
-        language = ctx.language,
-        filepath = ctx.filepath,
-        tags = { "rag" },
-      })
-
-      -- Show response
-      ui.show(response, mode .. "+RAG", query.question)
-    end)
-  end)
-end
-
----Show RAG index status
-function M.show_rag_status()
-  if not rag.is_available() then
-    vim.notify("[EduTutor] " .. M._msg("rag_not_available"), vim.log.levels.WARN)
-    return
-  end
-
-  rag.status(function(stats, err)
-    if err then
-      vim.notify("[EduTutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
-      return
-    end
-
-    local lines = {
-      M._msg("rag_status_title"),
-      "========================",
-      "",
-      string.format("Total chunks: %s", stats.total_chunks or "N/A"),
-      string.format("Total files: %s", stats.total_files or "N/A"),
-      string.format("Database size: %s", stats.db_size or "N/A"),
-      string.format("Last updated: %s", stats.last_updated or "N/A"),
-      "",
-    }
-
-    if stats.by_language then
-      table.insert(lines, "By Language:")
-      for lang, count in pairs(stats.by_language) do
-        table.insert(lines, string.format("  %s: %d", lang, count))
-      end
-    end
-
-    table.insert(lines, "")
-    table.insert(lines, "Commands:")
-    table.insert(lines, "  :EduTutorIndex [path] - Index codebase")
-    table.insert(lines, "  :EduTutorRAG - Ask with codebase context")
-
-    ui.show(table.concat(lines, "\n"), nil, nil)
-  end)
-end
-
--- =============================================================================
--- RAG Status & Auto-reindex Functions
--- =============================================================================
-
----Get RAG status for statusline integration
----@return table {available: boolean, chunks: number, files: number, auto_reindex: boolean}
-function M.get_rag_status()
-  local status = {
-    available = false,
-    chunks = 0,
-    files = 0,
-    auto_reindex = config.options.rag and config.options.rag.auto_reindex or false,
-  }
-
-  if not rag.is_available() then
-    return status
-  end
-
-  status.available = true
-
-  -- Get cached stats or fetch new ones
-  if M._rag_status_cache and (os.time() - (M._rag_status_cache_time or 0)) < 60 then
-    return M._rag_status_cache
-  end
-
-  -- Async fetch stats (for statusline, we use cached values)
-  rag.status(function(stats, err)
-    if not err and stats then
-      M._rag_status_cache = {
-        available = true,
-        chunks = stats.total_chunks or 0,
-        files = stats.total_files or 0,
-        auto_reindex = config.options.rag and config.options.rag.auto_reindex or false,
-      }
-      M._rag_status_cache_time = os.time()
-    end
-  end)
-
-  return status
-end
-
----Get a compact status string for statusline
----@return string Status string like "RAG: 150c/25f" or "RAG: off"
-function M.get_rag_statusline()
-  local status = M.get_rag_status()
-
-  if not status.available then
-    return ""
-  end
-
-  if status.chunks == 0 then
-    return "RAG: no index"
-  end
-
-  local auto = status.auto_reindex and "+" or ""
-  return string.format("RAG%s: %dc/%df", auto, status.chunks, status.files)
-end
-
----Toggle auto-reindex
-function M.toggle_auto_reindex()
-  if not config.options.rag then
-    config.options.rag = { auto_reindex = false }
-  end
-
-  config.options.rag.auto_reindex = not config.options.rag.auto_reindex
-
-  -- Re-setup autocmds
-  M._setup_auto_reindex()
-
-  if config.options.rag.auto_reindex then
-    vim.notify("[EduTutor] " .. M._msg("auto_reindex_enabled"), vim.log.levels.INFO)
-  else
-    vim.notify("[EduTutor] " .. M._msg("auto_reindex_disabled"), vim.log.levels.INFO)
-  end
 end
 
 -- =============================================================================

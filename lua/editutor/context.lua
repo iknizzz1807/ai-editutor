@@ -1,9 +1,10 @@
 -- editutor/context.lua
--- Context extraction for tutor queries using Tree-sitter
+-- Context extraction for tutor queries using Tree-sitter and LSP
 
 local M = {}
 
 local config = require("editutor.config")
+local lsp_context = require("editutor.lsp_context")
 
 ---@class CodeContext
 ---@field language string Programming language
@@ -182,7 +183,7 @@ function M.extract(bufnr, query_line)
   }
 end
 
----Format context for LLM prompt
+---Format context for LLM prompt (basic, without LSP)
 ---@param context CodeContext
 ---@return string formatted
 function M.format_for_prompt(context)
@@ -206,6 +207,103 @@ function M.format_for_prompt(context)
   table.insert(parts, "```" .. context.language)
   table.insert(parts, context.surrounding_code)
   table.insert(parts, "```")
+
+  return table.concat(parts, "\n")
+end
+
+-- =============================================================================
+-- LSP-Enhanced Context Functions
+-- =============================================================================
+
+---Check if LSP is available
+---@return boolean
+function M.has_lsp()
+  return lsp_context.is_available()
+end
+
+---Extract context with LSP support (async)
+---Includes external definitions from project files
+---@param callback function Callback(formatted_context, has_lsp)
+---@param opts? table Options override
+function M.extract_with_lsp(callback, opts)
+  opts = opts or {}
+
+  local context_opts = {
+    lines_around_cursor = opts.lines_around_cursor or config.options.context.lines_around_cursor or 100,
+    external_context_lines = opts.external_context_lines or config.options.context.external_context_lines or 30,
+    max_external_symbols = opts.max_external_symbols or config.options.context.max_external_symbols or 20,
+  }
+
+  lsp_context.get_context(function(ctx)
+    local formatted = M.format_lsp_context(ctx)
+    callback(formatted, ctx.has_lsp)
+  end, context_opts)
+end
+
+---Format LSP context for LLM prompt
+---@param ctx table LSP context from lsp_context.get_context
+---@return string formatted
+function M.format_lsp_context(ctx)
+  local parts = {}
+
+  -- Detect language from filepath
+  local ext = ctx.current.filepath:match("%.(%w+)$") or "unknown"
+  local lang_map = {
+    lua = "lua", py = "python", js = "javascript", ts = "typescript",
+    tsx = "tsx", jsx = "jsx", go = "go", rs = "rust", rb = "ruby",
+    java = "java", c = "c", cpp = "cpp", h = "c", hpp = "cpp",
+  }
+  local language = lang_map[ext] or ext
+
+  -- Project root for relative paths
+  local project_root = lsp_context.get_project_root()
+
+  -- Header
+  local relative_path = ctx.current.filepath:gsub(project_root .. "/", "")
+  table.insert(parts, string.format("Language: %s", language))
+  table.insert(parts, string.format("File: %s", relative_path))
+  table.insert(parts, "")
+
+  -- Current file context
+  table.insert(parts, string.format("=== Current Code (lines %d-%d, cursor at line %d) ===",
+    ctx.current.start_line + 1,
+    ctx.current.end_line + 1,
+    ctx.current.cursor_line + 1
+  ))
+  table.insert(parts, "```" .. language)
+  table.insert(parts, ctx.current.content)
+  table.insert(parts, "```")
+  table.insert(parts, "")
+
+  -- External definitions
+  if ctx.external and #ctx.external > 0 then
+    table.insert(parts, string.format("=== Related Definitions from Project (%d files) ===", #ctx.external))
+    table.insert(parts, "")
+
+    for _, def in ipairs(ctx.external) do
+      local def_relative = def.filepath:gsub(project_root .. "/", "")
+      local def_ext = def.filepath:match("%.(%w+)$") or ext
+      local def_lang = lang_map[def_ext] or def_ext
+
+      table.insert(parts, string.format("--- %s (lines %d-%d, defines: %s) ---",
+        def_relative,
+        def.start_line + 1,
+        def.end_line + 1,
+        def.name
+      ))
+      table.insert(parts, "```" .. def_lang)
+      table.insert(parts, def.content)
+      table.insert(parts, "```")
+      table.insert(parts, "")
+    end
+  end
+
+  -- LSP status note
+  if not ctx.has_lsp then
+    table.insert(parts, "[Note: LSP not available - showing only current file context]")
+    table.insert(parts, "[Tip: Setup LSP for your language to get better context from related files]")
+    table.insert(parts, "")
+  end
 
   return table.concat(parts, "\n")
 end

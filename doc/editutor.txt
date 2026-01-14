@@ -11,7 +11,7 @@ CONTENTS                                                    *editutor-contents*
     6. Modes ................................. |editutor-modes|
     7. Incremental Hints ..................... |editutor-hints|
     8. Knowledge Tracking .................... |editutor-knowledge|
-    9. RAG (Codebase Search) ................. |editutor-rag|
+    9. LSP Context ........................... |editutor-lsp-context|
    10. Commands .............................. |editutor-commands|
    11. Keymaps ............................... |editutor-keymaps|
    12. API ................................... |editutor-api|
@@ -30,9 +30,10 @@ Features:
   - 5 learning modes (Question, Socratic, Review, Debug, Explain)
   - Incremental hints (4 levels from subtle to complete)
   - Knowledge tracking (save and search Q&A history)
-  - RAG integration (codebase-aware responses)
+  - LSP-based context (auto-fetches related definitions from project)
   - Streaming responses (real-time display)
   - Multiple LLM providers (Claude, OpenAI, Ollama)
+  - Multi-language support (English, Vietnamese)
 
 ==============================================================================
 2. REQUIREMENTS                                         *editutor-requirements*
@@ -42,11 +43,13 @@ Required:
   - plenary.nvim (for HTTP requests)
   - An API key for Claude/OpenAI (or local Ollama)
 
+Recommended:
+  - LSP server for your language (for enhanced context extraction)
+  - nvim-treesitter (for better context extraction when LSP unavailable)
+
 Optional:
-  - nvim-treesitter (for better context extraction)
   - nui.nvim (for enhanced UI)
   - sqlite.lua (for enhanced knowledge storage)
-  - editutor-cli (for RAG features)
 
 ==============================================================================
 3. INSTALLATION                                         *editutor-installation*
@@ -67,12 +70,6 @@ Using lazy.nvim: >lua
     }
 <
 
-For RAG support (codebase search):
->bash
-    cd path/to/editutor
-    pip install -e python/
-<
-
 ==============================================================================
 4. CONFIGURATION                                       *editutor-configuration*
 
@@ -86,8 +83,15 @@ Default configuration: >lua
       default_mode = "question",
       context_lines = 50,
       include_imports = true,
-      language = "English",
-      stream = false, -- Enable streaming by default
+      language = "English",  -- or "Vietnamese"
+      stream = false,
+
+      -- LSP Context extraction
+      context = {
+        lines_around_cursor = 100,    -- Lines around cursor (50 above + 50 below)
+        external_context_lines = 30,  -- Lines around each external definition
+        max_external_symbols = 20,    -- Max external symbols to resolve
+      },
 
       -- UI
       ui = {
@@ -191,59 +195,57 @@ Export example: >
 <
 
 ==============================================================================
-9. RAG (CODEBASE SEARCH)                                        *editutor-rag*
+9. LSP CONTEXT                                           *editutor-lsp-context*
 
-RAG (Retrieval Augmented Generation) allows EduTutor to search your
-codebase for relevant context when answering questions.
+EduTutor automatically gathers context from your project using LSP
+(Language Server Protocol). When you ask a question, it:
 
-Setup:
->bash
-    pip install -e python/   # From editutor directory
-<
+  1. Extracts code around your cursor (configurable lines)
+  2. Finds all identifiers/symbols in that code using Tree-sitter
+  3. Uses LSP go-to-definition to find where they're defined
+  4. Includes relevant definitions from OTHER project files
+  5. Filters out library code (node_modules, site-packages, etc.)
 
-Commands:
-  :EduTutorIndex [path]   Index codebase (default: current directory)
-  :EduTutorRAG            Ask with codebase context
-  :EduTutorRAGStatus      Show index statistics
-  :EduTutorAutoReindex    Toggle auto-reindex on file save
+This gives the LLM a complete picture of how your code connects together,
+without requiring any external indexing or setup.
 
-How it works:
-  1. Index parses your code using Tree-sitter AST
-  2. Creates semantic embeddings with sentence-transformers
-  3. Stores in LanceDB vector database
-  4. Searches using hybrid (BM25 + semantic) search
-  5. Relevant code chunks are included in LLM context
+How it works:                                            *editutor-lsp-how*
+  - Only fetches definitions from PROJECT files (not libraries)
+  - Limits to 100 lines around cursor for performance
+  - Includes up to 20 external symbol definitions
+  - Falls back to Tree-sitter context when LSP unavailable
 
-Auto-reindex:                                            *editutor-auto-reindex*
-  By default, files are automatically re-indexed when saved (if they changed).
-  This ensures your RAG context is always up-to-date.
+Excluded paths (library detection):
+  - node_modules, .venv, venv, site-packages
+  - vendor, .cargo/registry, target/debug, target/release
+  - /usr/, /opt/, .local/lib/, .luarocks/
 
-  - Files are only re-indexed if their content hash changed
-  - Auto-reindex is debounced (500ms) to avoid excessive indexing
-  - Toggle with :EduTutorAutoReindex
-
-  Configuration: >lua
+Configuration: >lua
     require("editutor").setup({
-      rag = {
-        auto_reindex = true,        -- Enable auto-reindex (default: true)
-        auto_reindex_notify = false, -- Show notification on reindex
+      context = {
+        lines_around_cursor = 100,    -- Lines around cursor
+        external_context_lines = 30,  -- Lines around external definitions
+        max_external_symbols = 20,    -- Max symbols to resolve
       },
     })
 <
 
-Statusline Integration:                                  *editutor-statusline*
-  You can display RAG status in your statusline: >lua
-    -- In lualine or similar
-    require("editutor").get_rag_statusline()
-    -- Returns: "RAG+: 150c/25f" (+ means auto-reindex enabled)
-<
+LSP Setup Tips:                                          *editutor-lsp-setup*
+  For best results, ensure you have an LSP server for your language:
 
-Example workflow:
->
-    :EduTutorIndex              " Index current project
-    // Q: How does the auth system work?
-    :EduTutorRAG                " Ask with codebase context
-<
+  - Lua: lua_ls (lua-language-server)
+  - Python: pyright or pylsp
+  - JavaScript/TypeScript: typescript-language-server
+  - Go: gopls
+  - Rust: rust-analyzer
+
+  Check LSP status with `:LspInfo`
+
+Fallback Behavior:                                       *editutor-lsp-fallback*
+  When LSP is not available, EduTutor:
+  - Shows a warning notification
+  - Falls back to current file context + Tree-sitter
+  - Still provides helpful answers, just with less external context
 
 ==============================================================================
 10. COMMANDS                                                *editutor-commands*
@@ -267,12 +269,6 @@ Knowledge Commands:
   :EduTutorSearch [query] Search knowledge base
   :EduTutorExport [path]  Export to markdown
   :EduTutorStats          Show statistics
-
-RAG Commands:
-  :EduTutorIndex [path]   Index codebase
-  :EduTutorRAG            Ask with codebase context
-  :EduTutorRAGStatus      Show RAG index status
-  :EduTutorAutoReindex    Toggle auto-reindex on file save
 
 Language Commands:
   :EduTutorLang           Show current language and options
@@ -322,14 +318,6 @@ Lua API: >lua
     editutor.ask_mode("debug")
     editutor.ask_mode("explain")
 
-    -- RAG functions
-    editutor.index_codebase(path)
-    editutor.ask_with_rag()
-    editutor.show_rag_status()
-    editutor.toggle_auto_reindex()
-    editutor.get_rag_status()       -- Returns {available, chunks, files, auto_reindex}
-    editutor.get_rag_statusline()   -- Returns "RAG+: 150c/25f" for statusline
-
     -- Knowledge functions
     editutor.show_history()
     editutor.search_knowledge(query)
@@ -376,9 +364,9 @@ This checks:
   - Required dependencies (plenary.nvim)
   - Optional dependencies (nui.nvim, sqlite.lua)
   - Tree-sitter availability
+  - LSP availability for current buffer
   - Provider configuration
   - API key setup
-  - RAG CLI installation
   - Knowledge database status
 
 ==============================================================================
