@@ -155,6 +155,46 @@ function M.status(callback)
   run_cli_async({ "status" }, callback)
 end
 
+---Index a single file (for auto-reindex on save)
+---@param filepath string Absolute path to file
+---@param callback? function Callback(success, error)
+function M.index_file(filepath, callback)
+  callback = callback or function() end
+
+  if not M.is_available() then
+    callback(false, "editutor-cli not installed")
+    return
+  end
+
+  local args = { "index-file", vim.fn.shellescape(filepath) }
+
+  run_cli_async(args, function(result, err)
+    if err then
+      callback(false, err)
+      return
+    end
+    callback(true, nil)
+  end)
+end
+
+---Check if a file is in an indexed project
+---@param filepath string File path to check
+---@param callback function Callback(is_indexed, project_root)
+function M.is_file_indexed(filepath, callback)
+  if not M.is_available() then
+    callback(false, nil)
+    return
+  end
+
+  run_cli_async({ "check-file", vim.fn.shellescape(filepath) }, function(result, err)
+    if err then
+      callback(false, nil)
+      return
+    end
+    callback(result.indexed or false, result.project_root)
+  end)
+end
+
 ---Format RAG results for prompt context
 ---@param results RAGResult[]
 ---@return string

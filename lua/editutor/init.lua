@@ -14,8 +14,10 @@ local knowledge = require("editutor.knowledge")
 local rag = require("editutor.rag")
 
 M._name = "EduTutor"
-M._version = "0.4.0"
+M._version = "0.5.0"
 M._setup_called = false
+M._augroup = nil
+M._index_debounce = {} -- Track pending index operations
 
 -- UI Messages for internationalization
 M._messages = {
@@ -50,6 +52,9 @@ M._messages = {
     rag_thinking = "Thinking with codebase context...",
     rag_status_title = "EduTutor - RAG Status",
     getting_hint = "Getting next hint...",
+    auto_reindex_enabled = "Auto-reindex enabled for this project",
+    auto_reindex_disabled = "Auto-reindex disabled",
+    file_reindexed = "Reindexed: ",
   },
   vi = {
     no_comment = "Không tìm thấy comment mentor gần con trỏ.\nSử dụng // Q: câu hỏi của bạn",
@@ -82,6 +87,9 @@ M._messages = {
     rag_thinking = "Đang suy nghĩ với ngữ cảnh codebase...",
     rag_status_title = "EduTutor - Trạng Thái RAG",
     getting_hint = "Đang lấy gợi ý tiếp theo...",
+    auto_reindex_enabled = "Đã bật auto-reindex cho project này",
+    auto_reindex_disabled = "Đã tắt auto-reindex",
+    file_reindexed = "Đã reindex: ",
   },
 }
 
@@ -106,11 +114,86 @@ function M.setup(opts)
   -- Setup keymaps
   M._setup_keymaps()
 
+  -- Setup auto-reindex
+  M._setup_auto_reindex()
+
   -- Check provider on setup
   local ready, err = provider.check_provider()
   if not ready then
     vim.notify("[EduTutor] Warning: " .. (err or "Provider not ready"), vim.log.levels.WARN)
   end
+end
+
+---Setup auto-reindex on file save
+function M._setup_auto_reindex()
+  -- Create augroup
+  M._augroup = vim.api.nvim_create_augroup("EduTutor", { clear = true })
+
+  -- Check if auto_reindex is enabled in config
+  if not config.options.rag or not config.options.rag.auto_reindex then
+    return
+  end
+
+  -- Auto-reindex on BufWritePost
+  vim.api.nvim_create_autocmd("BufWritePost", {
+    group = M._augroup,
+    pattern = "*",
+    callback = function(ev)
+      M._on_file_save(ev.file)
+    end,
+    desc = "EduTutor: Auto-reindex on save",
+  })
+end
+
+---Handle file save event for auto-reindex
+---@param filepath string Path of saved file
+function M._on_file_save(filepath)
+  -- Check if RAG is available
+  if not rag.is_available() then
+    return
+  end
+
+  -- Get absolute path
+  local abs_path = vim.fn.fnamemodify(filepath, ":p")
+
+  -- Debounce: skip if already pending
+  if M._index_debounce[abs_path] then
+    return
+  end
+
+  -- Check if file extension is indexable
+  local ext = vim.fn.fnamemodify(filepath, ":e")
+  local indexable_exts = {
+    "lua", "py", "js", "ts", "jsx", "tsx", "go", "rs", "rb", "java",
+    "c", "cpp", "h", "hpp", "cs", "php", "swift", "kt", "scala", "ex", "exs",
+  }
+  local is_indexable = false
+  for _, e in ipairs(indexable_exts) do
+    if ext == e then
+      is_indexable = true
+      break
+    end
+  end
+
+  if not is_indexable then
+    return
+  end
+
+  -- Mark as pending
+  M._index_debounce[abs_path] = true
+
+  -- Debounce delay (500ms)
+  vim.defer_fn(function()
+    -- Clear debounce
+    M._index_debounce[abs_path] = nil
+
+    -- Index the file
+    rag.index_file(abs_path, function(success, err)
+      if success and config.options.rag.auto_reindex_notify then
+        vim.notify("[EduTutor] " .. M._msg("file_reindexed") .. vim.fn.fnamemodify(filepath, ":t"), vim.log.levels.DEBUG)
+      end
+    end)
+  end, 500)
 end
 
 ---Create user commands
@@ -184,6 +267,10 @@ function M._create_commands()
   vim.api.nvim_create_user_command("EduTutorRAGStatus", function()
     M.show_rag_status()
   end, { desc = "Show RAG index status" })
+
+  vim.api.nvim_create_user_command("EduTutorAutoReindex", function()
+    M.toggle_auto_reindex()
+  end, { desc = "Toggle auto-reindex on file save" })
 
   -- Language command
   vim.api.nvim_create_user_command("EduTutorLang", function(opts)
@@ -816,6 +903,82 @@ function M.show_rag_status()
 
     ui.show(table.concat(lines, "\n"), nil, nil)
   end)
+end
+
+-- =============================================================================
+-- RAG Status & Auto-reindex Functions
+-- =============================================================================
+
+---Get RAG status for statusline integration
+---@return table {available: boolean, chunks: number, files: number, auto_reindex: boolean}
+function M.get_rag_status()
+  local status = {
+    available = false,
+    chunks = 0,
+    files = 0,
+    auto_reindex = config.options.rag and config.options.rag.auto_reindex or false,
+  }
+
+  if not rag.is_available() then
+    return status
+  end
+
+  status.available = true
+
+  -- Get cached stats or fetch new ones
+  if M._rag_status_cache and (os.time() - (M._rag_status_cache_time or 0)) < 60 then
+    return M._rag_status_cache
+  end
+
+  -- Async fetch stats (for statusline, we use cached values)
+  rag.status(function(stats, err)
+    if not err and stats then
+      M._rag_status_cache = {
+        available = true,
+        chunks = stats.total_chunks or 0,
+        files = stats.total_files or 0,
+        auto_reindex = config.options.rag and config.options.rag.auto_reindex or false,
+      }
+      M._rag_status_cache_time = os.time()
+    end
+  end)
+
+  return status
+end
+
+---Get a compact status string for statusline
+---@return string Status string like "RAG: 150c/25f" or "RAG: off"
+function M.get_rag_statusline()
+  local status = M.get_rag_status()
+
+  if not status.available then
+    return ""
+  end
+
+  if status.chunks == 0 then
+    return "RAG: no index"
+  end
+
+  local auto = status.auto_reindex and "+" or ""
+  return string.format("RAG%s: %dc/%df", auto, status.chunks, status.files)
+end
+
+---Toggle auto-reindex
+function M.toggle_auto_reindex()
+  if not config.options.rag then
+    config.options.rag = { auto_reindex = false }
+  end
+
+  config.options.rag.auto_reindex = not config.options.rag.auto_reindex
+
+  -- Re-setup autocmds
+  M._setup_auto_reindex()
+
+  if config.options.rag.auto_reindex then
+    vim.notify("[EduTutor] " .. M._msg("auto_reindex_enabled"), vim.log.levels.INFO)
+  else
+    vim.notify("[EduTutor] " .. M._msg("auto_reindex_disabled"), vim.log.levels.INFO)
+  end
 end
 
 -- =============================================================================

@@ -205,6 +205,7 @@ Commands:
   :EduTutorIndex [path]   Index codebase (default: current directory)
   :EduTutorRAG            Ask with codebase context
   :EduTutorRAGStatus      Show index statistics
+  :EduTutorAutoReindex    Toggle auto-reindex on file save
 
 How it works:
   1. Index parses your code using Tree-sitter AST
@@ -212,6 +213,30 @@ How it works:
   3. Stores in LanceDB vector database
   4. Searches using hybrid (BM25 + semantic) search
   5. Relevant code chunks are included in LLM context
+
+Auto-reindex:                                            *editutor-auto-reindex*
+  By default, files are automatically re-indexed when saved (if they changed).
+  This ensures your RAG context is always up-to-date.
+
+  - Files are only re-indexed if their content hash changed
+  - Auto-reindex is debounced (500ms) to avoid excessive indexing
+  - Toggle with :EduTutorAutoReindex
+
+  Configuration: >lua
+    require("editutor").setup({
+      rag = {
+        auto_reindex = true,        -- Enable auto-reindex (default: true)
+        auto_reindex_notify = false, -- Show notification on reindex
+      },
+    })
+<
+
+Statusline Integration:                                  *editutor-statusline*
+  You can display RAG status in your statusline: >lua
+    -- In lualine or similar
+    require("editutor").get_rag_statusline()
+    -- Returns: "RAG+: 150c/25f" (+ means auto-reindex enabled)
+<
 
 Example workflow:
 >
@@ -247,6 +272,7 @@ RAG Commands:
   :EduTutorIndex [path]   Index codebase
   :EduTutorRAG            Ask with codebase context
   :EduTutorRAGStatus      Show RAG index status
+  :EduTutorAutoReindex    Toggle auto-reindex on file save
 
 Language Commands:
   :EduTutorLang           Show current language and options
@@ -300,6 +326,9 @@ Lua API: >lua
     editutor.index_codebase(path)
     editutor.ask_with_rag()
     editutor.show_rag_status()
+    editutor.toggle_auto_reindex()
+    editutor.get_rag_status()       -- Returns {available, chunks, files, auto_reindex}
+    editutor.get_rag_statusline()   -- Returns "RAG+: 150c/25f" for statusline
 
     -- Knowledge functions
     editutor.show_history()

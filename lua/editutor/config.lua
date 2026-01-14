@@ -58,6 +58,14 @@ M.defaults = {
     max_width = 120,
   },
 
+  -- RAG (Retrieval Augmented Generation)
+  rag = {
+    enabled = true,
+    auto_reindex = true, -- Auto-reindex files on save
+    auto_reindex_notify = false, -- Show notification on reindex (DEBUG level)
+    db_path = nil, -- Uses ~/.editutor/vectors by default
+  },
+
   -- Keymaps
   keymaps = {
     ask = "<leader>ma",

@@ -110,38 +110,134 @@ class Searcher:
         where_clause: Optional[str],
         top_k: int,
     ) -> List[Dict]:
-        """Simple BM25-style keyword search."""
+        """
+        Optimized BM25-style keyword search.
+
+        Uses SQL LIKE queries to pre-filter instead of loading all docs.
+        Falls back to full scan only for very short queries.
+        """
         # Tokenize query
-        query_tokens = set(self._tokenize(query.lower()))
+        query_tokens = list(set(self._tokenize(query.lower())))
 
         if not query_tokens:
             return []
 
-        # Get all documents (for small codebases this is fine)
-        # For large codebases, would use proper inverted index
         try:
-            all_docs = table.to_pandas()
+            # Strategy 1: Use LIKE queries to pre-filter (efficient for large codebases)
+            # Only fetch docs that contain at least one query term
+            if len(query_tokens) <= 5:
+                # Build OR conditions for each token
+                like_conditions = [f"content LIKE '%{token}%'" for token in query_tokens[:5]]
+                combined_where = " OR ".join(like_conditions)
+
+                if where_clause:
+                    combined_where = f"({combined_where}) AND ({where_clause})"
+
+                # Fetch filtered results
+                try:
+                    filtered_docs = table.search().where(combined_where).limit(top_k * 10).to_list()
+                except Exception:
+                    # Fallback if LIKE not supported
+                    filtered_docs = self._fallback_keyword_search(table, query_tokens, where_clause, top_k)
+            else:
+                # Too many tokens, use fallback
+                filtered_docs = self._fallback_keyword_search(table, query_tokens, where_clause, top_k)
+
+            if not filtered_docs:
+                return []
+
+            # Score the filtered docs
+            scores = []
+            for doc in filtered_docs:
+                content = doc.get("content", "").lower()
+                doc_tokens = Counter(self._tokenize(content))
+
+                # BM25-inspired scoring with TF and document length normalization
+                doc_len = len(doc_tokens)
+                avg_doc_len = 100  # Approximate average
+                k1 = 1.2
+                b = 0.75
+
+                score = 0
+                for token in query_tokens:
+                    tf = doc_tokens.get(token, 0)
+                    if tf > 0:
+                        # Simplified BM25 TF component
+                        normalized_tf = (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * doc_len / avg_doc_len))
+                        score += normalized_tf
+
+                if score > 0:
+                    scores.append((score, doc))
+
+            # Sort by score
+            scores.sort(key=lambda x: -x[0])
+
+            return [
+                {**doc, "_distance": 1.0 / (score + 1)}
+                for score, doc in scores[:top_k]
+            ]
+
         except Exception:
             return []
 
-        scores = []
-        for idx, row in all_docs.iterrows():
-            content = row["content"].lower()
-            doc_tokens = Counter(self._tokenize(content))
+    def _fallback_keyword_search(
+        self,
+        table,
+        query_tokens: List[str],
+        where_clause: Optional[str],
+        top_k: int,
+    ) -> List[Dict]:
+        """
+        Fallback keyword search using batched iteration.
 
-            # Simple TF score
-            score = sum(doc_tokens.get(token, 0) for token in query_tokens)
+        More memory efficient than loading entire table.
+        """
+        try:
+            # Get total count
+            total = table.count_rows()
 
-            if score > 0:
-                scores.append((score, row.to_dict()))
+            if total == 0:
+                return []
 
-        # Sort by score
-        scores.sort(key=lambda x: -x[0])
+            # For small tables, just load all (faster)
+            if total <= 1000:
+                df = table.to_pandas()
+                return df.to_dict('records')
 
-        return [
-            {**doc, "_distance": 1.0 / (score + 1)}
-            for score, doc in scores[:top_k]
-        ]
+            # For larger tables, batch process
+            batch_size = 500
+            matching_docs = []
+            query_set = set(query_tokens)
+
+            # Use scanner for efficient iteration
+            scanner = table.to_lance().scanner(
+                columns=["id", "filepath", "content", "language", "start_line", "end_line", "chunk_type", "name"],
+                batch_size=batch_size,
+            )
+
+            for batch in scanner.to_batches():
+                df_batch = batch.to_pandas()
+                for _, row in df_batch.iterrows():
+                    content_lower = row["content"].lower()
+                    # Quick check if any query token is in content
+                    if any(token in content_lower for token in query_set):
+                        matching_docs.append(row.to_dict())
+
+                        # Early exit if we have enough candidates
+                        if len(matching_docs) >= top_k * 5:
+                            break
+
+                if len(matching_docs) >= top_k * 5:
+                    break
+
+            return matching_docs
+
+        except Exception:
+            # Ultimate fallback: load all
+            try:
+                return table.to_pandas().to_dict('records')
+            except Exception:
+                return []
 
     def _tokenize(self, text: str) -> List[str]:
         """Simple tokenization for BM25."""

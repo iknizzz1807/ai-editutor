@@ -181,6 +181,7 @@ editutor-cli status
 :EduTutorIndex     " Index codebase
 :EduTutorRAG       " Ask with codebase context
 :EduTutorRAGStatus " Show RAG status
+:EduTutorAutoReindex " Toggle auto-reindex on save
 
 " Language commands
 :EduTutorLang             " Show current language
@@ -298,11 +299,16 @@ rich>=13.0.0
 - [x] Hybrid search (BM25 + semantic + RRF)
 - [x] Neovim integration (:EduTutorRAG)
 - [x] Streaming response support
+- [x] Auto-reindex on file save
+- [x] Single file indexing (incremental)
+- [x] Optimized BM25 search (SQL LIKE pre-filtering)
+- [x] Statusline integration (get_rag_statusline)
 
 ### Phase 4: Polish (In Progress)
 - [x] Knowledge export to Markdown
 - [x] Health check (:checkhealth editutor)
 - [x] Vietnamese language support (:EduTutorLang)
+- [x] Enhanced prompts (best practices, examples, anti-patterns)
 - [ ] Obsidian integration
 - [ ] Team sharing
 - [ ] nui.nvim enhanced UI

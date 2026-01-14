@@ -255,5 +255,90 @@ def clear(db_path: Optional[str]):
         sys.exit(1)
 
 
+@main.command("index-file")
+@click.argument("filepath", type=click.Path(exists=True, file_okay=True, dir_okay=False))
+@click.option("--db-path", type=click.Path(), default=None, help="Database path")
+def index_file(filepath: str, db_path: Optional[str]):
+    """Index or re-index a single file.
+
+    FILEPATH: Path to the file to index
+
+    This command is used for incremental indexing when files are saved.
+    It only re-indexes if the file has changed (based on hash).
+
+    Examples:
+        editutor-cli index-file /path/to/file.py
+        editutor-cli index-file ./src/main.rs
+    """
+    file_path = Path(filepath).resolve()
+    db = Path(db_path) if db_path else get_default_db_path()
+
+    if not db.exists():
+        # Output JSON for Neovim
+        print(json.dumps({"success": False, "error": "No index found. Run 'editutor-cli index' first."}))
+        return
+
+    try:
+        indexer = Indexer(db_path=db)
+        indexed = indexer.index_file(file_path, force=False)
+
+        # Output JSON for Neovim integration
+        print(json.dumps({
+            "success": True,
+            "indexed": indexed,
+            "filepath": str(file_path),
+        }))
+
+    except Exception as e:
+        print(json.dumps({"success": False, "error": str(e)}))
+        sys.exit(1)
+
+
+@main.command("check-file")
+@click.argument("filepath", type=click.Path(exists=True, file_okay=True, dir_okay=False))
+@click.option("--db-path", type=click.Path(), default=None, help="Database path")
+def check_file(filepath: str, db_path: Optional[str]):
+    """Check if a file is in an indexed project.
+
+    FILEPATH: Path to the file to check
+
+    Returns JSON indicating if the file is part of an indexed codebase.
+
+    Examples:
+        editutor-cli check-file /path/to/file.py
+    """
+    file_path = Path(filepath).resolve()
+    db = Path(db_path) if db_path else get_default_db_path()
+
+    if not db.exists():
+        print(json.dumps({"indexed": False, "project_root": None}))
+        return
+
+    try:
+        searcher = Searcher(db_path=db)
+
+        # Check if file is in the index
+        if "metadata" in searcher.db.table_names():
+            meta_table = searcher.db.open_table("metadata")
+            results = meta_table.search().where(
+                f"filepath = '{str(file_path)}'"
+            ).limit(1).to_list()
+
+            if results:
+                # Find project root (common ancestor of indexed files)
+                all_meta = meta_table.to_pandas()
+                paths = [Path(p) for p in all_meta["filepath"].tolist()]
+                if paths:
+                    # Simple heuristic: find common prefix
+                    project_root = str(Path(*Path(paths[0]).parts[:3]))
+                    print(json.dumps({"indexed": True, "project_root": project_root}))
+                    return
+
+        print(json.dumps({"indexed": False, "project_root": None}))
+
+    except Exception as e:
+        print(json.dumps({"indexed": False, "project_root": None, "error": str(e)}))
+
+
 if __name__ == "__main__":
     main()
