@@ -61,6 +61,12 @@ A Neovim plugin that acts as your personal coding mentor - explaining concepts, 
 - Export to Markdown for review
 - Track your learning progress
 
+### Multi-Language Support
+```vim
+:EduTutorLang Vietnamese  " Switch to Vietnamese responses
+:EduTutorLang English     " Switch to English responses
+```
+
 ## Installation
 
 ### lazy.nvim
@@ -261,23 +267,24 @@ func process(ch chan int) {
 
 - [x] Project setup and architecture
 - [x] Research reference implementations
-- [ ] **Phase 1: MVP**
-  - [ ] Comment parsing
-  - [ ] Basic context collection
-  - [ ] Claude API integration
-  - [ ] Floating window UI
-- [ ] **Phase 2: Multi-Mode**
-  - [ ] 5 interaction modes
-  - [ ] Incremental hints
-  - [ ] Knowledge tracking
-- [ ] **Phase 3: RAG**
-  - [ ] Codebase indexing CLI
-  - [ ] Hybrid search
-  - [ ] Two-stage retrieval
+- [x] **Phase 1: MVP**
+  - [x] Comment parsing
+  - [x] Basic context collection
+  - [x] Claude API integration
+  - [x] Floating window UI
+- [x] **Phase 2: Multi-Mode**
+  - [x] 5 interaction modes
+  - [x] Incremental hints
+  - [x] Knowledge tracking
+- [x] **Phase 3: RAG**
+  - [x] Codebase indexing CLI
+  - [x] Hybrid search
+  - [x] Streaming responses
 - [ ] **Phase 4: Polish**
+  - [x] Vietnamese language support
   - [ ] Obsidian integration
   - [ ] Team knowledge sharing
-  - [ ] Vietnamese language support
+  - [ ] nui.nvim enhanced UI
 
 ## Contributing
 

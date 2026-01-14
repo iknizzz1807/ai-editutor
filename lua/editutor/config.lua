@@ -46,6 +46,7 @@ M.defaults = {
   default_mode = "question",
   context_lines = 50,
   include_imports = true,
+  -- Language for responses: "English", "Vietnamese", "vi", "en", "Tiếng Việt"
   language = "English",
   stream = false, -- Enable streaming by default
 

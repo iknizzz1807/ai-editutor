@@ -14,8 +14,85 @@ local knowledge = require("editutor.knowledge")
 local rag = require("editutor.rag")
 
 M._name = "EduTutor"
-M._version = "0.3.0"
+M._version = "0.4.0"
 M._setup_called = false
+
+-- UI Messages for internationalization
+M._messages = {
+  en = {
+    no_comment = "No mentor comment found near cursor.\nUse // Q: your question",
+    thinking = "Thinking about: ",
+    error = "Error: ",
+    no_response = "No response received",
+    modes_title = "AI EduTutor - Available Modes",
+    modes_instruction = "Write a comment with one of these prefixes, then press ",
+    examples = "Examples:",
+    hints_title = "Incremental Hints:",
+    hints_instruction = "Use :EduTutorHint to get progressive hints (level 1-4)",
+    hints_next = "Press 'n' in the popup to get the next hint level",
+    history_title = "EduTutor - Recent History",
+    history_empty = "No history found",
+    history_language = "Language",
+    search_prompt = "Search knowledge: ",
+    search_results = "Search Results: '%s'",
+    search_found = "Found %d entries",
+    search_empty = "No results found for: ",
+    export_success = "Exported to: ",
+    export_failed = "Export failed: ",
+    stats_title = "EduTutor - Statistics",
+    stats_total = "Total Q&A entries",
+    stats_by_mode = "By Mode:",
+    stats_by_language = "By Language:",
+    rag_not_available = "RAG CLI not available.\nInstall with: pip install -e python/",
+    rag_indexing = "Indexing ",
+    rag_indexed = "Indexed %d files, created %d chunks",
+    rag_searching = "Searching codebase...",
+    rag_thinking = "Thinking with codebase context...",
+    rag_status_title = "EduTutor - RAG Status",
+    getting_hint = "Getting next hint...",
+  },
+  vi = {
+    no_comment = "Không tìm thấy comment mentor gần con trỏ.\nSử dụng // Q: câu hỏi của bạn",
+    thinking = "Đang suy nghĩ về: ",
+    error = "Lỗi: ",
+    no_response = "Không nhận được phản hồi",
+    modes_title = "AI EduTutor - Các Chế Độ",
+    modes_instruction = "Viết comment với một trong các tiền tố sau, rồi nhấn ",
+    examples = "Ví dụ:",
+    hints_title = "Gợi Ý Từng Bước:",
+    hints_instruction = "Dùng :EduTutorHint để nhận gợi ý từng bước (cấp 1-4)",
+    hints_next = "Nhấn 'n' trong popup để nhận gợi ý tiếp theo",
+    history_title = "EduTutor - Lịch Sử Gần Đây",
+    history_empty = "Không có lịch sử",
+    history_language = "Ngôn ngữ",
+    search_prompt = "Tìm kiếm kiến thức: ",
+    search_results = "Kết quả tìm kiếm: '%s'",
+    search_found = "Tìm thấy %d mục",
+    search_empty = "Không tìm thấy kết quả cho: ",
+    export_success = "Đã xuất ra: ",
+    export_failed = "Xuất thất bại: ",
+    stats_title = "EduTutor - Thống Kê",
+    stats_total = "Tổng số Q&A",
+    stats_by_mode = "Theo Chế Độ:",
+    stats_by_language = "Theo Ngôn Ngữ:",
+    rag_not_available = "RAG CLI không khả dụng.\nCài đặt với: pip install -e python/",
+    rag_indexing = "Đang index ",
+    rag_indexed = "Đã index %d files, tạo %d chunks",
+    rag_searching = "Đang tìm kiếm trong codebase...",
+    rag_thinking = "Đang suy nghĩ với ngữ cảnh codebase...",
+    rag_status_title = "EduTutor - Trạng Thái RAG",
+    getting_hint = "Đang lấy gợi ý tiếp theo...",
+  },
+}
+
+---Get a message in the current language
+---@param key string Message key
+---@return string Message text
+function M._msg(key)
+  local lang = prompts.get_language()
+  local messages = M._messages[lang] or M._messages.en
+  return messages[key] or M._messages.en[key] or key
+end
 
 ---Setup the plugin
 ---@param opts? table User configuration
@@ -107,6 +184,17 @@ function M._create_commands()
   vim.api.nvim_create_user_command("EduTutorRAGStatus", function()
     M.show_rag_status()
   end, { desc = "Show RAG index status" })
+
+  -- Language command
+  vim.api.nvim_create_user_command("EduTutorLang", function(opts)
+    M.set_language(opts.args ~= "" and opts.args or nil)
+  end, {
+    nargs = "?",
+    complete = function()
+      return { "English", "Vietnamese", "en", "vi" }
+    end,
+    desc = "Set response language (English/Vietnamese)",
+  })
 end
 
 ---Setup keymaps
@@ -130,7 +218,7 @@ function M.ask()
   local query = parser.find_query()
 
   if not query then
-    vim.notify("[EduTutor] No mentor comment found near cursor.\nUse // Q: your question", vim.log.levels.WARN)
+    vim.notify("[EduTutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
     return
   end
 
@@ -146,19 +234,19 @@ function M.ask()
   local user_prompt = prompts.build_user_prompt(query.question, context_formatted, mode)
 
   -- Show loading
-  ui.show_loading("Thinking about: " .. query.question:sub(1, 50) .. "...")
+  ui.show_loading(M._msg("thinking") .. query.question:sub(1, 50) .. "...")
 
   -- Query LLM
   provider.query_async(system_prompt, user_prompt, function(response, err)
     if err then
       ui.close()
-      vim.notify("[EduTutor] Error: " .. err, vim.log.levels.ERROR)
+      vim.notify("[EduTutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
       return
     end
 
     if not response then
       ui.close()
-      vim.notify("[EduTutor] No response received", vim.log.levels.ERROR)
+      vim.notify("[EduTutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
       return
     end
 
@@ -181,7 +269,7 @@ function M.ask_stream()
   local query = parser.find_query()
 
   if not query then
-    vim.notify("[EduTutor] No mentor comment found near cursor.\nUse // Q: your question", vim.log.levels.WARN)
+    vim.notify("[EduTutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
     return
   end
 
@@ -240,7 +328,7 @@ function M.ask_with_hints()
   local query = parser.find_query()
 
   if not query then
-    vim.notify("[EduTutor] No mentor comment found near cursor.\nUse // Q: your question", vim.log.levels.WARN)
+    vim.notify("[EduTutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
     return
   end
 
@@ -253,18 +341,18 @@ function M.ask_with_hints()
 
   -- Function to request and show next hint
   local function show_next_hint()
-    ui.show_loading("Getting next hint...")
+    ui.show_loading(M._msg("getting_hint"))
 
     hints.request_next_hint(session, function(response, level, has_more, err)
       if err then
         ui.close()
-        vim.notify("[EduTutor] Error: " .. err, vim.log.levels.ERROR)
+        vim.notify("[EduTutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
         return
       end
 
       if not response then
         ui.close()
-        vim.notify("[EduTutor] No response received", vim.log.levels.ERROR)
+        vim.notify("[EduTutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
         return
       end
 
@@ -411,29 +499,61 @@ end
 
 ---Show available modes
 function M.show_modes()
+  local lang = prompts.get_language()
+  local is_vi = lang == "vi"
+
   local help = {
-    "AI EduTutor - Available Modes",
+    M._msg("modes_title"),
     "================================",
     "",
-    "Write a comment with one of these prefixes, then press " .. (config.options.keymaps.ask or "<leader>ma"),
+    M._msg("modes_instruction") .. (config.options.keymaps.ask or "<leader>ma"),
     "",
   }
 
-  for mode_char, mode_info in pairs(parser.modes) do
-    table.insert(help, string.format("// %s: %s", mode_char, mode_info.description))
+  -- Mode descriptions based on language
+  local mode_descriptions = {
+    en = {
+      Q = "Question - Direct answers with explanations",
+      S = "Socratic - Guided discovery through questions",
+      R = "Review - Code review and best practices",
+      D = "Debug - Guided debugging assistance",
+      E = "Explain - Deep concept explanations",
+    },
+    vi = {
+      Q = "Hỏi Đáp - Trả lời trực tiếp với giải thích",
+      S = "Socratic - Khám phá qua câu hỏi dẫn dắt",
+      R = "Review - Đánh giá code và best practices",
+      D = "Debug - Hỗ trợ debug có hướng dẫn",
+      E = "Giải Thích - Giải thích khái niệm sâu",
+    },
+  }
+
+  local descs = mode_descriptions[lang] or mode_descriptions.en
+  for mode_char, desc in pairs(descs) do
+    table.insert(help, string.format("// %s: %s", mode_char, desc))
   end
 
   table.insert(help, "")
-  table.insert(help, "Examples:")
-  table.insert(help, "  // Q: What is the time complexity of this function?")
-  table.insert(help, "  // S: Why might async/await be better here?")
-  table.insert(help, "  // R: Review this function for security issues")
-  table.insert(help, "  // D: This function returns nil sometimes, why?")
-  table.insert(help, "  // E: Explain closures in JavaScript")
+  table.insert(help, M._msg("examples"))
+
+  if is_vi then
+    table.insert(help, "  // Q: Độ phức tạp thời gian của function này là gì?")
+    table.insert(help, "  // S: Tại sao async/await có thể tốt hơn ở đây?")
+    table.insert(help, "  // R: Review function này về vấn đề bảo mật")
+    table.insert(help, "  // D: Function này đôi khi trả về nil, tại sao?")
+    table.insert(help, "  // E: Giải thích closures trong JavaScript")
+  else
+    table.insert(help, "  // Q: What is the time complexity of this function?")
+    table.insert(help, "  // S: Why might async/await be better here?")
+    table.insert(help, "  // R: Review this function for security issues")
+    table.insert(help, "  // D: This function returns nil sometimes, why?")
+    table.insert(help, "  // E: Explain closures in JavaScript")
+  end
+
   table.insert(help, "")
-  table.insert(help, "Incremental Hints:")
-  table.insert(help, "  Use :EduTutorHint to get progressive hints (level 1-4)")
-  table.insert(help, "  Press 'n' in the popup to get the next hint level")
+  table.insert(help, M._msg("hints_title"))
+  table.insert(help, "  " .. M._msg("hints_instruction"))
+  table.insert(help, "  " .. M._msg("hints_next"))
 
   ui.show(table.concat(help, "\n"), nil, nil)
 end
@@ -443,12 +563,12 @@ function M.show_history()
   local entries = knowledge.get_recent(20)
 
   if #entries == 0 then
-    vim.notify("[EduTutor] No history found", vim.log.levels.INFO)
+    vim.notify("[EduTutor] " .. M._msg("history_empty"), vim.log.levels.INFO)
     return
   end
 
   local lines = {
-    "EduTutor - Recent History",
+    M._msg("history_title"),
     "============================",
     "",
   }
@@ -456,7 +576,7 @@ function M.show_history()
   for i, entry in ipairs(entries) do
     table.insert(lines, string.format("%d. [%s] %s", i, entry.mode:upper(), entry.question:sub(1, 60)))
     if entry.language then
-      table.insert(lines, string.format("   Language: %s", entry.language))
+      table.insert(lines, string.format("   %s: %s", M._msg("history_language"), entry.language))
     end
     table.insert(lines, "")
   end
@@ -472,7 +592,7 @@ end
 ---@param query? string Search query
 function M.search_knowledge(query)
   if not query or query == "" then
-    vim.ui.input({ prompt = "Search knowledge: " }, function(input)
+    vim.ui.input({ prompt = M._msg("search_prompt") }, function(input)
       if input and input ~= "" then
         M.search_knowledge(input)
       end
@@ -483,13 +603,13 @@ function M.search_knowledge(query)
   local results = knowledge.search(query)
 
   if #results == 0 then
-    vim.notify("[EduTutor] No results found for: " .. query, vim.log.levels.INFO)
+    vim.notify("[EduTutor] " .. M._msg("search_empty") .. query, vim.log.levels.INFO)
     return
   end
 
   local lines = {
-    string.format("Search Results: '%s'", query),
-    string.format("Found %d entries", #results),
+    string.format(M._msg("search_results"), query),
+    string.format(M._msg("search_found"), #results),
     "========================",
     "",
   }
@@ -518,9 +638,9 @@ function M.export_knowledge(filepath)
 
   if success then
     local path = filepath or (os.getenv("HOME") .. "/editutor_export.md")
-    vim.notify("[EduTutor] Exported to: " .. path, vim.log.levels.INFO)
+    vim.notify("[EduTutor] " .. M._msg("export_success") .. path, vim.log.levels.INFO)
   else
-    vim.notify("[EduTutor] Export failed: " .. (err or "unknown error"), vim.log.levels.ERROR)
+    vim.notify("[EduTutor] " .. M._msg("export_failed") .. (err or "unknown error"), vim.log.levels.ERROR)
   end
 end
 
@@ -529,12 +649,12 @@ function M.show_stats()
   local stats = knowledge.get_stats()
 
   local lines = {
-    "EduTutor - Statistics",
+    M._msg("stats_title"),
     "========================",
     "",
-    string.format("Total Q&A entries: %d", stats.total),
+    string.format("%s: %d", M._msg("stats_total"), stats.total),
     "",
-    "By Mode:",
+    M._msg("stats_by_mode"),
   }
 
   for mode, count in pairs(stats.by_mode) do
@@ -542,7 +662,7 @@ function M.show_stats()
   end
 
   table.insert(lines, "")
-  table.insert(lines, "By Language:")
+  table.insert(lines, M._msg("stats_by_language"))
 
   for lang, count in pairs(stats.by_language) do
     table.insert(lines, string.format("  %s: %d", lang, count))
@@ -567,20 +687,20 @@ function M.index_codebase(path)
   path = path or vim.fn.getcwd()
 
   if not rag.is_available() then
-    vim.notify("[EduTutor] RAG CLI not available.\nInstall with: pip install -e python/", vim.log.levels.ERROR)
+    vim.notify("[EduTutor] " .. M._msg("rag_not_available"), vim.log.levels.ERROR)
     return
   end
 
-  vim.notify("[EduTutor] Indexing " .. path .. "...", vim.log.levels.INFO)
+  vim.notify("[EduTutor] " .. M._msg("rag_indexing") .. path .. "...", vim.log.levels.INFO)
 
   rag.index(path, {}, function(stats, err)
     if err then
-      vim.notify("[EduTutor] Indexing error: " .. err, vim.log.levels.ERROR)
+      vim.notify("[EduTutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
       return
     end
 
     vim.notify(
-      string.format("[EduTutor] Indexed %d files, created %d chunks",
+      string.format("[EduTutor] " .. M._msg("rag_indexed"),
         stats.files_processed or 0,
         stats.chunks_created or 0),
       vim.log.levels.INFO
@@ -593,12 +713,12 @@ function M.ask_with_rag()
   local query = parser.find_query()
 
   if not query then
-    vim.notify("[EduTutor] No mentor comment found near cursor.\nUse // Q: your question", vim.log.levels.WARN)
+    vim.notify("[EduTutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
     return
   end
 
   if not rag.is_available() then
-    vim.notify("[EduTutor] RAG not available, falling back to normal ask", vim.log.levels.WARN)
+    vim.notify("[EduTutor] " .. M._msg("rag_not_available"), vim.log.levels.WARN)
     M.ask()
     return
   end
@@ -606,7 +726,7 @@ function M.ask_with_rag()
   local mode = query.mode_name or config.options.default_mode
   local ctx = context.extract(nil, query.line)
 
-  ui.show_loading("Searching codebase...")
+  ui.show_loading(M._msg("rag_searching"))
 
   -- Get RAG context
   rag.get_context(query.question, function(rag_context, rag_err)
@@ -626,19 +746,19 @@ function M.ask_with_rag()
 
     local user_prompt = prompts.build_user_prompt(query.question, full_context, mode)
 
-    ui.show_loading("Thinking with codebase context...")
+    ui.show_loading(M._msg("rag_thinking"))
 
     -- Query LLM
     provider.query_async(system_prompt, user_prompt, function(response, err)
       if err then
         ui.close()
-        vim.notify("[EduTutor] Error: " .. err, vim.log.levels.ERROR)
+        vim.notify("[EduTutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
         return
       end
 
       if not response then
         ui.close()
-        vim.notify("[EduTutor] No response received", vim.log.levels.ERROR)
+        vim.notify("[EduTutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
         return
       end
 
@@ -661,18 +781,18 @@ end
 ---Show RAG index status
 function M.show_rag_status()
   if not rag.is_available() then
-    vim.notify("[EduTutor] RAG CLI not available", vim.log.levels.WARN)
+    vim.notify("[EduTutor] " .. M._msg("rag_not_available"), vim.log.levels.WARN)
     return
   end
 
   rag.status(function(stats, err)
     if err then
-      vim.notify("[EduTutor] " .. err, vim.log.levels.ERROR)
+      vim.notify("[EduTutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
       return
     end
 
     local lines = {
-      "EduTutor - RAG Status",
+      M._msg("rag_status_title"),
       "========================",
       "",
       string.format("Total chunks: %s", stats.total_chunks or "N/A"),
@@ -696,6 +816,80 @@ function M.show_rag_status()
 
     ui.show(table.concat(lines, "\n"), nil, nil)
   end)
+end
+
+-- =============================================================================
+-- Language Functions
+-- =============================================================================
+
+---Set the response language
+---@param lang? string Language to set (English, Vietnamese, en, vi)
+function M.set_language(lang)
+  if not lang then
+    -- Show current language and options
+    local current = config.options.language
+    local available = prompts.get_available_languages()
+
+    local lines = {
+      "EduTutor - Language Settings",
+      "============================",
+      "",
+      string.format("Current language: %s", current),
+      "",
+      "Available languages:",
+    }
+
+    for _, l in ipairs(available) do
+      local marker = (l.name == current or l.key == current) and " (current)" or ""
+      table.insert(lines, string.format("  - %s (%s)%s", l.name, l.key, marker))
+    end
+
+    table.insert(lines, "")
+    table.insert(lines, "Usage:")
+    table.insert(lines, "  :EduTutorLang Vietnamese  - Switch to Vietnamese")
+    table.insert(lines, "  :EduTutorLang English     - Switch to English")
+    table.insert(lines, "  :EduTutorLang vi          - Switch to Vietnamese")
+    table.insert(lines, "  :EduTutorLang en          - Switch to English")
+
+    ui.show(table.concat(lines, "\n"), nil, nil)
+    return
+  end
+
+  -- Validate and set language
+  local valid_langs = {
+    ["English"] = "English",
+    ["english"] = "English",
+    ["en"] = "English",
+    ["Vietnamese"] = "Vietnamese",
+    ["vietnamese"] = "Vietnamese",
+    ["vi"] = "Vietnamese",
+    ["Tiếng Việt"] = "Vietnamese",
+  }
+
+  local normalized = valid_langs[lang]
+  if not normalized then
+    vim.notify(
+      string.format("[EduTutor] Invalid language: %s. Use 'English' or 'Vietnamese'.", lang),
+      vim.log.levels.ERROR
+    )
+    return
+  end
+
+  config.options.language = normalized
+
+  -- Notify in the appropriate language
+  local messages = {
+    ["English"] = "Language set to English",
+    ["Vietnamese"] = "Đã chuyển sang tiếng Việt",
+  }
+
+  vim.notify("[EduTutor] " .. messages[normalized], vim.log.levels.INFO)
+end
+
+---Get current language
+---@return string Current language setting
+function M.get_language()
+  return config.options.language
 end
 
 return M

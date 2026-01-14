@@ -182,6 +182,11 @@ editutor-cli status
 :EduTutorRAG       " Ask with codebase context
 :EduTutorRAGStatus " Show RAG status
 
+" Language commands
+:EduTutorLang             " Show current language
+:EduTutorLang Vietnamese  " Switch to Vietnamese
+:EduTutorLang English     " Switch to English
+
 " Health check
 :checkhealth editutor
 ```
@@ -297,9 +302,9 @@ rich>=13.0.0
 ### Phase 4: Polish (In Progress)
 - [x] Knowledge export to Markdown
 - [x] Health check (:checkhealth editutor)
+- [x] Vietnamese language support (:EduTutorLang)
 - [ ] Obsidian integration
 - [ ] Team sharing
-- [ ] Vietnamese language support
 - [ ] nui.nvim enhanced UI
 
 ---

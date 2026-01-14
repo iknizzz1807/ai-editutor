@@ -248,6 +248,13 @@ RAG Commands:
   :EduTutorRAG            Ask with codebase context
   :EduTutorRAGStatus      Show RAG index status
 
+Language Commands:
+  :EduTutorLang           Show current language and options
+  :EduTutorLang English   Switch to English responses
+  :EduTutorLang Vietnamese Switch to Vietnamese responses
+  :EduTutorLang vi        Short form for Vietnamese
+  :EduTutorLang en        Short form for English
+
 ==============================================================================
 11. KEYMAPS                                                  *editutor-keymaps*
 
