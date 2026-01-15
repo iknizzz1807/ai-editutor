@@ -4,6 +4,32 @@
 
 A Neovim plugin that acts as your personal coding mentor - explaining concepts, guiding your thinking, and helping you truly understand code rather than just generating it.
 
+## What's New in v0.8.0
+
+**Inline Comments UI** - Responses are now inserted directly as comments in your code file, right below your question. No floating windows - everything stays in your code.
+
+```go
+// Q: What's the difference between goroutine and thread?
+/*
+A: A goroutine is a lightweight thread managed by the Go runtime,
+not the OS. Key differences:
+
+1. Memory: goroutines start with ~2KB stack vs ~1MB for OS threads
+2. Scheduling: Go runtime schedules goroutines (M:N model)
+3. Communication: Use channels instead of shared memory
+
+Example:
+go func() {
+    // This runs concurrently
+}()
+
+Learn more: Look into Go's scheduler and the GOMAXPROCS setting.
+*/
+func main() {
+    // your code here
+}
+```
+
 ## Why ai-editutor?
 
 | Problem | Solution |
@@ -15,22 +41,20 @@ A Neovim plugin that acts as your personal coding mentor - explaining concepts, 
 
 ## Features
 
-### Comment-Based Interaction
-```go
-// Q: What's the difference between goroutine and thread?
-// Press <leader>ma - Get explanation right in your editor
+### Comment-Based Interaction (Inline Responses)
 
-// S: Why might a mutex be better than a channel here?
-// - AI asks guiding questions instead of giving direct answers
+```javascript
+// Q: What does this regex do?
+/*
+A: This regex validates a strong password:
+- (?=.*[A-Z]) - at least one uppercase
+- (?=.*[a-z]) - at least one lowercase
+- (?=.*\d) - at least one digit
+- .{8,} - minimum 8 characters
 
-// R: Review this function for production readiness
-// - Detailed code review with security, performance, best practices
-
-// D: This function sometimes returns nil, help me debug
-// - Guided debugging process, teaching you to find issues
-
-// E: Explain the ownership system in Rust
-// - Deep dive into concepts with examples
+Common mistake: Forgetting anchors (^$) allows partial matches.
+*/
+const pattern = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,}$/;
 ```
 
 ### 5 Learning Modes
@@ -44,27 +68,34 @@ A Neovim plugin that acts as your personal coding mentor - explaining concepts, 
 | **Explain** | `// E:` | Deep concept explanations |
 
 ### Incremental Hints
-- Ask once - subtle hint
-- Ask again - clearer hint
-- Ask third time - partial solution
-- Ask fourth time - full solution with explanation
+
+Run `:EduTutorHint` multiple times on the same question:
+- Level 1: Subtle hint (concept to research)
+- Level 2: Clearer hint (point to problem area)
+- Level 3: Strong hint (almost the answer)
+- Level 4: Full solution with explanation
 
 ### LSP-Powered Context
-```javascript
+
+```typescript
 // Q: How does this service interact with the authentication module?
-// - AI automatically gathers context from related project files via LSP
-// - No indexing required - just works with your existing LSP setup
+// ai-editutor automatically gathers context from related project files via LSP
+// No indexing required - just works with your existing LSP setup
 ```
 
-ai-editutor uses LSP go-to-definition to automatically find and include relevant code from your project files. It filters out library code and focuses only on YOUR code.
+### Conversation Memory
 
-### Knowledge Tracking
-- Every Q&A saved automatically
-- Search your learning history
-- Export to Markdown for review
-- Track your learning progress
+Ask follow-up questions without repeating context:
+```python
+# Q: What does this function do?
+# A: [explanation inserted as comment]
+
+# Q: Can you elaborate on the error handling?
+# A: [AI remembers previous discussion, continues naturally]
+```
 
 ### Multi-Language Support
+
 ```vim
 :EduTutorLang Vietnamese  " Switch to Vietnamese responses
 :EduTutorLang English     " Switch to English responses
@@ -78,7 +109,7 @@ ai-editutor uses LSP go-to-definition to automatically find and include relevant
   "your-username/ai-editutor",
   dependencies = {
     "nvim-lua/plenary.nvim",
-    "nvim-treesitter/nvim-treesitter",  -- Recommended for better context
+    "nvim-treesitter/nvim-treesitter",  -- Recommended
   },
   config = function()
     require("editutor").setup({
@@ -86,16 +117,6 @@ ai-editutor uses LSP go-to-definition to automatically find and include relevant
       api_key = os.getenv("ANTHROPIC_API_KEY"),
     })
   end,
-}
-```
-
-### Optional Dependencies
-```lua
-dependencies = {
-  "nvim-lua/plenary.nvim",          -- Required: HTTP requests
-  "nvim-treesitter/nvim-treesitter", -- Recommended: Better context extraction
-  "MunifTanjim/nui.nvim",           -- Optional: Enhanced UI
-  "kkharji/sqlite.lua",             -- Optional: Better knowledge storage
 }
 ```
 
@@ -108,28 +129,19 @@ dependencies = {
    export ANTHROPIC_API_KEY="your-key-here"
    ```
 
-3. **Ensure LSP is configured** for your language (for best context extraction)
-   ```vim
-   :LspInfo  " Check LSP status
-   ```
-
-4. **Open any code file and ask a question**
+3. **Open any code file and ask a question**
    ```python
    # Q: What does this regex do?
    pattern = r'^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,}$'
    ```
 
-5. **Press `<leader>ma`** - See the explanation in a floating window
+4. **Press `<leader>ma`** - The explanation is inserted as a comment below your question
 
 ## Keybindings
 
 | Key | Action |
 |-----|--------|
-| `<leader>ma` | Mentor Ask - trigger on current comment |
-| `<leader>ms` | Mentor Stream - streaming response |
-| `q` | Close popup |
-| `y` | Copy answer to clipboard |
-| `n` | Next hint (in hint mode) |
+| `<leader>ma` | Ask - response inserted as inline comment |
 
 ## Configuration
 
@@ -141,31 +153,19 @@ require("editutor").setup({
   model = "claude-sonnet-4-20250514",
 
   -- Behavior
-  default_mode = "question",  -- Default interaction mode
+  default_mode = "question",
   language = "English",       -- or "Vietnamese"
 
   -- LSP Context Extraction
   context = {
-    lines_around_cursor = 100,    -- Lines around cursor (50 above + 50 below)
-    external_context_lines = 30,  -- Lines around each external definition
-    max_external_symbols = 20,    -- Max external symbols to resolve via LSP
-  },
-
-  -- UI
-  ui = {
-    width = 80,
-    height = 20,
-    border = "rounded",
-    max_width = 120,
+    lines_around_cursor = 100,
+    external_context_lines = 30,
+    max_external_symbols = 20,
   },
 
   -- Keymaps
   keymaps = {
     ask = "<leader>ma",
-    stream = "<leader>ms",
-    close = "q",
-    copy = "y",
-    next_hint = "n",
   },
 })
 ```
@@ -182,109 +182,24 @@ require("editutor").setup({
 |  1. Parse comment (detect Q/S/R/D/E mode)                 |
 |  2. Extract code context around cursor                    |
 |  3. Use LSP to find related definitions in project        |
-|  4. Filter out library code (node_modules, etc.)          |
-|  5. Build pedagogical prompt with full context            |
-|  6. Send to LLM (Claude/OpenAI/Ollama)                    |
-|  7. Stream response to floating window                    |
-|  8. Save to knowledge base                                |
+|  4. Build pedagogical prompt with full context            |
+|  5. Send to LLM (Claude/OpenAI/Ollama)                    |
+|  6. Insert response as comment below question             |
+|  7. Save to knowledge base                                |
 +-----------------------------------------------------------+
 ```
 
-### LSP Context Flow
+### Comment Style Detection
 
-```
-Current File                    External Definitions
-+-------------------+          +------------------------+
-| // Q: question    |   LSP    | auth_service.ts        |
-| import { auth }   | -------> | export function login  |
-| auth.login()      |  go-to-  +------------------------+
-+-------------------+   def    | user_repository.py     |
-                               | class UserRepository   |
-                               +------------------------+
-```
+The plugin automatically uses the appropriate comment style:
 
-ai-editutor finds symbols in your code and uses LSP to locate their definitions in OTHER project files. This gives the LLM context about how your code connects together.
-
-## Project Structure
-
-```
-ai-editutor/
-├── lua/editutor/           # Neovim plugin (Lua)
-│   ├── init.lua            # Plugin entry point (v0.6.0)
-│   ├── config.lua          # Configuration management
-│   ├── parser.lua          # Comment parsing (// Q:, etc.)
-│   ├── context.lua         # Context extraction (Tree-sitter)
-│   ├── lsp_context.lua     # LSP-based context (go-to-def)
-│   ├── prompts.lua         # Pedagogical prompt templates
-│   ├── provider.lua        # LLM providers + streaming
-│   ├── ui.lua              # Floating window UI
-│   ├── hints.lua           # Incremental hints (4 levels)
-│   ├── knowledge.lua       # Q&A persistence
-│   └── health.lua          # :checkhealth editutor
-├── plugin/
-│   └── editutor.lua        # Lazy loading entry
-├── doc/
-│   └── editutor.txt        # Vim help documentation
-├── tests/                  # Test suite
-│   ├── fixtures/           # Multi-language test projects
-│   └── manual_lsp_test.lua # Manual LSP verification
-├── README.md
-└── CLAUDE.md               # Development guide
-```
-
-## Comparison with Other Tools
-
-| Feature | Copilot | ChatGPT | ai-editutor |
-|---------|---------|---------|-------------|
-| Code generation | Yes | Yes | No (by design) |
-| In-editor | Yes | No | Yes |
-| Teaches concepts | No | Partially | Yes (primary goal) |
-| Socratic mode | No | No | Yes |
-| Code review | No | Manual | Yes (`// R:`) |
-| Knowledge tracking | No | No | Yes |
-| Project-aware context | Limited | No | Yes (LSP-based) |
-| No external indexing | N/A | N/A | Yes (uses LSP) |
-| Open source | No | No | Yes |
-
-## Use Cases
-
-### Learning a New Language
-```rust
-// Q: Why does Rust require explicit lifetime annotations here?
-fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
-    if x.len() > y.len() { x } else { y }
-}
-// - Get explanation of ownership, borrowing, and lifetimes
-```
-
-### Understanding Legacy Code
-```python
-# E: Explain what this complex regex does step by step
-pattern = r'(?P<protocol>https?):\/\/(?P<domain>[^\/]+)(?P<path>\/.*)?'
-# - Detailed breakdown of each component
-```
-
-### Code Review Before PR
-```typescript
-// R: Review this function before I submit the PR
-async function fetchUserData(userId: string) {
-  const response = await fetch(`/api/users/${userId}`);
-  return response.json();
-}
-// - Security issues, error handling, type safety feedback
-```
-
-### Debugging
-```go
-// D: This goroutine sometimes deadlocks, help me understand why
-func process(ch chan int) {
-    for {
-        val := <-ch
-        // process val
-    }
-}
-// - Guided questions to help you discover the issue
-```
+| Languages | Comment Style |
+|-----------|---------------|
+| JS/TS/Go/Rust/C/C++/Java | `/* block comment */` |
+| Python | `""" docstring """` |
+| Lua/SQL | `--[[ block ]]` |
+| HTML/XML | `<!-- comment -->` |
+| Shell/YAML | `# line comment` |
 
 ## Commands
 
@@ -292,7 +207,6 @@ func process(ch chan int) {
 | Command | Description |
 |---------|-------------|
 | `:EduTutorAsk` | Ask about current mentor comment |
-| `:EduTutorStream` | Ask with streaming response |
 | `:EduTutorHint` | Ask with incremental hints |
 | `:EduTutorModes` | Show available modes |
 
@@ -313,67 +227,109 @@ func process(ch chan int) {
 | `:EduTutorExport [path]` | Export to markdown |
 | `:EduTutorStats` | Show statistics |
 
-### Language Commands
+### Other Commands
 | Command | Description |
 |---------|-------------|
-| `:EduTutorLang` | Show current language |
-| `:EduTutorLang Vietnamese` | Switch to Vietnamese |
-| `:EduTutorLang English` | Switch to English |
+| `:EduTutorLang` | Show/set response language |
+| `:EduTutorConversation` | Show conversation info |
+| `:EduTutorClearConversation` | Clear conversation |
+| `:checkhealth editutor` | Check plugin health |
 
-## Health Check
+## Use Cases
 
-Verify your setup:
-```vim
-:checkhealth editutor
+### Learning a New Language
+```rust
+// Q: Why does Rust require explicit lifetime annotations here?
+/*
+A: Rust needs lifetimes to ensure the returned reference
+is valid. Here, both inputs could have different lifetimes,
+so you must specify which one the return value follows.
+
+The 'a annotation says: "the return value lives as long as
+the shorter of x and y's lifetimes."
+
+Without this, Rust can't guarantee memory safety at compile time.
+*/
+fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
+    if x.len() > y.len() { x } else { y }
+}
 ```
 
-This checks:
-- Neovim version
-- Required dependencies (plenary.nvim)
-- Optional dependencies (nui.nvim, sqlite.lua)
-- Tree-sitter availability
-- LSP availability for current buffer
-- Provider configuration and API key
+### Code Review Before PR
+```typescript
+// R: Review this function before I submit the PR
+/*
+A: Issues found:
+
+CRITICAL: No input validation - userId could be used for injection
+WARNING: No error handling for failed fetch
+WARNING: response.json() can throw if response isn't JSON
+
+Improved version:
+async function fetchUserData(userId: string) {
+  if (!userId || typeof userId !== 'string') {
+    throw new Error('Invalid userId');
+  }
+  const response = await fetch(`/api/users/${encodeURIComponent(userId)}`);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return response.json();
+}
+*/
+async function fetchUserData(userId: string) {
+  const response = await fetch(`/api/users/${userId}`);
+  return response.json();
+}
+```
+
+## Comparison with Other Tools
+
+| Feature | Copilot | ChatGPT | ai-editutor |
+|---------|---------|---------|-------------|
+| Code generation | Yes | Yes | No (by design) |
+| In-editor | Yes | No | Yes |
+| Teaches concepts | No | Partially | Yes (primary goal) |
+| Inline responses | No | No | Yes |
+| Socratic mode | No | No | Yes |
+| Knowledge tracking | No | No | Yes |
+| Project-aware context | Limited | No | Yes (LSP-based) |
+
+## Project Structure
+
+```
+ai-editutor/
+├── lua/editutor/
+│   ├── init.lua              # Plugin entry (v0.8.0)
+│   ├── comment_writer.lua    # Inline comment insertion
+│   ├── parser.lua            # Comment parsing
+│   ├── context.lua           # Context extraction
+│   ├── lsp_context.lua       # LSP-based context
+│   ├── prompts.lua           # Pedagogical prompts
+│   ├── provider.lua          # LLM providers
+│   ├── hints.lua             # Incremental hints
+│   ├── knowledge.lua         # Q&A persistence
+│   ├── conversation.lua      # Conversation memory
+│   └── health.lua            # Health check
+├── doc/editutor.txt          # Vim help
+├── README.md
+└── CLAUDE.md                 # Development guide
+```
 
 ## Roadmap
 
-- [x] **Phase 1: MVP**
-  - [x] Comment parsing
-  - [x] Basic context collection
-  - [x] Claude API integration
-  - [x] Floating window UI
-- [x] **Phase 2: Multi-Mode**
-  - [x] 5 interaction modes
-  - [x] Incremental hints
-  - [x] Knowledge tracking
-- [x] **Phase 3: LSP Context**
-  - [x] LSP-based context extraction
-  - [x] Go-to-definition for external symbols
-  - [x] Project file filtering
-  - [x] Streaming responses
-- [x] **Phase 4: Polish**
-  - [x] Vietnamese language support
-  - [x] Health check
-  - [x] Knowledge export
-- [ ] **Future**
-  - [ ] Obsidian integration
-  - [ ] Team knowledge sharing
-  - [ ] Enhanced UI with nui.nvim
+- [x] **v0.6.0**: LSP-based context extraction
+- [x] **v0.7.0**: Conversation memory
+- [x] **v0.8.0**: Inline comments UI
+- [ ] **Future**: Obsidian integration, Team sharing
 
 ## Contributing
 
-Contributions are welcome! Please read our contributing guidelines first.
+Contributions are welcome! Please read CLAUDE.md for development guidelines.
 
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
-
-## Acknowledgments
-
-Built with inspiration from:
-- [wtf.nvim](https://github.com/piersolenski/wtf.nvim) - Explanation-first architecture
-- [gp.nvim](https://github.com/Robitx/gp.nvim) - Popup and streaming patterns
-- [CS50.ai](https://cs50.ai/) - Pedagogical AI design principles
 
 ---
 

@@ -9,6 +9,9 @@
 
 Unlike GitHub Copilot which writes code for you, ai-editutor **explains concepts** so you can write better code yourself.
 
+### v0.8.0 - Inline Comments UI
+Responses are now inserted as **inline comments** directly in your code file, right below your question. No floating windows - everything stays in your code.
+
 ---
 
 ## Project Structure
@@ -17,16 +20,18 @@ Unlike GitHub Copilot which writes code for you, ai-editutor **explains concepts
 ai-editutor/
 ├── lua/
 │   └── editutor/
-│       ├── init.lua              # Plugin entry point (v0.6.0)
+│       ├── init.lua              # Plugin entry point (v0.8.0)
 │       ├── config.lua            # Configuration management
 │       ├── parser.lua            # Comment parsing (// Q:, // S:, etc.)
 │       ├── context.lua           # Context extraction (Tree-sitter)
 │       ├── lsp_context.lua       # LSP-based context (go-to-definition)
+│       ├── comment_writer.lua    # Insert responses as inline comments
 │       ├── prompts.lua           # Pedagogical prompt templates
-│       ├── provider.lua          # LLM API (Claude, OpenAI, Ollama) + Streaming
-│       ├── ui.lua                # Floating window + streaming display
+│       ├── provider.lua          # LLM API (Claude, OpenAI, Ollama)
 │       ├── hints.lua             # Incremental hints (4 levels)
 │       ├── knowledge.lua         # Knowledge tracking (SQLite/JSON fallback)
+│       ├── conversation.lua      # Session-based conversation memory
+│       ├── project_context.lua   # Project docs context
 │       └── health.lua            # :checkhealth editutor
 ├── plugin/
 │   └── editutor.lua              # Lazy loading entry
@@ -35,22 +40,7 @@ ai-editutor/
 ├── tests/
 │   ├── spec/                     # Unit tests (plenary)
 │   ├── fixtures/                 # Multi-language test projects
-│   │   ├── typescript-fullstack/ # TypeScript/React (11 files)
-│   │   ├── python-django/        # Python/Django (11 files)
-│   │   ├── go-gin/               # Go/Gin (10 files)
-│   │   ├── rust-axum/            # Rust/Axum (9 files)
-│   │   ├── java-spring/          # Java/Spring (8 files)
-│   │   ├── cpp-server/           # C++/Crow (10 files)
-│   │   ├── vanilla-frontend/     # HTML/CSS/JS (9 files)
-│   │   ├── vue-app/              # Vue.js (10 files)
-│   │   ├── svelte-app/           # Svelte (9 files)
-│   │   └── angular-app/          # Angular (9 files)
 │   └── manual_lsp_test.lua       # Manual LSP verification script
-├── research/                     # Reference implementations (cloned repos)
-│   ├── core/                     # gp.nvim, wtf.nvim, backseat.nvim
-│   ├── ui/                       # nui.nvim, render-markdown.nvim
-│   ├── backend/                  # lsp-ai, llm.nvim
-│   └── reference/                # AiComments, vscode-extension-samples
 ├── README.md
 └── CLAUDE.md                     # This file
 ```
@@ -59,72 +49,82 @@ ai-editutor/
 
 ## Architecture Overview
 
-### Context Extraction: LSP-Based (v0.6.0+)
-
-ai-editutor uses **LSP go-to-definition** for context extraction instead of RAG:
+### Inline Comment Response (v0.8.0)
 
 ```
-User writes // Q: question
-       │
-       ▼
+User writes: // Q: What is closure?
+                    │
+                    ▼
 ┌─────────────────────────────────────────────────────────┐
-│ 1. Extract code around cursor (±50 lines)               │
-│ 2. Use Tree-sitter to find all identifiers              │
-│ 3. For each identifier, call LSP textDocument/definition│
-│ 4. Filter: only include PROJECT files (not libraries)   │
-│ 5. Read ±15 lines around each definition                │
-│ 6. Format all context for LLM prompt                    │
+│ 1. Parse comment (detect Q/S/R/D/E mode)               │
+│ 2. Extract code context + LSP definitions              │
+│ 3. Build pedagogical prompt                            │
+│ 4. Send to LLM (Claude/OpenAI/Ollama)                  │
+│ 5. Insert response as comment below question           │
 └─────────────────────────────────────────────────────────┘
-       │
-       ▼
-LLM receives: current code + related definitions from project
+                    │
+                    ▼
+Result in code:
+    // Q: What is closure?
+    /*
+    A: A closure is a function that captures variables
+    from its enclosing scope...
+
+    Example:
+    function outer() {
+      let x = 10;
+      return function inner() { console.log(x); }
+    }
+    */
 ```
+
+### Comment Style Detection
+
+The plugin automatically detects the appropriate comment style based on filetype:
+
+| Languages | Line Comment | Block Comment |
+|-----------|--------------|---------------|
+| JS/TS/Go/Rust/C/C++/Java | `//` | `/* */` |
+| Python/Ruby/Shell | `#` | `""" """` or `=begin =end` |
+| Lua/SQL/Haskell | `--` | `--[[ ]]` or `{- -}` |
+| HTML/XML | - | `<!-- -->` |
+
+Block comments are preferred when available.
+
+### Context Extraction: LSP-Based
+
+ai-editutor uses **LSP go-to-definition** for context extraction:
+
+1. Extract code around cursor (±50 lines)
+2. Use Tree-sitter to find all identifiers
+3. For each identifier, call LSP textDocument/definition
+4. Filter: only include PROJECT files (not libraries)
+5. Read ±15 lines around each definition
+6. Format all context for LLM prompt
 
 **Why LSP instead of RAG?**
 - Zero setup - works immediately with existing LSP
 - No indexing/embedding required
 - No Python dependencies
 - Always up-to-date (LSP reads actual files)
-- More precise (exact definitions, not similarity search)
-
-**Excluded paths (library detection):**
-```lua
-M.exclude_patterns = {
-  "node_modules", ".venv", "venv", "site%-packages",
-  "vendor", "%.cargo/registry", "target/debug", "target/release",
-  "/usr/", "/opt/", "%.local/lib/", "%.luarocks/",
-}
-```
-
----
-
-## Research Repos Quick Reference
-
-### Priority 1: Core Architecture
-
-| Repo | Path | Learn From |
-|------|------|------------|
-| **gp.nvim** | `research/core/gp.nvim/` | Popup system, streaming, provider abstraction |
-| **wtf.nvim** | `research/core/wtf.nvim/` | Explanation-first architecture, context collection |
-| **nui.nvim** | `research/ui/nui.nvim/` | Floating window API |
-
-### Priority 2: Reference
-
-| Repo | Path | Learn From |
-|------|------|------------|
-| **AiComments** | `research/reference/AiComments/` | Comment syntax convention |
-| **vscode-extension-samples** | `research/reference/vscode-extension-samples/` | Tutor prompt engineering |
 
 ---
 
 ## Key Files
 
 ### init.lua - Plugin Entry Point
-- Version: 0.6.0
+- Version: 0.8.0
 - Creates all user commands (`:EduTutor*`)
 - Sets up keymaps
-- Main functions: `ask()`, `ask_stream()`, `ask_with_hints()`
+- Main functions: `ask()`, `ask_with_hints()`
 - Multi-language UI messages (English, Vietnamese)
+
+### comment_writer.lua - Inline Comment Insertion
+- `get_style()` - Detect comment style for filetype
+- `format_response()` - Format response as block/line comments
+- `insert_response()` - Insert after question line
+- `insert_or_replace()` - Replace existing response if present
+- Supports 40+ languages
 
 ### lsp_context.lua - LSP Context Extraction
 - `is_available()` - Check if LSP is running
@@ -132,20 +132,17 @@ M.exclude_patterns = {
 - `is_project_file()` - Filter out library code
 - `extract_identifiers()` - Tree-sitter identifier extraction
 - `get_definition()` - LSP textDocument/definition
-- `get_external_definitions()` - Async gather all external defs
-- `format_for_prompt()` - Format context for LLM
 
 ### config.lua - Configuration
 - Default provider: Claude (claude-sonnet-4-20250514)
 - Context settings: 100 lines around cursor, 20 max external symbols
 - Provider configs for Claude, OpenAI, Ollama
-- UI and keymap settings
+- Single keymap: `<leader>ma`
 
-### provider.lua - LLM Communication
-- `query_async()` - Non-streaming request
-- `query_stream()` - Streaming with SSE parsing
-- Supports Claude, OpenAI, Ollama APIs
-- Error handling and retry logic
+### prompts.lua - Pedagogical Prompts
+- Concise prompts optimized for inline comments
+- No emoji headers (plain text for code comments)
+- Mode-specific instructions (Q/S/R/D/E)
 
 ---
 
@@ -161,19 +158,12 @@ stylua lua/
 
 # Run tests
 nvim --headless -c "PlenaryBustedDirectory tests/spec {minimal_init = 'tests/minimal_init.lua'}"
-
-# Manual LSP context test (in Neovim)
-:lua require('tests.manual_lsp_test').test_all()
-:lua require('tests.manual_lsp_test').test_typescript_fullstack()
-:lua require('tests.manual_lsp_test').test_vue_app()
 ```
 
 ### Plugin Usage (in Neovim)
 ```vim
-" Core commands
-<leader>ma           " Ask (normal)
-<leader>ms           " Ask (streaming)
-:EduTutorHint        " Progressive hints
+" Core command
+<leader>ma           " Ask - response inserted as inline comment
 
 " Mode commands
 :EduTutorQuestion    " Q mode
@@ -181,6 +171,7 @@ nvim --headless -c "PlenaryBustedDirectory tests/spec {minimal_init = 'tests/min
 :EduTutorReview      " R mode
 :EduTutorDebug       " D mode
 :EduTutorExplain     " E mode
+:EduTutorHint        " Progressive hints (run multiple times)
 
 " Knowledge commands
 :EduTutorHistory     " Show Q&A history
@@ -192,6 +183,10 @@ nvim --headless -c "PlenaryBustedDirectory tests/spec {minimal_init = 'tests/min
 :EduTutorLang             " Show current language
 :EduTutorLang Vietnamese  " Switch to Vietnamese
 :EduTutorLang English     " Switch to English
+
+" Conversation commands
+:EduTutorConversation       " Show conversation info
+:EduTutorClearConversation  " Clear conversation
 
 " Health check
 :checkhealth editutor
@@ -205,13 +200,15 @@ The plugin parses these comment patterns:
 
 ```javascript
 // Q: What is the time complexity of this algorithm?
+// A: The response will be inserted here as a comment...
+
 // S: Why might using a hash map be better here?
 // R: Review this function for security issues
 // D: This function sometimes returns nil, why?
 // E: Explain closures in JavaScript
 ```
 
-Supported in all languages via Tree-sitter comment node detection.
+Supported in all languages via comment pattern detection.
 
 ---
 
@@ -245,8 +242,6 @@ dependencies = {
 ### Optional
 ```lua
 dependencies = {
-  "MunifTanjim/nui.nvim",       -- Enhanced UI components
-  "MeanderingProgrammer/render-markdown.nvim",  -- Response formatting
   "kkharji/sqlite.lua",         -- Enhanced knowledge storage
 }
 ```
@@ -275,50 +270,47 @@ dependencies = {
 - [x] Project file filtering (exclude libraries)
 - [x] Tree-sitter fallback when no LSP
 - [x] Configurable context window (100 lines default)
-- [x] Streaming response support
 
 ### Phase 4: Polish - COMPLETE
 - [x] Knowledge export to Markdown
 - [x] Health check (:checkhealth editutor)
 - [x] Vietnamese language support (:EduTutorLang)
-- [x] Enhanced prompts (best practices, examples, anti-patterns)
+
+### Phase 5: Conversation Memory - COMPLETE (v0.7.0)
+- [x] Session-based conversation memory
+- [x] Smart session management (file + line proximity)
+- [x] Project documentation context (README, package.json)
+- [x] Conversation management commands
+
+### Phase 6: Inline Comments UI - COMPLETE (v0.8.0)
+- [x] Response as inline comments (no floating window)
+- [x] Auto-detect comment style per language
+- [x] Block comment support for 40+ languages
+- [x] Replace existing response on re-ask
+- [x] Concise prompts optimized for inline display
 
 ### Future Enhancements
 - [ ] Obsidian integration
 - [ ] Team sharing
-- [ ] nui.nvim enhanced UI
 
 ---
 
 ## Prompting Guidelines
 
-### Pedagogical Prompt Structure
-```
-You are a coding mentor helping a developer understand concepts.
-
-Guidelines:
-1. EXPLAIN concepts, don't just give solutions
-2. Use Socratic questioning when appropriate
-3. Provide incremental hints (subtle → clearer → partial → full)
-4. Reference the actual code context provided
-5. Suggest follow-up learning topics
-6. Keep explanations concise but thorough
-
-Context:
-- Language: {language}
-- Current file: {filepath}
-- Code context:
-{code_context}
-
-Question: {user_question}
-```
+### Inline Comment Prompts
+Since responses appear as code comments, prompts instruct the LLM to:
+- Keep responses concise and structured
+- Avoid emoji headers
+- Use plain text formatting
+- Include 1-2 code examples when helpful
+- Focus on the key points
 
 ### Mode-Specific Prompts
-- **Q (Question)**: Direct, educational answer with examples
-- **S (Socratic)**: Ask guiding questions, don't answer directly
-- **R (Review)**: Point out issues, suggest improvements, praise good parts
-- **D (Debug)**: Guide debugging process, don't fix directly
-- **E (Explain)**: Deep dive with What/Why/How/When/Examples
+- **Q (Question)**: Direct answer, brief explanation, one example
+- **S (Socratic)**: Guiding questions, don't answer directly
+- **R (Review)**: Critical issues, warnings, suggestions, what's good
+- **D (Debug)**: Symptoms, hypothesis, verification steps, fix pattern
+- **E (Explain)**: What/Why/How/When/Example/Next
 
 ---
 
@@ -327,7 +319,7 @@ Question: {user_question}
 ### Unit Tests (tests/spec/)
 - Parser tests (comment detection)
 - Context extraction tests
-- Mode logic tests
+- Comment writer tests
 - Config validation tests
 
 ### Fixture Projects (tests/fixtures/)
@@ -335,20 +327,6 @@ Each fixture contains:
 - 8-11 files with realistic cross-file dependencies
 - `// Q:` comments asking real programming questions
 - Import chains for LSP to follow
-
-**Fixtures:**
-| Language | Files | Key Patterns |
-|----------|-------|--------------|
-| TypeScript/React | 11 | hooks → services → api → types |
-| Python/Django | 11 | views → services → models |
-| Go/Gin | 10 | handlers → services → repository |
-| Rust/Axum | 9 | handlers → services → models |
-| Java/Spring | 8 | controllers → services → repos |
-| C++/Crow | 10 | handlers → services → models |
-| Vanilla JS | 9 | components → services → api |
-| Vue.js | 10 | composables → services → api |
-| Svelte | 9 | stores → services → api |
-| Angular | 9 | components → services → guards |
 
 ### Manual LSP Testing
 ```lua
@@ -358,9 +336,6 @@ Each fixture contains:
 -- Test specific framework:
 :lua require('tests.manual_lsp_test').test_vue_app()
 :lua require('tests.manual_lsp_test').test_angular_app()
-
--- Test current buffer:
-:lua require('tests.manual_lsp_test').test_current_buffer()
 ```
 
 ---
@@ -389,19 +364,15 @@ require('editutor').setup({
 :LspInfo
 
 " Ensure LSP server is installed for your language
-" Lua: lua_ls (lua-language-server)
-" Python: pyright or pylsp
-" TypeScript: typescript-language-server
-" Go: gopls
-" Rust: rust-analyzer
 ```
 
-### Issue: No external context appearing
+### Issue: Wrong comment style
 ```lua
--- ai-editutor will warn if LSP is unavailable
--- Check :checkhealth editutor for LSP status
--- External definitions only come from PROJECT files
--- Library paths (node_modules, etc.) are excluded
+-- Check if filetype is detected correctly
+:set filetype?
+
+-- comment_writer.lua supports 40+ languages
+-- Add custom styles in comment_writer.comment_styles table
 ```
 
 ---
@@ -410,6 +381,5 @@ require('editutor').setup({
 
 - [Tree-sitter Neovim Guide](https://tree-sitter.github.io/tree-sitter/)
 - [Neovim LSP Documentation](https://neovim.io/doc/user/lsp.html)
-- [nui.nvim Wiki](https://github.com/MunifTanjim/nui.nvim/wiki)
 - [Claude API Docs](https://docs.anthropic.com/)
 - [Pedagogical AI Research (CS50.ai)](https://cs50.ai/)

@@ -8,27 +8,29 @@ local parser = require("editutor.parser")
 local context = require("editutor.context")
 local prompts = require("editutor.prompts")
 local provider = require("editutor.provider")
-local ui = require("editutor.ui")
+local comment_writer = require("editutor.comment_writer")
 local hints = require("editutor.hints")
 local knowledge = require("editutor.knowledge")
+local conversation = require("editutor.conversation")
+local project_context = require("editutor.project_context")
 
 M._name = "EduTutor"
-M._version = "0.6.0"
+M._version = "0.8.0"
 M._setup_called = false
 
 -- UI Messages for internationalization
 M._messages = {
   en = {
-    no_comment = "No mentor comment found near cursor.\nUse // Q: your question",
-    thinking = "Thinking about: ",
+    no_comment = "No mentor comment found near cursor. Use // Q: your question",
+    thinking = "Thinking...",
     error = "Error: ",
     no_response = "No response received",
+    response_inserted = "Response inserted as comment",
     modes_title = "ai-editutor - Available Modes",
     modes_instruction = "Write a comment with one of these prefixes, then press ",
     examples = "Examples:",
     hints_title = "Incremental Hints:",
     hints_instruction = "Use :EduTutorHint to get progressive hints (level 1-4)",
-    hints_next = "Press 'n' in the popup to get the next hint level",
     history_title = "ai-editutor - Recent History",
     history_empty = "No history found",
     history_language = "Language",
@@ -42,22 +44,26 @@ M._messages = {
     stats_total = "Total Q&A entries",
     stats_by_mode = "By Mode:",
     stats_by_language = "By Language:",
-    getting_hint = "Getting next hint...",
+    getting_hint = "Getting hint level %d...",
     lsp_context = "Gathering context from LSP...",
     lsp_not_available = "LSP not available - using current file context only",
     lsp_found_defs = "Found %d related definitions",
+    conversation_continued = "Continuing conversation (%d messages)",
+    conversation_new = "Starting new conversation",
+    conversation_cleared = "Conversation cleared",
+    conversation_info = "Conversation: %d messages, %s",
   },
   vi = {
-    no_comment = "Không tìm thấy comment mentor gần con trỏ.\nSử dụng // Q: câu hỏi của bạn",
-    thinking = "Đang suy nghĩ về: ",
+    no_comment = "Không tìm thấy comment mentor gần con trỏ. Sử dụng // Q: câu hỏi của bạn",
+    thinking = "Đang xử lý...",
     error = "Lỗi: ",
     no_response = "Không nhận được phản hồi",
+    response_inserted = "Đã chèn response dưới dạng comment",
     modes_title = "ai-editutor - Các Chế Độ",
     modes_instruction = "Viết comment với một trong các tiền tố sau, rồi nhấn ",
     examples = "Ví dụ:",
     hints_title = "Gợi Ý Từng Bước:",
     hints_instruction = "Dùng :EduTutorHint để nhận gợi ý từng bước (cấp 1-4)",
-    hints_next = "Nhấn 'n' trong popup để nhận gợi ý tiếp theo",
     history_title = "ai-editutor - Lịch Sử Gần Đây",
     history_empty = "Không có lịch sử",
     history_language = "Ngôn ngữ",
@@ -71,10 +77,14 @@ M._messages = {
     stats_total = "Tổng số Q&A",
     stats_by_mode = "Theo Chế Độ:",
     stats_by_language = "Theo Ngôn Ngữ:",
-    getting_hint = "Đang lấy gợi ý tiếp theo...",
+    getting_hint = "Đang lấy gợi ý cấp %d...",
     lsp_context = "Đang thu thập context từ LSP...",
     lsp_not_available = "LSP không khả dụng - chỉ sử dụng context file hiện tại",
     lsp_found_defs = "Tìm thấy %d definitions liên quan",
+    conversation_continued = "Tiếp tục hội thoại (%d tin nhắn)",
+    conversation_new = "Bắt đầu hội thoại mới",
+    conversation_cleared = "Đã xóa hội thoại",
+    conversation_info = "Hội thoại: %d tin nhắn, %s",
   },
 }
 
@@ -136,14 +146,6 @@ function M._create_commands()
     M.ask_mode("explain")
   end, { desc = "Explain concept" })
 
-  vim.api.nvim_create_user_command("EduTutorClose", function()
-    ui.close()
-  end, { desc = "Close tutor popup" })
-
-  vim.api.nvim_create_user_command("EduTutorStream", function()
-    M.ask_stream()
-  end, { desc = "Ask with streaming response" })
-
   vim.api.nvim_create_user_command("EduTutorModes", function()
     M.show_modes()
   end, { desc = "Show available modes" })
@@ -175,6 +177,15 @@ function M._create_commands()
     end,
     desc = "Set response language (English/Vietnamese)",
   })
+
+  -- Conversation commands
+  vim.api.nvim_create_user_command("EduTutorConversation", function()
+    M.show_conversation()
+  end, { desc = "Show current conversation info" })
+
+  vim.api.nvim_create_user_command("EduTutorClearConversation", function()
+    M.clear_conversation()
+  end, { desc = "Clear current conversation" })
 end
 
 ---Setup keymaps
@@ -185,15 +196,13 @@ function M._setup_keymaps()
   if keymaps.ask then
     vim.keymap.set("n", keymaps.ask, M.ask, { desc = "ai-editutor: Ask" })
   end
-
-  -- Streaming keymap
-  if keymaps.stream then
-    vim.keymap.set("n", keymaps.stream, M.ask_stream, { desc = "ai-editutor: Ask (Stream)" })
-  end
 end
 
 ---Main ask function - detect and respond to mentor comments
 ---Uses LSP to gather context from related project files
+---Supports conversation memory for follow-up questions
+---Includes project documentation for better codebase understanding
+---Response is inserted as inline comment below the question
 function M.ask()
   -- Find query at or near cursor
   local query = parser.find_query()
@@ -205,9 +214,18 @@ function M.ask()
 
   -- Get mode from query
   local mode = query.mode_name or config.options.default_mode
+  local filepath = vim.api.nvim_buf_get_name(0)
+  local bufnr = vim.api.nvim_get_current_buf()
 
-  -- Show loading while gathering context
-  ui.show_loading(M._msg("lsp_context"))
+  -- Check if we should continue existing conversation
+  local is_continuation = conversation.continue_or_start(filepath, query.line, mode)
+  if is_continuation then
+    local info = conversation.get_session_info()
+    vim.notify(string.format("[ai-editutor] " .. M._msg("conversation_continued"), info.message_count), vim.log.levels.INFO)
+  end
+
+  -- Show thinking notification
+  vim.notify("[ai-editutor] " .. M._msg("thinking"), vim.log.levels.INFO)
 
   -- Extract context with LSP (async)
   context.extract_with_lsp(function(context_formatted, has_lsp)
@@ -216,29 +234,44 @@ function M.ask()
       vim.notify("[ai-editutor] " .. M._msg("lsp_not_available"), vim.log.levels.WARN)
     end
 
+    -- Build enhanced context with project docs and conversation history
+    local full_context = context_formatted
+
+    -- Add project documentation (README, package.json, etc.) for explain/review modes
+    if mode == "explain" or mode == "review" or not is_continuation then
+      local project_summary = project_context.get_project_summary()
+      if project_summary ~= "" then
+        full_context = full_context .. "\n\n" .. project_summary
+      end
+    end
+
+    -- Add conversation history if continuing
+    local conv_history = conversation.get_history_as_context()
+    if conv_history ~= "" then
+      full_context = conv_history .. "\n" .. full_context
+    end
+
     -- Build prompts
     local system_prompt = prompts.get_system_prompt(mode)
-    local user_prompt = prompts.build_user_prompt(query.question, context_formatted, mode)
-
-    -- Update loading message
-    ui.show_loading(M._msg("thinking") .. query.question:sub(1, 50) .. "...")
+    local user_prompt = prompts.build_user_prompt(query.question, full_context, mode)
 
     -- Query LLM
     provider.query_async(system_prompt, user_prompt, function(response, err)
       if err then
-        ui.close()
         vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
         return
       end
 
       if not response then
-        ui.close()
         vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
         return
       end
 
+      -- Add to conversation history
+      conversation.add_message("user", query.question)
+      conversation.add_message("assistant", response)
+
       -- Save to knowledge base
-      local filepath = vim.api.nvim_buf_get_name(0)
       local lang = vim.bo.filetype
       knowledge.save({
         mode = mode,
@@ -248,84 +281,16 @@ function M.ask()
         filepath = filepath,
       })
 
-      -- Show response
-      ui.show(response, mode, query.question)
+      -- Insert response as inline comment
+      comment_writer.insert_or_replace(response, query.line, bufnr)
+      vim.notify("[ai-editutor] " .. M._msg("response_inserted"), vim.log.levels.INFO)
     end)
-  end)
-end
-
----Ask with streaming response
----Uses LSP to gather context from related project files
-function M.ask_stream()
-  local query = parser.find_query()
-
-  if not query then
-    vim.notify("[ai-editutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
-    return
-  end
-
-  local mode = query.mode_name or config.options.default_mode
-
-  -- Show loading while gathering context
-  ui.show_loading(M._msg("lsp_context"))
-
-  -- Extract context with LSP (async)
-  context.extract_with_lsp(function(context_formatted, has_lsp)
-    -- Warn if no LSP
-    if not has_lsp then
-      vim.notify("[ai-editutor] " .. M._msg("lsp_not_available"), vim.log.levels.WARN)
-    end
-
-    -- Build prompts
-    local system_prompt = prompts.get_system_prompt(mode)
-    local user_prompt = prompts.build_user_prompt(query.question, context_formatted, mode)
-
-    -- Start streaming UI
-    ui.start_stream(mode, query.question, nil)
-
-    -- Stream response
-    local job_id = provider.query_stream(
-      system_prompt,
-      user_prompt,
-      -- On each chunk
-      function(chunk)
-        ui.append_stream(chunk)
-      end,
-      -- On done
-      function(full_response, err)
-        if err then
-          ui.finish_stream(false, err)
-          return
-        end
-
-        ui.finish_stream(true, nil)
-
-        -- Save to knowledge base
-        local content = ui.get_stream_content()
-        local filepath = vim.api.nvim_buf_get_name(0)
-        local lang = vim.bo.filetype
-        if content and content ~= "" then
-          knowledge.save({
-            mode = mode,
-            question = query.question,
-            answer = content,
-            language = lang,
-            filepath = filepath,
-            tags = { "stream" },
-          })
-        end
-      end
-    )
-
-    -- Store job_id for cancellation (update UI state)
-    if job_id and ui.is_open() then
-      -- The UI already handles cancellation via the job_id passed to start_stream
-    end
   end)
 end
 
 ---Ask with incremental hints system
 ---Uses LSP to gather context from related project files
+---Response is inserted as inline comment with hint level indicator
 function M.ask_with_hints()
   local query = parser.find_query()
 
@@ -335,9 +300,10 @@ function M.ask_with_hints()
   end
 
   local mode = query.mode_name or config.options.default_mode
+  local bufnr = vim.api.nvim_get_current_buf()
 
-  -- Show loading while gathering context
-  ui.show_loading(M._msg("lsp_context"))
+  -- Show thinking notification
+  vim.notify("[ai-editutor] " .. M._msg("lsp_context"), vim.log.levels.INFO)
 
   -- Extract context with LSP (async)
   context.extract_with_lsp(function(context_formatted, has_lsp)
@@ -349,48 +315,47 @@ function M.ask_with_hints()
     -- Get or create hint session
     local session = hints.get_session(query.question, mode, context_formatted)
 
-    -- Function to request and show next hint
-    local function show_next_hint()
-      ui.show_loading(M._msg("getting_hint"))
+    -- Get the next hint level
+    local level = session.current_level + 1
+    vim.notify(string.format("[ai-editutor] " .. M._msg("getting_hint"), level), vim.log.levels.INFO)
 
-      hints.request_next_hint(session, function(response, level, has_more, err)
-        if err then
-          ui.close()
-          vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
-          return
-        end
+    hints.request_next_hint(session, function(response, hint_level, has_more, err)
+      if err then
+        vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
+        return
+      end
 
-        if not response then
-          ui.close()
-          vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
-          return
-        end
+      if not response then
+        vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
+        return
+      end
 
-        -- Save to knowledge if final hint
-        if level == hints.MAX_LEVEL then
-          local filepath = vim.api.nvim_buf_get_name(0)
-          local lang = vim.bo.filetype
-          knowledge.save({
-            mode = mode,
-            question = query.question,
-            answer = response,
-            language = lang,
-            filepath = filepath,
-            tags = { "hint", "level-" .. level },
-          })
-        end
-
-        -- Show response with hint info
-        ui.show(response, mode, query.question, {
-          hint_level = level,
-          has_more_hints = has_more,
-          hint_callback = has_more and show_next_hint or nil,
+      -- Save to knowledge if final hint
+      if hint_level == hints.MAX_LEVEL then
+        local filepath = vim.api.nvim_buf_get_name(0)
+        local lang = vim.bo.filetype
+        knowledge.save({
+          mode = mode,
+          question = query.question,
+          answer = response,
+          language = lang,
+          filepath = filepath,
+          tags = { "hint", "level-" .. hint_level },
         })
-      end)
-    end
+      end
 
-    -- Start with first hint
-    show_next_hint()
+      -- Prepend hint level indicator to response
+      local hint_prefix = string.format("[Hint %d/%d]\n", hint_level, hints.MAX_LEVEL)
+      local full_response = hint_prefix .. response
+
+      -- Insert response as inline comment
+      comment_writer.insert_or_replace(full_response, query.line, bufnr)
+
+      local msg = has_more
+        and string.format("Hint level %d inserted. Run :EduTutorHint again for more hints.", hint_level)
+        or string.format("Final hint (level %d) inserted.", hint_level)
+      vim.notify("[ai-editutor] " .. msg, vim.log.levels.INFO)
+    end)
   end)
 end
 
@@ -426,6 +391,7 @@ end
 ---@param mode_override? string Mode override
 function M._process_query(query, mode_override)
   local mode = mode_override or query.mode_name or config.options.default_mode
+  local bufnr = vim.api.nvim_get_current_buf()
 
   -- Extract context
   local ctx = context.extract(nil, query.line)
@@ -435,20 +401,18 @@ function M._process_query(query, mode_override)
   local context_formatted = context.format_for_prompt(ctx)
   local user_prompt = prompts.build_user_prompt(query.question, context_formatted, mode)
 
-  -- Show loading
-  ui.show_loading("Thinking...")
+  -- Show thinking notification
+  vim.notify("[ai-editutor] " .. M._msg("thinking"), vim.log.levels.INFO)
 
   -- Query LLM
   provider.query_async(system_prompt, user_prompt, function(response, err)
     if err then
-      ui.close()
-      vim.notify("[ai-editutor] Error: " .. err, vim.log.levels.ERROR)
+      vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
       return
     end
 
     if not response then
-      ui.close()
-      vim.notify("[ai-editutor] No response received", vim.log.levels.ERROR)
+      vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
       return
     end
 
@@ -461,8 +425,9 @@ function M._process_query(query, mode_override)
       filepath = ctx.filepath,
     })
 
-    -- Show response
-    ui.show(response, mode, query.question)
+    -- Insert response as inline comment
+    comment_writer.insert_or_replace(response, query.line, bufnr)
+    vim.notify("[ai-editutor] " .. M._msg("response_inserted"), vim.log.levels.INFO)
   end)
 end
 
@@ -471,6 +436,8 @@ end
 ---@param mode string Mode name
 ---@param line number Line number for context
 function M._process_question(question, mode, line)
+  local bufnr = vim.api.nvim_get_current_buf()
+
   -- Extract context
   local ctx = context.extract(nil, line)
 
@@ -479,20 +446,18 @@ function M._process_question(question, mode, line)
   local context_formatted = context.format_for_prompt(ctx)
   local user_prompt = prompts.build_user_prompt(question, context_formatted, mode)
 
-  -- Show loading
-  ui.show_loading("Thinking...")
+  -- Show thinking notification
+  vim.notify("[ai-editutor] " .. M._msg("thinking"), vim.log.levels.INFO)
 
   -- Query LLM
   provider.query_async(system_prompt, user_prompt, function(response, err)
     if err then
-      ui.close()
-      vim.notify("[ai-editutor] Error: " .. err, vim.log.levels.ERROR)
+      vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
       return
     end
 
     if not response then
-      ui.close()
-      vim.notify("[ai-editutor] No response received", vim.log.levels.ERROR)
+      vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
       return
     end
 
@@ -505,8 +470,9 @@ function M._process_question(question, mode, line)
       filepath = ctx.filepath,
     })
 
-    -- Show response
-    ui.show(response, mode, question)
+    -- Insert response as inline comment
+    comment_writer.insert_or_replace(response, line, bufnr)
+    vim.notify("[ai-editutor] " .. M._msg("response_inserted"), vim.log.levels.INFO)
   end)
 end
 
@@ -566,9 +532,8 @@ function M.show_modes()
   table.insert(help, "")
   table.insert(help, M._msg("hints_title"))
   table.insert(help, "  " .. M._msg("hints_instruction"))
-  table.insert(help, "  " .. M._msg("hints_next"))
 
-  ui.show(table.concat(help, "\n"), nil, nil)
+  print(table.concat(help, "\n"))
 end
 
 ---Show recent Q&A history
@@ -598,7 +563,7 @@ function M.show_history()
   table.insert(lines, "Use :EduTutorSearch <query> to search")
   table.insert(lines, "Use :EduTutorExport to export to markdown")
 
-  ui.show(table.concat(lines, "\n"), nil, nil)
+  print(table.concat(lines, "\n"))
 end
 
 ---Search knowledge base
@@ -641,7 +606,7 @@ function M.search_knowledge(query)
     table.insert(lines, "")
   end
 
-  ui.show(table.concat(lines, "\n"), nil, nil)
+  print(table.concat(lines, "\n"))
 end
 
 ---Export knowledge to markdown
@@ -681,7 +646,7 @@ function M.show_stats()
     table.insert(lines, string.format("  %s: %d", lang, count))
   end
 
-  ui.show(table.concat(lines, "\n"), nil, nil)
+  print(table.concat(lines, "\n"))
 end
 
 ---Get plugin version
@@ -723,7 +688,7 @@ function M.set_language(lang)
     table.insert(lines, "  :EduTutorLang vi          - Switch to Vietnamese")
     table.insert(lines, "  :EduTutorLang en          - Switch to English")
 
-    ui.show(table.concat(lines, "\n"), nil, nil)
+    print(table.concat(lines, "\n"))
     return
   end
 
@@ -762,6 +727,69 @@ end
 ---@return string Current language setting
 function M.get_language()
   return config.options.language
+end
+
+-- =============================================================================
+-- Conversation Functions
+-- =============================================================================
+
+---Show current conversation info
+function M.show_conversation()
+  local info = conversation.get_session_info()
+
+  if not info then
+    vim.notify("[ai-editutor] " .. M._msg("conversation_new"), vim.log.levels.INFO)
+    return
+  end
+
+  local duration_str
+  if info.duration < 60 then
+    duration_str = string.format("%ds", info.duration)
+  elseif info.duration < 3600 then
+    duration_str = string.format("%dm", math.floor(info.duration / 60))
+  else
+    duration_str = string.format("%dh %dm", math.floor(info.duration / 3600), math.floor((info.duration % 3600) / 60))
+  end
+
+  local lines = {
+    "ai-editutor - Conversation",
+    "==========================",
+    "",
+    string.format("Messages: %d", info.message_count),
+    string.format("Mode: %s", info.mode),
+    string.format("Duration: %s", duration_str),
+    string.format("File: %s", info.file or "unknown"),
+    "",
+    "---",
+    "",
+    "Recent messages:",
+  }
+
+  local history = conversation.get_history()
+  local start_idx = math.max(1, #history - 3) -- Show last 4 messages
+  for i = start_idx, #history do
+    local msg = history[i]
+    local role_label = msg.role == "user" and "You" or "AI"
+    local content = msg.content:sub(1, 100)
+    if #msg.content > 100 then
+      content = content .. "..."
+    end
+    content = content:gsub("\n", " ")
+    table.insert(lines, string.format("[%s]: %s", role_label, content))
+    table.insert(lines, "")
+  end
+
+  table.insert(lines, "---")
+  table.insert(lines, "Use :EduTutorClearConversation to start fresh")
+
+  print(table.concat(lines, "\n"))
+end
+
+---Clear current conversation
+function M.clear_conversation()
+  conversation.clear_session()
+  project_context.clear_cache()
+  vim.notify("[ai-editutor] " .. M._msg("conversation_cleared"), vim.log.levels.INFO)
 end
 
 return M

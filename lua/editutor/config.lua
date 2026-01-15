@@ -11,21 +11,11 @@ local M = {}
 ---@field context_lines number Lines of context around question
 ---@field include_imports boolean Include file imports in context
 ---@field language string Language for explanations
----@field ui EditutorUIConfig UI configuration
 ---@field keymaps EditutorKeymaps Keymap configuration
 ---@field providers table<string, EditutorProvider> Provider configurations
 
----@class EditutorUIConfig
----@field width number|string Window width
----@field height number|string Window height
----@field border string Border style
----@field max_width number Maximum window width
-
 ---@class EditutorKeymaps
 ---@field ask string Trigger mentor ask
----@field close string Close popup
----@field copy string Copy answer
----@field next_hint string Get next hint level
 
 ---@class EditutorProvider
 ---@field name string Provider name
@@ -48,15 +38,6 @@ M.defaults = {
   include_imports = true,
   -- Language for responses: "English", "Vietnamese", "vi", "en", "Tiếng Việt"
   language = "English",
-  stream = false, -- Enable streaming by default
-
-  -- UI
-  ui = {
-    width = 80,
-    height = 20,
-    border = "rounded",
-    max_width = 120,
-  },
 
   -- Context extraction (LSP-based)
   context = {
@@ -68,10 +49,6 @@ M.defaults = {
   -- Keymaps
   keymaps = {
     ask = "<leader>ma",
-    stream = "<leader>ms",
-    close = "q",
-    copy = "y",
-    next_hint = "n",
   },
 
   -- Provider configurations

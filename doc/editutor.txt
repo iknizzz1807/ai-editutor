@@ -12,10 +12,11 @@ CONTENTS                                                    *editutor-contents*
     7. Incremental Hints ..................... |editutor-hints|
     8. Knowledge Tracking .................... |editutor-knowledge|
     9. LSP Context ........................... |editutor-lsp-context|
-   10. Commands .............................. |editutor-commands|
-   11. Keymaps ............................... |editutor-keymaps|
-   12. API ................................... |editutor-api|
-   13. Health Check .......................... |editutor-health|
+   10. Conversation Memory ................... |editutor-conversation|
+   11. Commands .............................. |editutor-commands|
+   12. Keymaps ............................... |editutor-keymaps|
+   13. API ................................... |editutor-api|
+   14. Health Check .......................... |editutor-health|
 
 ==============================================================================
 1. INTRODUCTION                                         *editutor-introduction*
@@ -26,12 +27,18 @@ guides your learning instead of writing code for you.
 
 Philosophy: "Teach a person to fish, don't fish for them."
 
+v0.8.0 - Inline Comments UI:
+  Responses are now inserted directly as comments in your code file, right
+  below your question. No floating windows - everything stays in your code.
+
 Features:
+  - Inline comment responses (v0.8.0)
   - 5 learning modes (Question, Socratic, Review, Debug, Explain)
   - Incremental hints (4 levels from subtle to complete)
   - Knowledge tracking (save and search Q&A history)
   - LSP-based context (auto-fetches related definitions from project)
-  - Streaming responses (real-time display)
+  - Conversation memory (follow-up questions keep context)
+  - Project documentation context (README, package.json, etc.)
   - Multiple LLM providers (Claude, OpenAI, Ollama)
   - Multi-language support (English, Vietnamese)
 
@@ -48,7 +55,6 @@ Recommended:
   - nvim-treesitter (for better context extraction when LSP unavailable)
 
 Optional:
-  - nui.nvim (for enhanced UI)
   - sqlite.lua (for enhanced knowledge storage)
 
 ==============================================================================
@@ -84,30 +90,17 @@ Default configuration: >lua
       context_lines = 50,
       include_imports = true,
       language = "English",  -- or "Vietnamese"
-      stream = false,
 
       -- LSP Context extraction
       context = {
-        lines_around_cursor = 100,    -- Lines around cursor (50 above + 50 below)
-        external_context_lines = 30,  -- Lines around each external definition
-        max_external_symbols = 20,    -- Max external symbols to resolve
-      },
-
-      -- UI
-      ui = {
-        width = 80,
-        height = 20,
-        border = "rounded",
-        max_width = 120,
+        lines_around_cursor = 100,    -- Lines around cursor
+        external_context_lines = 30,  -- Lines around each external def
+        max_external_symbols = 20,    -- Max symbols to resolve
       },
 
       -- Keymaps
       keymaps = {
         ask = "<leader>ma",
-        stream = "<leader>ms",
-        close = "q",
-        copy = "y",
-        next_hint = "n",
       },
     })
 <
@@ -126,11 +119,22 @@ Provider-specific models:
 
 2. Press <leader>ma (or your configured keymap)
 
-3. Read the explanation in the floating window
+3. The explanation is inserted as a comment below your question: >
+    // Q: What is the time complexity of this algorithm?
+    /*
+    A: This algorithm has O(n) time complexity because...
+    */
+<
 
-4. Press 'q' to close, 'y' to copy
+4. The response stays in your code file as documentation
 
-For streaming responses: Press <leader>ms or :EduTutorStream
+Comment Style:
+  ai-editutor automatically detects the appropriate comment style:
+  - JS/TS/Go/Rust/C: /* block comment */
+  - Python: """ docstring """
+  - Lua/SQL: --[[ block ]]
+  - HTML/XML: <!-- comment -->
+  - Shell/YAML: # line comment
 
 ==============================================================================
 6. MODES                                                       *editutor-modes*
@@ -170,10 +174,11 @@ The hints system provides progressive assistance in 4 levels:
 Usage:
   1. Write your question comment
   2. Run :EduTutorHint
-  3. Press 'n' in popup to get next hint level
+  3. Run :EduTutorHint again to get next level hint
 
-This approach encourages learning by giving you progressively more help
-rather than immediate complete answers.
+Each hint level replaces the previous response in your code. This approach
+encourages learning by giving progressively more help rather than immediate
+complete answers.
 
 ==============================================================================
 8. KNOWLEDGE TRACKING                                      *editutor-knowledge*
@@ -230,31 +235,48 @@ Configuration: >lua
     })
 <
 
-LSP Setup Tips:                                          *editutor-lsp-setup*
-  For best results, ensure you have an LSP server for your language:
+==============================================================================
+10. CONVERSATION MEMORY                                  *editutor-conversation*
 
-  - Lua: lua_ls (lua-language-server)
-  - Python: pyright or pylsp
-  - JavaScript/TypeScript: typescript-language-server
-  - Go: gopls
-  - Rust: rust-analyzer
+ai-editutor remembers your conversation context for follow-up questions.
 
-  Check LSP status with `:LspInfo`
+How It Works:                                        *editutor-conversation-how*
+  - Each question continues from the previous Q&A in the same session
+  - Sessions are tied to file + line proximity
+  - Auto-clears after 30 minutes of inactivity
 
-Fallback Behavior:                                       *editutor-lsp-fallback*
-  When LSP is not available, ai-editutor:
-  - Shows a warning notification
-  - Falls back to current file context + Tree-sitter
-  - Still provides helpful answers, just with less external context
+Session Continuation Rules:
+  - Same file + within 50 lines of last question = continues
+  - Different file = starts new session
+  - More than 50 lines away = starts new session
+  - More than 30 min since last question = starts new session
+
+Example: >
+    // Q: What does this function do?
+    // [Response inserted below]
+
+    // Q: Can you explain the error handling?
+    // [AI remembers previous discussion]
+<
+
+Commands:
+  :EduTutorConversation       Show current session info
+  :EduTutorClearConversation  Clear session to start fresh
+
+Project Documentation:                               *editutor-project-context*
+  ai-editutor automatically reads project documentation for better context:
+
+  - README.md, README - Project overview
+  - package.json, pyproject.toml, Cargo.toml - Dependencies
+  - go.mod, pom.xml, build.gradle - Build config
+  - ARCHITECTURE.md, CONTRIBUTING.md - Design docs
 
 ==============================================================================
-10. COMMANDS                                                *editutor-commands*
+11. COMMANDS                                                *editutor-commands*
 
 Core Commands:
   :EduTutorAsk            Ask about current mentor comment
-  :EduTutorStream         Ask with streaming response
   :EduTutorHint           Ask with incremental hints
-  :EduTutorClose          Close popup window
   :EduTutorModes          Show available modes
 
 Mode Commands:
@@ -277,26 +299,22 @@ Language Commands:
   :EduTutorLang vi        Short form for Vietnamese
   :EduTutorLang en        Short form for English
 
+Conversation Commands:
+  :EduTutorConversation       Show current conversation session info
+  :EduTutorClearConversation  Clear current conversation
+
 ==============================================================================
-11. KEYMAPS                                                  *editutor-keymaps*
+12. KEYMAPS                                                  *editutor-keymaps*
 
 Default keymaps (configurable):
 
 Normal mode:
     <leader>ma    Ask mentor about current comment
-    <leader>ms    Ask with streaming response
 
-Popup window:
-    q             Close popup
-    <Esc>         Close popup
-    y             Copy content to clipboard
-    n             Next hint (in hint mode)
-    j/k           Navigate (with wrap)
-    <C-d>/<C-u>   Scroll half page
-    <C-c>         Cancel streaming
+The response is inserted as an inline comment below your question.
 
 ==============================================================================
-12. API                                                          *editutor-api*
+13. API                                                          *editutor-api*
 
 Lua API: >lua
     local editutor = require("editutor")
@@ -304,9 +322,8 @@ Lua API: >lua
     -- Setup
     editutor.setup(opts)
 
-    -- Ask about current comment
+    -- Ask about current comment (inserts response as inline comment)
     editutor.ask()
-    editutor.ask_stream()
 
     -- Ask with incremental hints
     editutor.ask_with_hints()
@@ -324,21 +341,32 @@ Lua API: >lua
     editutor.export_knowledge(path)
     editutor.show_stats()
 
+    -- Conversation functions
+    editutor.show_conversation()
+    editutor.clear_conversation()
+
     -- Utilities
     editutor.show_modes()
     editutor.version()
 <
 
-UI API: >lua
-    local ui = require("editutor.ui")
+Comment Writer API: >lua
+    local comment_writer = require("editutor.comment_writer")
 
-    ui.show(content, mode, question, opts)
-    ui.show_loading(message)
-    ui.start_stream(mode, question, job_id)
-    ui.append_stream(chunk)
-    ui.finish_stream(success, error_msg)
-    ui.close()
-    ui.is_open()
+    -- Get comment style for current filetype
+    comment_writer.get_style(bufnr)
+
+    -- Format response as comments
+    comment_writer.format_response(response, bufnr, reference_line)
+
+    -- Insert response as comment after a line
+    comment_writer.insert_response(response, after_line, bufnr)
+
+    -- Insert or replace existing response
+    comment_writer.insert_or_replace(response, question_line, bufnr)
+
+    -- Remove existing response after question
+    comment_writer.remove_existing_response(question_line, bufnr)
 <
 
 Knowledge API: >lua
@@ -351,8 +379,33 @@ Knowledge API: >lua
     knowledge.export_markdown(filepath)
 <
 
+Conversation API: >lua
+    local conversation = require("editutor.conversation")
+
+    conversation.start_session(opts)
+    conversation.continue_or_start(filepath, line, mode)
+    conversation.add_message(role, content)
+    conversation.get_history()
+    conversation.get_history_as_context()
+    conversation.has_active_session()
+    conversation.get_session_info()
+    conversation.clear_session()
+<
+
+Project Context API: >lua
+    local project_context = require("editutor.project_context")
+
+    project_context.get_project_root()
+    project_context.get_project_docs()
+    project_context.get_project_summary()
+    project_context.get_references(bufnr, line, col, callback)
+    project_context.get_workspace_symbols(query, callback)
+    project_context.get_document_symbols(bufnr, callback)
+    project_context.clear_cache()
+<
+
 ==============================================================================
-13. HEALTH CHECK                                              *editutor-health*
+14. HEALTH CHECK                                              *editutor-health*
 
 Run health check to verify setup:
 >
@@ -362,7 +415,7 @@ Run health check to verify setup:
 This checks:
   - Neovim version
   - Required dependencies (plenary.nvim)
-  - Optional dependencies (nui.nvim, sqlite.lua)
+  - Optional dependencies (sqlite.lua)
   - Tree-sitter availability
   - LSP availability for current buffer
   - Provider configuration
