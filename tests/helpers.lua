@@ -254,4 +254,112 @@ function M.build_mock_lsp_context(definitions)
   return result
 end
 
+---Simulate the full editutor flow and capture LLM payload
+---@param code string Code content with Q: comment
+---@param filetype string Filetype
+---@param comment_prefix? string Comment prefix (default "//")
+---@return table payload {system_prompt, user_prompt, mode, question, context}
+function M.simulate_ask_flow(code, filetype, comment_prefix)
+  comment_prefix = comment_prefix or "//"
+
+  local parser = require("editutor.parser")
+  local context = require("editutor.context")
+  local prompts = require("editutor.prompts")
+
+  -- Create buffer
+  local bufnr = M.create_mock_buffer(code, filetype)
+  vim.api.nvim_set_current_buf(bufnr)
+
+  -- Find question
+  local q_line_content, q_line_num = M.find_q_comment(code, comment_prefix)
+  if not q_line_content then
+    M.cleanup_buffer(bufnr)
+    return nil
+  end
+
+  -- Parse question
+  local mode, question = parser.parse_line(q_line_content)
+  mode = mode and mode:lower() or "question"
+
+  -- Set cursor
+  vim.api.nvim_win_set_cursor(0, { q_line_num, 0 })
+
+  -- Extract context
+  local ctx = context.extract(bufnr, q_line_num)
+  local formatted_context = context.format_for_prompt(ctx)
+
+  -- Build prompts
+  local system_prompt = prompts.get_system_prompt(mode)
+  local user_prompt = prompts.build_user_prompt(question, formatted_context, mode)
+
+  M.cleanup_buffer(bufnr)
+
+  return {
+    system_prompt = system_prompt,
+    user_prompt = user_prompt,
+    mode = mode,
+    question = question,
+    context = ctx,
+    formatted_context = formatted_context,
+  }
+end
+
+---Simulate inserting a response and return final buffer content
+---@param code string Original code
+---@param response string LLM response
+---@param filetype string Filetype
+---@param comment_prefix? string Comment prefix
+---@return string final_code Final code with response inserted
+function M.simulate_response_insertion(code, response, filetype, comment_prefix)
+  comment_prefix = comment_prefix or "//"
+
+  local comment_writer = require("editutor.comment_writer")
+
+  -- Create buffer
+  local bufnr = M.create_mock_buffer(code, filetype)
+  vim.api.nvim_set_current_buf(bufnr)
+
+  -- Find question line
+  local _, q_line_num = M.find_q_comment(code, comment_prefix)
+  if not q_line_num then
+    M.cleanup_buffer(bufnr)
+    return code
+  end
+
+  -- Insert response
+  comment_writer.insert_or_replace(response, q_line_num, bufnr)
+
+  -- Get final content
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local final_code = table.concat(lines, "\n")
+
+  M.cleanup_buffer(bufnr)
+
+  return final_code
+end
+
+---Print the full LLM payload for debugging
+---@param payload table From simulate_ask_flow
+function M.print_llm_payload(payload)
+  if not payload then
+    print("No payload generated")
+    return
+  end
+
+  print("\n" .. string.rep("=", 70))
+  print("LLM PAYLOAD DEBUG")
+  print(string.rep("=", 70))
+  print(string.format("Mode: %s", payload.mode))
+  print(string.format("Question: %s", payload.question))
+  print(string.rep("-", 70))
+  print("SYSTEM PROMPT:")
+  print(string.rep("-", 70))
+  print(payload.system_prompt)
+  print(string.rep("-", 70))
+  print("USER PROMPT:")
+  print(string.rep("-", 70))
+  print(payload.user_prompt)
+  print(string.rep("=", 70) .. "\n")
+end
+
 return M

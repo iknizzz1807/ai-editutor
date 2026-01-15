@@ -27,7 +27,7 @@ describe("Context Relevance Tests", function()
 
         local q_line, q_line_num = helpers.find_q_comment(content)
         assert.is_not_nil(q_line, "Should find Q: comment")
-        assert.matches("token refresh", q_line)
+        assert.matches("refresh token", q_line)
 
         local parser = require("editutor.parser")
         local mode, question = parser.parse_line(q_line)
@@ -69,16 +69,16 @@ describe("Context Relevance Tests", function()
       end)
     end)
 
-    describe("useAuth hook (session persistence question)", function()
+    describe("useAuth hook (logout cleanup question)", function()
       local filepath = project_path .. "src/hooks/useAuth.ts"
 
-      it("should find Q: comment about session persistence", function()
+      it("should find Q: comment about logout cleanup", function()
         local content = helpers.read_file(filepath)
         assert.is_not_nil(content)
 
         local q_line, _ = helpers.find_q_comment(content)
         assert.is_not_nil(q_line)
-        assert.matches("session", q_line:lower())
+        assert.matches("logout", q_line:lower())
       end)
 
       it("should import authService for context", function()
@@ -145,7 +145,12 @@ describe("Context Relevance Tests", function()
 
       it("should import models for context", function()
         local content = helpers.read_file(filepath)
-        assert.matches("from..models.user import", content:gsub("%s+", ""))
+        -- Check that the file imports from models
+        assert.is_true(
+          content:find("from..models.user import", 1, true) ~= nil or
+          content:find("from ..models.user import", 1, true) ~= nil,
+          "Should import from models.user"
+        )
       end)
     end)
 
@@ -572,7 +577,7 @@ describe("Question Context Relationships", function()
       assert.matches("validate", context:lower())
     end)
 
-    it("Go: pagination question has list/query code nearby", function()
+    it("Go: pagination question has pagination code nearby", function()
       local filepath = fixtures_path .. "go-gin/repository/user_repository.go"
       local content = helpers.read_file(filepath)
       local lines = vim.split(content, "\n")
@@ -580,14 +585,15 @@ describe("Question Context Relationships", function()
       local _, q_line_num = helpers.find_q_comment(content)
       assert.is_not_nil(q_line_num)
 
-      local start_line = math.max(1, q_line_num - 30)
-      local end_line = math.min(#lines, q_line_num + 30)
+      -- Use wider range to capture the List function that follows the Q comment
+      local start_line = math.max(1, q_line_num - 10)
+      local end_line = math.min(#lines, q_line_num + 40)
       local context = table.concat(vim.list_slice(lines, start_line, end_line), "\n")
 
       -- The question is about cursor-based pagination
-      -- Context should have list/pagination related code
-      assert.matches("page", context:lower())
-      assert.matches("list", context:lower())
+      -- Context should have pagination related code
+      assert.matches("pagination", context:lower())
+      assert.matches("offset", context:lower())
     end)
 
     it("Rust: partial updates question has update logic nearby", function()

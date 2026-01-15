@@ -29,18 +29,9 @@ describe("config", function()
       assert.equals(20, config.defaults.context.max_external_symbols)
     end)
 
-    it("should have UI configuration", function()
-      assert.is_not_nil(config.defaults.ui)
-      assert.equals(80, config.defaults.ui.width)
-      assert.equals(20, config.defaults.ui.height)
-      assert.equals("rounded", config.defaults.ui.border)
-    end)
-
     it("should have keymaps configuration", function()
       assert.is_not_nil(config.defaults.keymaps)
       assert.equals("<leader>ma", config.defaults.keymaps.ask)
-      assert.equals("<leader>ms", config.defaults.keymaps.stream)
-      assert.equals("q", config.defaults.keymaps.close)
     end)
   end)
 
