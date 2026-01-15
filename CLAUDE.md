@@ -20,7 +20,7 @@ ai-editutor/
 │       ├── init.lua              # Plugin entry point (v0.6.0)
 │       ├── config.lua            # Configuration management
 │       ├── parser.lua            # Comment parsing (// Q:, // S:, etc.)
-│       ├── context.lua           # Context extraction (Tree-sitter + LSP)
+│       ├── context.lua           # Context extraction (Tree-sitter)
 │       ├── lsp_context.lua       # LSP-based context (go-to-definition)
 │       ├── prompts.lua           # Pedagogical prompt templates
 │       ├── provider.lua          # LLM API (Claude, OpenAI, Ollama) + Streaming
@@ -32,21 +32,75 @@ ai-editutor/
 │   └── editutor.lua              # Lazy loading entry
 ├── doc/
 │   └── editutor.txt              # Vim help documentation
+├── tests/
+│   ├── spec/                     # Unit tests (plenary)
+│   ├── fixtures/                 # Multi-language test projects
+│   │   ├── typescript-fullstack/ # TypeScript/React (11 files)
+│   │   ├── python-django/        # Python/Django (11 files)
+│   │   ├── go-gin/               # Go/Gin (10 files)
+│   │   ├── rust-axum/            # Rust/Axum (9 files)
+│   │   ├── java-spring/          # Java/Spring (8 files)
+│   │   ├── cpp-server/           # C++/Crow (10 files)
+│   │   ├── vanilla-frontend/     # HTML/CSS/JS (9 files)
+│   │   ├── vue-app/              # Vue.js (10 files)
+│   │   ├── svelte-app/           # Svelte (9 files)
+│   │   └── angular-app/          # Angular (9 files)
+│   └── manual_lsp_test.lua       # Manual LSP verification script
 ├── research/                     # Reference implementations (cloned repos)
-│   ├── core/                     # gp.nvim, wtf.nvim, backseat.nvim, etc.
+│   ├── core/                     # gp.nvim, wtf.nvim, backseat.nvim
 │   ├── ui/                       # nui.nvim, render-markdown.nvim
 │   ├── backend/                  # lsp-ai, llm.nvim
-│   ├── reference/                # AiComments, vscode-extension-samples
-│   └── tools/                    # ast-grep
+│   └── reference/                # AiComments, vscode-extension-samples
 ├── README.md
 └── CLAUDE.md                     # This file
 ```
 
 ---
 
+## Architecture Overview
+
+### Context Extraction: LSP-Based (v0.6.0+)
+
+ai-editutor uses **LSP go-to-definition** for context extraction instead of RAG:
+
+```
+User writes // Q: question
+       │
+       ▼
+┌─────────────────────────────────────────────────────────┐
+│ 1. Extract code around cursor (±50 lines)               │
+│ 2. Use Tree-sitter to find all identifiers              │
+│ 3. For each identifier, call LSP textDocument/definition│
+│ 4. Filter: only include PROJECT files (not libraries)   │
+│ 5. Read ±15 lines around each definition                │
+│ 6. Format all context for LLM prompt                    │
+└─────────────────────────────────────────────────────────┘
+       │
+       ▼
+LLM receives: current code + related definitions from project
+```
+
+**Why LSP instead of RAG?**
+- Zero setup - works immediately with existing LSP
+- No indexing/embedding required
+- No Python dependencies
+- Always up-to-date (LSP reads actual files)
+- More precise (exact definitions, not similarity search)
+
+**Excluded paths (library detection):**
+```lua
+M.exclude_patterns = {
+  "node_modules", ".venv", "venv", "site%-packages",
+  "vendor", "%.cargo/registry", "target/debug", "target/release",
+  "/usr/", "/opt/", "%.local/lib/", "%.luarocks/",
+}
+```
+
+---
+
 ## Research Repos Quick Reference
 
-### Priority 1: Core Architecture (Start Here)
+### Priority 1: Core Architecture
 
 | Repo | Path | Learn From |
 |------|------|------------|
@@ -63,41 +117,35 @@ ai-editutor/
 
 ---
 
-## Key Files to Study
+## Key Files
 
-### gp.nvim (Core Architecture)
-```
-research/core/gp.nvim/lua/gp/
-├── init.lua        # Entry point, command registration
-├── config.lua      # Configuration patterns
-├── dispatcher.lua  # Request handling, streaming
-├── render.lua      # UI rendering
-└── helper.lua      # Utility functions
-```
+### init.lua - Plugin Entry Point
+- Version: 0.6.0
+- Creates all user commands (`:EduTutor*`)
+- Sets up keymaps
+- Main functions: `ask()`, `ask_stream()`, `ask_with_hints()`
+- Multi-language UI messages (English, Vietnamese)
 
-### wtf.nvim (Explanation Pattern)
-```
-research/core/wtf.nvim/lua/wtf/
-├── init.lua                    # Plugin setup
-├── ai/
-│   ├── client.lua              # LLM client abstraction
-│   └── providers/
-│       ├── anthropic.lua       # Claude integration
-│       └── openai.lua          # OpenAI integration
-├── search.lua                  # Context extraction
-└── diagnostics.lua             # Error handling
-```
+### lsp_context.lua - LSP Context Extraction
+- `is_available()` - Check if LSP is running
+- `get_project_root()` - Find git root or cwd
+- `is_project_file()` - Filter out library code
+- `extract_identifiers()` - Tree-sitter identifier extraction
+- `get_definition()` - LSP textDocument/definition
+- `get_external_definitions()` - Async gather all external defs
+- `format_for_prompt()` - Format context for LLM
 
-### nui.nvim (UI)
-```
-research/ui/nui.nvim/lua/nui/
-├── popup/
-│   └── init.lua                # Floating window
-├── input/
-│   └── init.lua                # Input component
-└── layout/
-    └── init.lua                # Layout management
-```
+### config.lua - Configuration
+- Default provider: Claude (claude-sonnet-4-20250514)
+- Context settings: 100 lines around cursor, 20 max external symbols
+- Provider configs for Claude, OpenAI, Ollama
+- UI and keymap settings
+
+### provider.lua - LLM Communication
+- `query_async()` - Non-streaming request
+- `query_stream()` - Streaming with SSE parsing
+- Supports Claude, OpenAI, Ollama APIs
+- Error handling and retry logic
 
 ---
 
@@ -110,6 +158,14 @@ luacheck lua/
 
 # Format Lua
 stylua lua/
+
+# Run tests
+nvim --headless -c "PlenaryBustedDirectory tests/spec {minimal_init = 'tests/minimal_init.lua'}"
+
+# Manual LSP context test (in Neovim)
+:lua require('tests.manual_lsp_test').test_all()
+:lua require('tests.manual_lsp_test').test_typescript_fullstack()
+:lua require('tests.manual_lsp_test').test_vue_app()
 ```
 
 ### Plugin Usage (in Neovim)
@@ -159,31 +215,6 @@ Supported in all languages via Tree-sitter comment node detection.
 
 ---
 
-## Architecture Decisions
-
-### 1. LSP-Based Context (v0.6.0+)
-- **Context Extraction**: Uses LSP go-to-definition for related code
-- **Scope**: Only project files (filters out library code)
-- **Fallback**: Tree-sitter context when LSP unavailable
-- **Performance**: Limited to 100 lines around cursor
-
-### 2. LLM Providers
-Priority order:
-1. Claude API (primary - best for teaching)
-2. OpenAI API (fallback)
-3. Ollama (local, privacy-focused)
-
-### 3. UI Framework
-- nui.nvim for floating windows
-- render-markdown.nvim for response formatting
-
-### 4. Knowledge Tracking
-- SQLite (if sqlite.lua available) or JSON fallback
-- Searchable Q&A history
-- Export to Markdown
-
----
-
 ## Code Style Guidelines
 
 ### Lua
@@ -207,7 +238,7 @@ dependencies = {
 ### Recommended
 ```lua
 dependencies = {
-  "nvim-treesitter/nvim-treesitter",  -- AST parsing, better fallback
+  "nvim-treesitter/nvim-treesitter",  -- AST parsing, better context
 }
 ```
 
@@ -224,21 +255,21 @@ dependencies = {
 
 ## Development Phases
 
-### Phase 1: MVP ✅ COMPLETE
+### Phase 1: MVP - COMPLETE
 - [x] Comment parsing (`// Q:` detection)
 - [x] Basic context collection (current buffer + 50 lines)
 - [x] Claude API integration
 - [x] Floating window response
 - [x] Single keybinding `<leader>ma`
 
-### Phase 2: Multi-Mode ✅ COMPLETE
+### Phase 2: Multi-Mode - COMPLETE
 - [x] 5 interaction modes (Q/S/R/D/E)
 - [x] Incremental hints system (4 levels)
 - [x] Knowledge tracking (JSON fallback, SQLite optional)
 - [x] Mode-specific pedagogical prompts
 - [x] Knowledge search and export
 
-### Phase 3: LSP Context ✅ COMPLETE (v0.6.0)
+### Phase 3: LSP Context - COMPLETE (v0.6.0)
 - [x] LSP-based context extraction
 - [x] Go-to-definition for external symbols
 - [x] Project file filtering (exclude libraries)
@@ -246,7 +277,7 @@ dependencies = {
 - [x] Configurable context window (100 lines default)
 - [x] Streaming response support
 
-### Phase 4: Polish ✅ COMPLETE
+### Phase 4: Polish - COMPLETE
 - [x] Knowledge export to Markdown
 - [x] Health check (:checkhealth editutor)
 - [x] Vietnamese language support (:EduTutorLang)
@@ -293,27 +324,43 @@ Question: {user_question}
 
 ## Testing Strategy
 
-### Unit Tests
+### Unit Tests (tests/spec/)
 - Parser tests (comment detection)
 - Context extraction tests
 - Mode logic tests
-- LSP context tests
+- Config validation tests
 
-### Integration Tests
-- Full flow: comment → parse → context → LLM → render
-- LSP context with external definitions
+### Fixture Projects (tests/fixtures/)
+Each fixture contains:
+- 8-11 files with realistic cross-file dependencies
+- `// Q:` comments asking real programming questions
+- Import chains for LSP to follow
 
-### Manual Testing
+**Fixtures:**
+| Language | Files | Key Patterns |
+|----------|-------|--------------|
+| TypeScript/React | 11 | hooks → services → api → types |
+| Python/Django | 11 | views → services → models |
+| Go/Gin | 10 | handlers → services → repository |
+| Rust/Axum | 9 | handlers → services → models |
+| Java/Spring | 8 | controllers → services → repos |
+| C++/Crow | 10 | handlers → services → models |
+| Vanilla JS | 9 | components → services → api |
+| Vue.js | 10 | composables → services → api |
+| Svelte | 9 | stores → services → api |
+| Angular | 9 | components → services → guards |
+
+### Manual LSP Testing
 ```lua
--- Test comment in any file:
-// Q: What does this function do?
--- Press <leader>ma and verify response
+-- In Neovim with LSP configured:
+:lua require('tests.manual_lsp_test').test_all()
 
--- Test LSP context:
--- 1. Open a file with LSP running
--- 2. Navigate to code that uses external symbols
--- 3. Add a Q: comment and run :EduTutorAsk
--- 4. Verify context includes external definitions
+-- Test specific framework:
+:lua require('tests.manual_lsp_test').test_vue_app()
+:lua require('tests.manual_lsp_test').test_angular_app()
+
+-- Test current buffer:
+:lua require('tests.manual_lsp_test').test_current_buffer()
 ```
 
 ---
@@ -342,9 +389,11 @@ require('editutor').setup({
 :LspInfo
 
 " Ensure LSP server is installed for your language
-" Lua: lua-language-server
+" Lua: lua_ls (lua-language-server)
 " Python: pyright or pylsp
 " TypeScript: typescript-language-server
+" Go: gopls
+" Rust: rust-analyzer
 ```
 
 ### Issue: No external context appearing

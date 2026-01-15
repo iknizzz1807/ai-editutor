@@ -49,11 +49,14 @@ A Neovim plugin that acts as your personal coding mentor - explaining concepts, 
 - Ask third time - partial solution
 - Ask fourth time - full solution with explanation
 
-### Codebase-Aware (RAG)
+### LSP-Powered Context
 ```javascript
-// Q: Where is authentication handled in this project?
-// - AI searches your entire codebase and explains the auth flow
+// Q: How does this service interact with the authentication module?
+// - AI automatically gathers context from related project files via LSP
+// - No indexing required - just works with your existing LSP setup
 ```
+
+ai-editutor uses LSP go-to-definition to automatically find and include relevant code from your project files. It filters out library code and focuses only on YOUR code.
 
 ### Knowledge Tracking
 - Every Q&A saved automatically
@@ -75,8 +78,7 @@ A Neovim plugin that acts as your personal coding mentor - explaining concepts, 
   "your-username/ai-editutor",
   dependencies = {
     "nvim-lua/plenary.nvim",
-    "MunifTanjim/nui.nvim",
-    "nvim-treesitter/nvim-treesitter",
+    "nvim-treesitter/nvim-treesitter",  -- Recommended for better context
   },
   config = function()
     require("editutor").setup({
@@ -87,12 +89,14 @@ A Neovim plugin that acts as your personal coding mentor - explaining concepts, 
 }
 ```
 
-### Python CLI (for RAG features)
-```bash
-pip install editutor-cli
-
-# Index your codebase
-editutor-cli index /path/to/your/project
+### Optional Dependencies
+```lua
+dependencies = {
+  "nvim-lua/plenary.nvim",          -- Required: HTTP requests
+  "nvim-treesitter/nvim-treesitter", -- Recommended: Better context extraction
+  "MunifTanjim/nui.nvim",           -- Optional: Enhanced UI
+  "kkharji/sqlite.lua",             -- Optional: Better knowledge storage
+}
 ```
 
 ## Quick Start
@@ -104,26 +108,28 @@ editutor-cli index /path/to/your/project
    export ANTHROPIC_API_KEY="your-key-here"
    ```
 
-3. **Open any code file and ask a question**
+3. **Ensure LSP is configured** for your language (for best context extraction)
+   ```vim
+   :LspInfo  " Check LSP status
+   ```
+
+4. **Open any code file and ask a question**
    ```python
    # Q: What does this regex do?
    pattern = r'^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,}$'
    ```
 
-4. **Press `<leader>ma`** - See the explanation in a floating window
+5. **Press `<leader>ma`** - See the explanation in a floating window
 
 ## Keybindings
 
 | Key | Action |
 |-----|--------|
 | `<leader>ma` | Mentor Ask - trigger on current comment |
-| `<leader>mq` | Quick question mode |
-| `<leader>ms` | Socratic mode |
-| `<leader>mr` | Review current function |
-| `<leader>md` | Debug assistance |
-| `<leader>me` | Explain concept |
-| `<leader>mk` | Search knowledge base |
-| `<leader>mx` | Export knowledge to Markdown |
+| `<leader>ms` | Mentor Stream - streaming response |
+| `q` | Close popup |
+| `y` | Copy answer to clipboard |
+| `n` | Next hint (in hint mode) |
 
 ## Configuration
 
@@ -136,24 +142,13 @@ require("editutor").setup({
 
   -- Behavior
   default_mode = "question",  -- Default interaction mode
-  hint_levels = 4,            -- Number of hint increments
+  language = "English",       -- or "Vietnamese"
 
-  -- Context
-  context_lines = 50,         -- Lines of context around question
-  include_imports = true,     -- Include file imports in context
-
-  -- RAG (requires editutor-cli)
-  rag = {
-    enabled = false,          -- Enable codebase-wide search
-    db_path = "~/.editutor/vectors",
-    top_k = 5,                -- Number of relevant chunks
-  },
-
-  -- Knowledge Tracking
-  knowledge = {
-    enabled = true,
-    db_path = "~/.editutor/knowledge.db",
-    auto_save = true,
+  -- LSP Context Extraction
+  context = {
+    lines_around_cursor = 100,    -- Lines around cursor (50 above + 50 below)
+    external_context_lines = 30,  -- Lines around each external definition
+    max_external_symbols = 20,    -- Max external symbols to resolve via LSP
   },
 
   -- UI
@@ -161,11 +156,13 @@ require("editutor").setup({
     width = 80,
     height = 20,
     border = "rounded",
+    max_width = 120,
   },
 
   -- Keymaps
   keymaps = {
     ask = "<leader>ma",
+    stream = "<leader>ms",
     close = "q",
     copy = "y",
     next_hint = "n",
@@ -183,44 +180,70 @@ require("editutor").setup({
                               v
 +-----------------------------------------------------------+
 |  1. Parse comment (detect Q/S/R/D/E mode)                 |
-|  2. Extract context (surrounding code via Tree-sitter)    |
-|  3. [Optional] RAG search for related code                |
-|  4. Build pedagogical prompt                              |
-|  5. Send to LLM (Claude/OpenAI/Ollama)                    |
-|  6. Render response in floating window                    |
-|  7. Save to knowledge base                                |
+|  2. Extract code context around cursor                    |
+|  3. Use LSP to find related definitions in project        |
+|  4. Filter out library code (node_modules, etc.)          |
+|  5. Build pedagogical prompt with full context            |
+|  6. Send to LLM (Claude/OpenAI/Ollama)                    |
+|  7. Stream response to floating window                    |
+|  8. Save to knowledge base                                |
 +-----------------------------------------------------------+
 ```
+
+### LSP Context Flow
+
+```
+Current File                    External Definitions
++-------------------+          +------------------------+
+| // Q: question    |   LSP    | auth_service.ts        |
+| import { auth }   | -------> | export function login  |
+| auth.login()      |  go-to-  +------------------------+
++-------------------+   def    | user_repository.py     |
+                               | class UserRepository   |
+                               +------------------------+
+```
+
+ai-editutor finds symbols in your code and uses LSP to locate their definitions in OTHER project files. This gives the LLM context about how your code connects together.
 
 ## Project Structure
 
 ```
-ai-tutor/
+ai-editutor/
 ├── lua/editutor/           # Neovim plugin (Lua)
-├── python/editutor_cli/    # RAG CLI (Python)
-├── research/                 # Reference implementations
-│   ├── core/                 # gp.nvim, wtf.nvim, etc.
-│   ├── rag/                  # VectorCode, continue, etc.
-│   ├── chunking/             # astchunk, code-chunk
-│   ├── ui/                   # nui.nvim, render-markdown
-│   ├── backend/              # lsp-ai, lancedb
-│   ├── reference/            # AiComments, vscode samples
-│   └── tools/                # ast-grep
+│   ├── init.lua            # Plugin entry point (v0.6.0)
+│   ├── config.lua          # Configuration management
+│   ├── parser.lua          # Comment parsing (// Q:, etc.)
+│   ├── context.lua         # Context extraction (Tree-sitter)
+│   ├── lsp_context.lua     # LSP-based context (go-to-def)
+│   ├── prompts.lua         # Pedagogical prompt templates
+│   ├── provider.lua        # LLM providers + streaming
+│   ├── ui.lua              # Floating window UI
+│   ├── hints.lua           # Incremental hints (4 levels)
+│   ├── knowledge.lua       # Q&A persistence
+│   └── health.lua          # :checkhealth editutor
+├── plugin/
+│   └── editutor.lua        # Lazy loading entry
+├── doc/
+│   └── editutor.txt        # Vim help documentation
+├── tests/                  # Test suite
+│   ├── fixtures/           # Multi-language test projects
+│   └── manual_lsp_test.lua # Manual LSP verification
 ├── README.md
-└── CLAUDE.md                 # Development guide
+└── CLAUDE.md               # Development guide
 ```
 
 ## Comparison with Other Tools
 
 | Feature | Copilot | ChatGPT | ai-editutor |
-|---------|---------|---------|----------------|
+|---------|---------|---------|-------------|
 | Code generation | Yes | Yes | No (by design) |
 | In-editor | Yes | No | Yes |
 | Teaches concepts | No | Partially | Yes (primary goal) |
 | Socratic mode | No | No | Yes |
 | Code review | No | Manual | Yes (`// R:`) |
 | Knowledge tracking | No | No | Yes |
-| Codebase-aware | Limited | No | Yes (RAG) |
+| Project-aware context | Limited | No | Yes (LSP-based) |
+| No external indexing | N/A | N/A | Yes (uses LSP) |
 | Open source | No | No | Yes |
 
 ## Use Cases
@@ -263,10 +286,57 @@ func process(ch chan int) {
 // - Guided questions to help you discover the issue
 ```
 
+## Commands
+
+### Core Commands
+| Command | Description |
+|---------|-------------|
+| `:EduTutorAsk` | Ask about current mentor comment |
+| `:EduTutorStream` | Ask with streaming response |
+| `:EduTutorHint` | Ask with incremental hints |
+| `:EduTutorModes` | Show available modes |
+
+### Mode Commands
+| Command | Description |
+|---------|-------------|
+| `:EduTutorQuestion` | Force Question mode |
+| `:EduTutorSocratic` | Force Socratic mode |
+| `:EduTutorReview` | Force Review mode |
+| `:EduTutorDebug` | Force Debug mode |
+| `:EduTutorExplain` | Force Explain mode |
+
+### Knowledge Commands
+| Command | Description |
+|---------|-------------|
+| `:EduTutorHistory` | Show Q&A history |
+| `:EduTutorSearch [query]` | Search knowledge base |
+| `:EduTutorExport [path]` | Export to markdown |
+| `:EduTutorStats` | Show statistics |
+
+### Language Commands
+| Command | Description |
+|---------|-------------|
+| `:EduTutorLang` | Show current language |
+| `:EduTutorLang Vietnamese` | Switch to Vietnamese |
+| `:EduTutorLang English` | Switch to English |
+
+## Health Check
+
+Verify your setup:
+```vim
+:checkhealth editutor
+```
+
+This checks:
+- Neovim version
+- Required dependencies (plenary.nvim)
+- Optional dependencies (nui.nvim, sqlite.lua)
+- Tree-sitter availability
+- LSP availability for current buffer
+- Provider configuration and API key
+
 ## Roadmap
 
-- [x] Project setup and architecture
-- [x] Research reference implementations
 - [x] **Phase 1: MVP**
   - [x] Comment parsing
   - [x] Basic context collection
@@ -276,15 +346,19 @@ func process(ch chan int) {
   - [x] 5 interaction modes
   - [x] Incremental hints
   - [x] Knowledge tracking
-- [x] **Phase 3: RAG**
-  - [x] Codebase indexing CLI
-  - [x] Hybrid search
+- [x] **Phase 3: LSP Context**
+  - [x] LSP-based context extraction
+  - [x] Go-to-definition for external symbols
+  - [x] Project file filtering
   - [x] Streaming responses
-- [ ] **Phase 4: Polish**
+- [x] **Phase 4: Polish**
   - [x] Vietnamese language support
+  - [x] Health check
+  - [x] Knowledge export
+- [ ] **Future**
   - [ ] Obsidian integration
   - [ ] Team knowledge sharing
-  - [ ] nui.nvim enhanced UI
+  - [ ] Enhanced UI with nui.nvim
 
 ## Contributing
 
@@ -299,9 +373,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 Built with inspiration from:
 - [wtf.nvim](https://github.com/piersolenski/wtf.nvim) - Explanation-first architecture
 - [gp.nvim](https://github.com/Robitx/gp.nvim) - Popup and streaming patterns
-- [VectorCode](https://github.com/Davidyz/VectorCode) - Neovim RAG integration
 - [CS50.ai](https://cs50.ai/) - Pedagogical AI design principles
-- [Continue.dev](https://github.com/continuedev/continue) - Enterprise RAG patterns
 
 ---
 
