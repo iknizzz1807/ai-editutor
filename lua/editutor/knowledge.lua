@@ -1,116 +1,69 @@
 -- editutor/knowledge.lua
 -- Knowledge tracking - save and search Q&A history
+-- Simplified version: JSON file storage only (no SQLite)
 
 local M = {}
 
-local config = require("editutor.config")
+-- Storage state
+local entries = nil
+local storage_path = nil
 
--- Database state
-local db = nil
-local db_path = nil
-
----Get database path
+---Get storage path
 ---@return string
-local function get_db_path()
-  if db_path then
-    return db_path
+local function get_storage_path()
+  if storage_path then
+    return storage_path
   end
 
   local data_dir = vim.fn.stdpath("data")
-  db_path = data_dir .. "/editutor/knowledge.db"
+  storage_path = data_dir .. "/editutor/knowledge.json"
 
   -- Ensure directory exists
-  local dir = vim.fn.fnamemodify(db_path, ":h")
+  local dir = vim.fn.fnamemodify(storage_path, ":h")
   vim.fn.mkdir(dir, "p")
 
-  return db_path
+  return storage_path
 end
 
----Initialize SQLite database
+---Initialize JSON storage
 ---@return boolean success
----@return string|nil error
-local function init_db()
-  if db then
-    return true, nil
+local function init_storage()
+  if entries then
+    return true
   end
 
-  -- Try to load sqlite.lua
-  local ok, sqlite = pcall(require, "sqlite")
-  if not ok then
-    -- Fallback: use simple JSON file storage
-    return M._init_json_storage()
-  end
-
-  local path = get_db_path()
-
-  local success, result = pcall(function()
-    db = sqlite({
-      uri = path,
-      entries = {
-        id = true,
-        timestamp = { "integer", required = true },
-        mode = { "text", required = true },
-        question = { "text", required = true },
-        answer = { "text", required = true },
-        language = { "text" },
-        filepath = { "text" },
-        tags = { "text" }, -- JSON array
-      },
-    })
-  end)
-
-  if not success then
-    return M._init_json_storage()
-  end
-
-  return true, nil
-end
-
--- JSON file storage fallback
-local json_entries = nil
-local json_path = nil
-
----Initialize JSON file storage (fallback when sqlite.lua not available)
----@return boolean success
----@return string|nil error
-function M._init_json_storage()
-  local data_dir = vim.fn.stdpath("data")
-  json_path = data_dir .. "/editutor/knowledge.json"
-
-  -- Ensure directory exists
-  local dir = vim.fn.fnamemodify(json_path, ":h")
-  vim.fn.mkdir(dir, "p")
+  local path = get_storage_path()
 
   -- Load existing entries
-  if vim.fn.filereadable(json_path) == 1 then
-    local content = vim.fn.readfile(json_path)
+  if vim.fn.filereadable(path) == 1 then
+    local content = vim.fn.readfile(path)
     local ok, data = pcall(vim.json.decode, table.concat(content, "\n"))
     if ok and data then
-      json_entries = data
+      entries = data
     else
-      json_entries = {}
+      entries = {}
     end
   else
-    json_entries = {}
+    entries = {}
   end
 
-  return true, nil
+  return true
 end
 
----Save JSON entries to file
-local function save_json()
-  if not json_path or not json_entries then
+---Save entries to file
+local function save_storage()
+  if not storage_path or not entries then
     return
   end
 
-  local ok, encoded = pcall(vim.json.encode, json_entries)
+  local ok, encoded = pcall(vim.json.encode, entries)
   if ok then
-    vim.fn.writefile({ encoded }, json_path)
+    vim.fn.writefile({ encoded }, storage_path)
   end
 end
 
 ---@class KnowledgeEntry
----@field id number|string Entry ID
+---@field id number Entry ID
 ---@field timestamp number Unix timestamp
 ---@field mode string Interaction mode
 ---@field question string User's question
@@ -123,32 +76,24 @@ end
 ---@param entry KnowledgeEntry
 ---@return boolean success
 function M.save(entry)
-  local ok, err = init_db()
-  if not ok then
-    vim.notify("[ai-editutor] Knowledge tracking disabled: " .. (err or "unknown error"), vim.log.levels.WARN)
-    return false
-  end
+  init_storage()
 
   entry.timestamp = entry.timestamp or os.time()
+  entry.id = #entries + 1
 
-  -- Convert tags to JSON string if table
-  if type(entry.tags) == "table" then
-    entry.tags = vim.json.encode(entry.tags)
+  -- Ensure tags is a table
+  if type(entry.tags) == "string" then
+    local ok, tags = pcall(vim.json.decode, entry.tags)
+    if ok then
+      entry.tags = tags
+    else
+      entry.tags = {}
+    end
   end
 
-  if db then
-    -- SQLite storage
-    local success = pcall(function()
-      db:insert(entry)
-    end)
-    return success
-  else
-    -- JSON storage
-    entry.id = #json_entries + 1
-    table.insert(json_entries, entry)
-    save_json()
-    return true
-  end
+  table.insert(entries, entry)
+  save_storage()
+  return true
 end
 
 ---Search knowledge base
@@ -159,68 +104,38 @@ function M.search(query, opts)
   opts = opts or {}
   local limit = opts.limit or 50
 
-  local ok, _ = init_db()
-  if not ok then
-    return {}
-  end
+  init_storage()
 
   local results = {}
   query = query:lower()
 
-  if db then
-    -- SQLite search
-    local success, rows = pcall(function()
-      return db:select({
-        where = {
-          question = { "like", "%" .. query .. "%" },
-        },
-        limit = limit,
-      })
-    end)
+  for _, entry in ipairs(entries or {}) do
+    local match = false
 
-    if success and rows then
-      results = rows
+    -- Search in question
+    if entry.question and entry.question:lower():find(query, 1, true) then
+      match = true
     end
-  else
-    -- JSON search
-    for _, entry in ipairs(json_entries or {}) do
-      local match = false
 
-      -- Search in question
-      if entry.question and entry.question:lower():find(query, 1, true) then
-        match = true
-      end
-
-      -- Search in answer
-      if not match and entry.answer and entry.answer:lower():find(query, 1, true) then
-        match = true
-      end
-
-      -- Filter by mode
-      if match and opts.mode and entry.mode ~= opts.mode then
-        match = false
-      end
-
-      -- Filter by language
-      if match and opts.language and entry.language ~= opts.language then
-        match = false
-      end
-
-      if match then
-        table.insert(results, entry)
-        if #results >= limit then
-          break
-        end
-      end
+    -- Search in answer
+    if not match and entry.answer and entry.answer:lower():find(query, 1, true) then
+      match = true
     end
-  end
 
-  -- Parse tags back to table
-  for _, entry in ipairs(results) do
-    if type(entry.tags) == "string" then
-      local tag_ok, tags = pcall(vim.json.decode, entry.tags)
-      if tag_ok then
-        entry.tags = tags
+    -- Filter by mode
+    if match and opts.mode and entry.mode ~= opts.mode then
+      match = false
+    end
+
+    -- Filter by language
+    if match and opts.language and entry.language ~= opts.language then
+      match = false
+    end
+
+    if match then
+      table.insert(results, entry)
+      if #results >= limit then
+        break
       end
     end
   end
@@ -234,57 +149,27 @@ end
 function M.get_recent(limit)
   limit = limit or 20
 
-  local ok, _ = init_db()
-  if not ok then
-    return {}
-  end
+  init_storage()
 
   local results = {}
+  local start = math.max(1, #(entries or {}) - limit + 1)
 
-  if db then
-    local success, rows = pcall(function()
-      return db:select({
-        order_by = { desc = "timestamp" },
-        limit = limit,
-      })
-    end)
-
-    if success and rows then
-      results = rows
-    end
-  else
-    -- JSON: get last N entries
-    local start = math.max(1, #(json_entries or {}) - limit + 1)
-    for i = #(json_entries or {}), start, -1 do
-      table.insert(results, json_entries[i])
-    end
+  for i = #(entries or {}), start, -1 do
+    table.insert(results, entries[i])
   end
 
   return results
 end
 
 ---Get entry by ID
----@param id number|string Entry ID
+---@param id number Entry ID
 ---@return KnowledgeEntry|nil
 function M.get(id)
-  local ok, _ = init_db()
-  if not ok then
-    return nil
-  end
+  init_storage()
 
-  if db then
-    local success, rows = pcall(function()
-      return db:select({ where = { id = id }, limit = 1 })
-    end)
-
-    if success and rows and #rows > 0 then
-      return rows[1]
-    end
-  else
-    for _, entry in ipairs(json_entries or {}) do
-      if entry.id == id then
-        return entry
-      end
+  for _, entry in ipairs(entries or {}) do
+    if entry.id == id then
+      return entry
     end
   end
 
@@ -292,26 +177,16 @@ function M.get(id)
 end
 
 ---Delete entry by ID
----@param id number|string Entry ID
+---@param id number Entry ID
 ---@return boolean success
 function M.delete(id)
-  local ok, _ = init_db()
-  if not ok then
-    return false
-  end
+  init_storage()
 
-  if db then
-    local success = pcall(function()
-      db:delete({ where = { id = id } })
-    end)
-    return success
-  else
-    for i, entry in ipairs(json_entries or {}) do
-      if entry.id == id then
-        table.remove(json_entries, i)
-        save_json()
-        return true
-      end
+  for i, entry in ipairs(entries or {}) do
+    if entry.id == id then
+      table.remove(entries, i)
+      save_storage()
+      return true
     end
   end
 
@@ -321,31 +196,15 @@ end
 ---Get statistics
 ---@return table stats
 function M.get_stats()
-  local ok, _ = init_db()
-  if not ok then
-    return { total = 0, by_mode = {}, by_language = {} }
-  end
+  init_storage()
 
   local stats = {
-    total = 0,
+    total = #(entries or {}),
     by_mode = {},
     by_language = {},
   }
 
-  local entries = json_entries or {}
-
-  if db then
-    local success, rows = pcall(function()
-      return db:select({})
-    end)
-    if success and rows then
-      entries = rows
-    end
-  end
-
-  stats.total = #entries
-
-  for _, entry in ipairs(entries) do
+  for _, entry in ipairs(entries or {}) do
     -- Count by mode
     local mode = entry.mode or "unknown"
     stats.by_mode[mode] = (stats.by_mode[mode] or 0) + 1
@@ -365,14 +224,11 @@ end
 function M.export_markdown(filepath)
   filepath = filepath or (os.getenv("HOME") .. "/editutor_export.md")
 
-  local ok, _ = init_db()
-  if not ok then
-    return false, "Knowledge base not initialized"
-  end
+  init_storage()
 
-  local entries = M.get_recent(1000) -- Get up to 1000 entries
+  local all_entries = M.get_recent(1000)
 
-  if #entries == 0 then
+  if #all_entries == 0 then
     return false, "No entries to export"
   end
 
@@ -380,14 +236,14 @@ function M.export_markdown(filepath)
     "# ai-editutor Knowledge Base",
     "",
     string.format("Exported: %s", os.date("%Y-%m-%d %H:%M:%S")),
-    string.format("Total entries: %d", #entries),
+    string.format("Total entries: %d", #all_entries),
     "",
     "---",
     "",
   }
 
-  for _, entry in ipairs(entries) do
-    table.insert(lines, string.format("## %s [%s]", entry.mode:upper(), os.date("%Y-%m-%d", entry.timestamp)))
+  for _, entry in ipairs(all_entries) do
+    table.insert(lines, string.format("## %s [%s]", (entry.mode or "Q"):upper(), os.date("%Y-%m-%d", entry.timestamp)))
     table.insert(lines, "")
 
     if entry.language then
@@ -418,6 +274,12 @@ function M.export_markdown(filepath)
   else
     return false, "Failed to write file"
   end
+end
+
+---Clear all entries
+function M.clear()
+  entries = {}
+  save_storage()
 end
 
 return M

@@ -1,5 +1,6 @@
 -- editutor/health.lua
 -- Health check for :checkhealth editutor
+-- v1.1.0: Updated for simplified architecture (no SQLite/indexer)
 
 local M = {}
 
@@ -37,14 +38,6 @@ function M.check()
     })
   end
 
-  -- Check nui.nvim (optional, for better UI)
-  local nui_ok = pcall(require, "nui.popup")
-  if nui_ok then
-    ok("nui.nvim is installed (enhanced UI available)")
-  else
-    info("nui.nvim not installed (optional, for enhanced floating windows)")
-  end
-
   -- Check Tree-sitter
   local ts_ok = pcall(vim.treesitter.get_parser, 0)
   if ts_ok then
@@ -68,7 +61,7 @@ function M.check()
 
   if provider then
     ok(string.format("Active provider: %s", provider.name))
-    info(string.format("Model: %s", provider.model or "default"))
+    info(string.format("Model: %s", config.options.model or provider.model or "default"))
 
     -- Check API key
     if provider.name ~= "ollama" then
@@ -109,14 +102,34 @@ function M.check()
     })
   end
 
-  -- LSP Context checks
-  start("ai-editutor LSP Context")
+  -- Context extraction checks
+  start("ai-editutor Context Extraction")
+
+  local context_ok, context_mod = pcall(require, "editutor.context")
+  if context_ok then
+    ok("Context module loaded")
+
+    -- Check token budget
+    local budget = context_mod.get_token_budget()
+    info(string.format("Token budget: %d tokens", budget))
+
+    -- Detect mode for current project
+    local mode_info = context_mod.detect_mode()
+    if mode_info.mode == "full_project" then
+      ok(string.format("Mode: FULL_PROJECT (%d tokens, within budget)", mode_info.project_tokens))
+    else
+      info(string.format("Mode: LSP_SELECTIVE (project %d tokens > budget %d)",
+        mode_info.project_tokens, mode_info.budget))
+    end
+  else
+    warn("Context module not loaded")
+  end
+
+  -- LSP checks
+  start("ai-editutor LSP")
 
   local lsp_context_ok, lsp_context = pcall(require, "editutor.lsp_context")
-  if not lsp_context_ok then
-    warn("LSP context module not loaded")
-  else
-    -- Check if LSP is available for current buffer
+  if lsp_context_ok then
     if lsp_context.is_available() then
       ok("LSP is available for current buffer")
 
@@ -131,24 +144,40 @@ function M.check()
         "Lua: lua-language-server",
         "Python: pyright or pylsp",
         "TypeScript: typescript-language-server",
-        "Context will fallback to Tree-sitter only",
+        "For large projects, LSP provides better context",
       })
     end
 
     -- Check project root detection
     local project_root = lsp_context.get_project_root()
     ok(string.format("Project root: %s", project_root))
+  else
+    warn("LSP context module not loaded")
+  end
+
+  -- Project scanner checks
+  start("ai-editutor Project Scanner")
+
+  local scanner_ok, scanner = pcall(require, "editutor.project_scanner")
+  if scanner_ok then
+    ok("Project scanner loaded")
+
+    -- Scan project
+    local scan_result = scanner.scan_project()
+    info(string.format("Project files: %d source files", #scan_result.files))
+    info(string.format("Project folders: %d folders", #scan_result.folders))
+    info(string.format("Estimated tokens: %d", scan_result.total_tokens))
+  else
+    warn("Project scanner not loaded")
   end
 
   -- Knowledge tracking checks
   start("ai-editutor Knowledge Tracking")
 
   local knowledge_ok, knowledge = pcall(require, "editutor.knowledge")
-  if not knowledge_ok then
-    warn("Knowledge module not loaded")
-  else
+  if knowledge_ok then
     local stats = knowledge.get_stats()
-    ok(string.format("Knowledge database: %d entries", stats.total or 0))
+    ok(string.format("Knowledge database: %d entries (JSON storage)", stats.total or 0))
 
     if stats.total and stats.total > 0 then
       local modes = {}
@@ -159,92 +188,57 @@ function M.check()
         info("By mode: " .. table.concat(modes, ", "))
       end
     end
-
-    -- Check SQLite (optional)
-    local sqlite_ok = pcall(require, "sqlite")
-    if sqlite_ok then
-      ok("sqlite.lua available (enhanced storage)")
-    else
-      info("Using JSON fallback for knowledge storage (sqlite.lua not installed)")
-    end
-  end
-
-  -- v0.9.0: Indexer checks
-  start("ai-editutor Indexer (v0.9.0)")
-
-  -- First check sqlite.lua availability
-  local sqlite_ok = pcall(require, "sqlite")
-  if sqlite_ok then
-    ok("sqlite.lua is installed (BM25 search enabled)")
   else
-    warn("sqlite.lua not installed", {
-      "BM25 full-text search is DISABLED",
-      "Plugin will use LSP-only context (still works well)",
-      "",
-      "To enable BM25 search, install sqlite.lua:",
-      "  lazy.nvim: { 'kkharji/sqlite.lua' }",
-      "  packer: use { 'kkharji/sqlite.lua' }",
-      "  vim-plug: Plug 'kkharji/sqlite.lua'",
-    })
+    warn("Knowledge module not loaded")
   end
 
-  local indexer_ok, indexer_mod = pcall(require, "editutor.indexer")
-  if indexer_ok and sqlite_ok then
-    ok("Indexer module loaded")
-
-    -- Check if indexer is initialized
-    if indexer_mod.is_ready and indexer_mod.is_ready() then
-      ok("Indexer is ready")
-
-      -- Get indexer stats
-      local idx_stats = indexer_mod.get_stats()
-      if idx_stats.initialized then
-        info(string.format("Indexed: %d files, %d chunks", idx_stats.file_count or 0, idx_stats.chunk_count or 0))
-
-        if idx_stats.by_language and #idx_stats.by_language > 0 then
-          local langs = {}
-          for _, item in ipairs(idx_stats.by_language) do
-            table.insert(langs, string.format("%s:%d", item.language or "?", item.count))
-          end
-          info("Languages: " .. table.concat(langs, ", "))
-        end
-      else
-        info("Indexer initialized but no files indexed yet")
-        info("Run :EduTutorIndex to index the project")
-      end
-    else
-      info("Indexer not ready - will initialize on first use")
-    end
-  elseif not sqlite_ok then
-    info("Indexer skipped (requires sqlite.lua)")
-  else
-    warn("Indexer module failed to load")
-  end
-
-  -- v0.9.0: Cache checks
-  start("ai-editutor Cache (v0.9.0)")
+  -- Cache checks
+  start("ai-editutor Cache")
 
   local cache_ok, cache_mod = pcall(require, "editutor.cache")
   if cache_ok then
     ok("Cache module loaded")
 
     local cache_stats = cache_mod.get_stats()
-    info(string.format("Cache entries: %d/%d (active/max)", cache_stats.active or 0, cache_stats.max_entries or 0))
-
-    if cache_stats.expired and cache_stats.expired > 0 then
-      info(string.format("Expired entries: %d (will be cleaned)", cache_stats.expired))
-    end
+    info(string.format("Cache entries: %d active", cache_stats.active or 0))
   else
     warn("Cache module not loaded")
   end
 
+  -- Debug log checks
+  start("ai-editutor Debug Log")
+
+  local debug_ok, debug_log = pcall(require, "editutor.debug_log")
+  if debug_ok then
+    ok("Debug log module loaded")
+
+    local log_size = debug_log.get_size()
+    if log_size > 0 then
+      info(string.format("Log file size: %.1f KB", log_size / 1024))
+      info(string.format("Log path: %s", debug_log.get_log_path()))
+    else
+      info("No debug log yet (created on first request)")
+    end
+  else
+    warn("Debug log module not loaded")
+  end
+
   -- Summary
   start("ai-editutor Quick Start")
-  info("Available modes: Q (Question), S (Socratic), R (Review), D (Debug), E (Explain)")
-  info("Hint levels: 1 (Conceptual) -> 2 (Strategic) -> 3 (Directional) -> 4 (Specific) -> 5 (Solution)")
-  info("Example: // Q: What does this function do?")
+  info("Write: // Q: your question")
   info("Keymap: <leader>ma (or run :EduTutorAsk)")
-  info("Commands: :EduTutorModes, :EduTutorHint, :EduTutorIndex")
+  info("")
+  info("Context modes:")
+  info("  - FULL_PROJECT: Sends entire project if < 20k tokens")
+  info("  - LSP_SELECTIVE: Uses LSP definitions for large projects")
+  info("")
+  info("Commands:")
+  info("  :EduTutorAsk      - Ask question")
+  info("  :EduTutorHint     - Get progressive hints")
+  info("  :EduTutorLog      - Open debug log")
+  info("  :EduTutorHistory  - View Q&A history")
+  info("  :EduTutorStats    - View statistics")
+  info("")
   info("Help: :h editutor")
 end
 

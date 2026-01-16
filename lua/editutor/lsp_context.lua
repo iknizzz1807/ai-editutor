@@ -1,8 +1,11 @@
 -- editutor/lsp_context.lua
 -- LSP-based context extraction for ai-editutor
--- Extracts definitions and references from project files (not libraries)
+-- Enhanced: scans ENTIRE current file for symbols, not just cursor position
+-- Deduplicates definitions to avoid sending same content multiple times
 
 local M = {}
+
+local project_scanner = require("editutor.project_scanner")
 
 -- Patterns to exclude (library/vendor paths)
 M.exclude_patterns = {
@@ -23,10 +26,6 @@ M.exclude_patterns = {
   "share/lua/",
 }
 
--- Cache for LSP results (invalidated on buffer change)
-M._cache = {}
-M._cache_bufnr = nil
-
 ---Check if LSP is available for current buffer
 ---@return boolean
 function M.is_available()
@@ -37,13 +36,7 @@ end
 ---Get project root (git root or cwd)
 ---@return string
 function M.get_project_root()
-  -- Try git root first
-  local git_root = vim.fn.systemlist("git rev-parse --show-toplevel 2>/dev/null")[1]
-  if git_root and git_root ~= "" and vim.fn.isdirectory(git_root) == 1 then
-    return git_root
-  end
-  -- Fallback to cwd
-  return vim.fn.getcwd()
+  return project_scanner.get_project_root()
 end
 
 ---Check if a file path is within the project (not a library)
@@ -70,30 +63,16 @@ function M.is_project_file(filepath)
   return false
 end
 
----Get lines around a position from a file
----@param filepath string File path
----@param line number 0-indexed line number
----@param context_lines number Lines to include above and below
----@return string|nil content, number|nil start_line, number|nil end_line
-function M.get_lines_around(filepath, line, context_lines)
-  context_lines = context_lines or 15
-
-  -- Read file
+---Read entire file content
+---@param filepath string
+---@return string|nil content
+---@return number|nil line_count
+function M.read_file(filepath)
   local ok, lines = pcall(vim.fn.readfile, filepath)
   if not ok or not lines then
-    return nil
+    return nil, nil
   end
-
-  local total_lines = #lines
-  local start_line = math.max(0, line - context_lines)
-  local end_line = math.min(total_lines - 1, line + context_lines)
-
-  local result = {}
-  for i = start_line, end_line do
-    table.insert(result, lines[i + 1]) -- Lua is 1-indexed
-  end
-
-  return table.concat(result, "\n"), start_line, end_line
+  return table.concat(lines, "\n"), #lines
 end
 
 ---Get definition location for a symbol at position using LSP
@@ -141,14 +120,12 @@ function M.get_definition(bufnr, line, col, callback)
   end)
 end
 
----Extract identifiers from lines using Tree-sitter
+---Extract ALL identifiers from entire file using Tree-sitter
 ---@param bufnr number Buffer number
----@param start_line number Start line (0-indexed)
----@param end_line number End line (0-indexed)
----@return table List of {name, line, col} for each identifier
-function M.extract_identifiers(bufnr, start_line, end_line)
+---@return table List of {name, line, col} for each unique identifier
+function M.extract_all_identifiers(bufnr)
   local identifiers = {}
-  local seen = {}
+  local seen_names = {} -- Dedup by name (we only need one occurrence per symbol)
 
   -- Get parser
   local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
@@ -162,12 +139,12 @@ function M.extract_identifiers(bufnr, start_line, end_line)
   end
 
   local root = tree:root()
+  local lang = parser:lang()
 
   -- Query for identifiers (works for most languages)
-  local lang = parser:lang()
   local query_string = "(identifier) @id"
 
-  -- Some languages use different node types
+  -- Language-specific queries for better coverage
   if lang == "lua" then
     query_string = "[(identifier) (dot_index_expression)] @id"
   elseif lang == "python" then
@@ -185,25 +162,21 @@ function M.extract_identifiers(bufnr, start_line, end_line)
     return identifiers
   end
 
-  for id, node in query:iter_captures(root, bufnr, start_line, end_line + 1) do
+  -- Get total lines
+  local total_lines = vim.api.nvim_buf_line_count(bufnr)
+
+  for _, node in query:iter_captures(root, bufnr, 0, total_lines) do
     local node_start_row, node_start_col = node:start()
+    local name = vim.treesitter.get_node_text(node, bufnr)
 
-    -- Only include nodes in our range
-    if node_start_row >= start_line and node_start_row <= end_line then
-      local name = vim.treesitter.get_node_text(node, bufnr)
-
-      -- Skip common built-ins and locals
-      if name and #name > 1 and not M._is_builtin(name, lang) then
-        local key = name .. ":" .. node_start_row .. ":" .. node_start_col
-        if not seen[key] then
-          seen[key] = true
-          table.insert(identifiers, {
-            name = name,
-            line = node_start_row,
-            col = node_start_col,
-          })
-        end
-      end
+    -- Skip built-ins and already seen names
+    if name and #name > 1 and not M._is_builtin(name, lang) and not seen_names[name] then
+      seen_names[name] = true
+      table.insert(identifiers, {
+        name = name,
+        line = node_start_row,
+        col = node_start_col,
+      })
     end
   end
 
@@ -226,6 +199,7 @@ function M._is_builtin(name, lang)
     "async", "await", "yield",
     "try", "catch", "finally", "throw",
     "new", "delete", "typeof", "instanceof",
+    "and", "or", "not", "in", "is",
   }
 
   for _, builtin in ipairs(common) do
@@ -241,7 +215,7 @@ function M._is_builtin(name, lang)
       "string", "table", "math", "os", "io", "debug", "coroutine", "package",
       "error", "assert", "pcall", "xpcall", "select", "unpack", "rawget", "rawset",
       "setmetatable", "getmetatable", "require", "loadfile", "dofile",
-      "_G", "_VERSION", "arg",
+      "_G", "_VERSION", "arg", "M",
     }
     for _, builtin in ipairs(lua_builtins) do
       if name == builtin then
@@ -272,6 +246,7 @@ function M._is_builtin(name, lang)
       "setTimeout", "setInterval", "clearTimeout", "clearInterval",
       "fetch", "Request", "Response", "Headers", "URL", "URLSearchParams",
       "Buffer", "process", "global", "module", "exports", "__dirname", "__filename",
+      "React", "useState", "useEffect", "useCallback", "useMemo", "useRef",
     }
     for _, builtin in ipairs(js_builtins) do
       if name == builtin then
@@ -283,27 +258,29 @@ function M._is_builtin(name, lang)
   return false
 end
 
----Get external definitions for identifiers in a range
+---@class ExternalDefinition
+---@field name string Symbol name
+---@field filepath string Full file path
+---@field content string File content (full or partial)
+---@field start_line number Start line (0-indexed)
+---@field end_line number End line (0-indexed)
+---@field is_full_file boolean Whether content is full file
+
+---Get external definitions for ALL identifiers in current file
+---Deduplicates by file path (each external file included only once)
 ---@param bufnr number Buffer number
----@param start_line number Start line (0-indexed)
----@param end_line number End line (0-indexed)
----@param callback function Callback(definitions) where definitions is a list of {name, filepath, content, start_line, end_line}
----@param opts? table Options {max_symbols?: number, context_lines?: number}
-function M.get_external_definitions(bufnr, start_line, end_line, callback, opts)
+---@param callback function Callback(definitions) where definitions is ExternalDefinition[]
+---@param opts? table Options {max_files?: number, max_lines_per_file?: number}
+function M.get_all_external_definitions(bufnr, callback, opts)
   opts = opts or {}
-  local max_symbols = opts.max_symbols or 20
-  local context_lines = opts.context_lines or 15
+  local max_files = opts.max_files or 50
+  local max_lines_per_file = opts.max_lines_per_file or 500
 
   local current_file = vim.api.nvim_buf_get_name(bufnr)
-  local identifiers = M.extract_identifiers(bufnr, start_line, end_line)
-
-  -- Limit identifiers
-  if #identifiers > max_symbols then
-    identifiers = vim.list_slice(identifiers, 1, max_symbols)
-  end
+  local identifiers = M.extract_all_identifiers(bufnr)
 
   local definitions = {}
-  local seen_files = {}
+  local seen_files = {} -- Dedup by filepath
   local pending = #identifiers
   local completed = 0
 
@@ -312,28 +289,52 @@ function M.get_external_definitions(bufnr, start_line, end_line, callback, opts)
     return
   end
 
+  -- Process identifiers but limit total external files
   for _, ident in ipairs(identifiers) do
+    -- Stop if we have enough files
+    if vim.tbl_count(seen_files) >= max_files then
+      completed = completed + 1
+      if completed >= pending then
+        callback(definitions)
+      end
+      goto continue
+    end
+
     M.get_definition(bufnr, ident.line, ident.col, function(locations)
       completed = completed + 1
 
       for _, loc in ipairs(locations) do
         local filepath = vim.uri_to_fname(loc.uri)
 
-        -- Skip if same file or already seen or not project file
-        if filepath ~= current_file and not seen_files[filepath] and M.is_project_file(filepath) then
+        -- Skip if same file, already seen, or not project file
+        if filepath ~= current_file
+          and not seen_files[filepath]
+          and M.is_project_file(filepath)
+          and vim.tbl_count(seen_files) < max_files then
+
           seen_files[filepath] = true
 
-          local def_line = loc.range and loc.range.start and loc.range.start.line or 0
-          local content, content_start, content_end = M.get_lines_around(filepath, def_line, context_lines)
+          -- Read full file content
+          local content, line_count = M.read_file(filepath)
 
-          if content then
+          if content and line_count then
+            local is_full = line_count <= max_lines_per_file
+
+            -- Truncate if too long
+            if not is_full then
+              local lines = vim.split(content, "\n")
+              lines = vim.list_slice(lines, 1, max_lines_per_file)
+              content = table.concat(lines, "\n") .. "\n... (truncated, " .. line_count .. " total lines)"
+            end
+
             table.insert(definitions, {
               name = ident.name,
               filepath = filepath,
               content = content,
-              start_line = content_start,
-              end_line = content_end,
-              definition_line = def_line,
+              start_line = 0,
+              end_line = is_full and (line_count - 1) or (max_lines_per_file - 1),
+              is_full_file = is_full,
+              line_count = line_count,
             })
           end
         end
@@ -344,40 +345,36 @@ function M.get_external_definitions(bufnr, start_line, end_line, callback, opts)
         callback(definitions)
       end
     end)
+
+    ::continue::
   end
 end
 
----Get full LSP context for current cursor position
+---Get full LSP context for current buffer
 ---@param callback function Callback(context) where context is {current, external, has_lsp}
----@param opts? table Options from config
+---@param opts? table Options {max_external_files?: number, max_lines_per_file?: number}
 function M.get_context(callback, opts)
   opts = opts or {}
-  local lines_around = opts.lines_around_cursor or 100
-  local external_lines = opts.external_context_lines or 30
-  local max_symbols = opts.max_external_symbols or 20
+  local max_external_files = opts.max_external_files or 50
+  local max_lines_per_file = opts.max_lines_per_file or 500
 
   local bufnr = vim.api.nvim_get_current_buf()
-  local cursor = vim.api.nvim_win_get_cursor(0)
-  local cursor_line = cursor[1] - 1 -- 0-indexed
-  local total_lines = vim.api.nvim_buf_line_count(bufnr)
-
-  -- Calculate range around cursor
-  local half = math.floor(lines_around / 2)
-  local start_line = math.max(0, cursor_line - half)
-  local end_line = math.min(total_lines - 1, cursor_line + half)
-
-  -- Get current context
-  local current_lines = vim.api.nvim_buf_get_lines(bufnr, start_line, end_line + 1, false)
-  local current_content = table.concat(current_lines, "\n")
   local current_file = vim.api.nvim_buf_get_name(bufnr)
+
+  -- Read full current file
+  local current_content, current_lines = M.read_file(current_file)
+  if not current_content then
+    -- Fallback: read from buffer
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    current_content = table.concat(lines, "\n")
+    current_lines = #lines
+  end
 
   local context = {
     current = {
       filepath = current_file,
       content = current_content,
-      start_line = start_line,
-      end_line = end_line,
-      cursor_line = cursor_line,
+      line_count = current_lines,
     },
     external = {},
     has_lsp = M.is_available(),
@@ -389,50 +386,77 @@ function M.get_context(callback, opts)
     return
   end
 
-  -- Get external definitions
-  M.get_external_definitions(bufnr, start_line, end_line, function(definitions)
+  -- Get external definitions (scans entire file, deduped)
+  M.get_all_external_definitions(bufnr, function(definitions)
     context.external = definitions
     callback(context)
   end, {
-    max_symbols = max_symbols,
-    context_lines = math.floor(external_lines / 2),
+    max_files = max_external_files,
+    max_lines_per_file = max_lines_per_file,
   })
 end
 
 ---Format context for LLM prompt
 ---@param ctx table Context from get_context
 ---@return string Formatted context
+---@return table metadata
 function M.format_for_prompt(ctx)
   local parts = {}
+  local metadata = {
+    current_file = ctx.current.filepath,
+    current_lines = ctx.current.line_count,
+    external_files = {},
+    total_tokens = 0,
+  }
 
-  -- Current file context
-  local relative_path = ctx.current.filepath:gsub(M.get_project_root() .. "/", "")
-  table.insert(parts, string.format("=== Current File: %s (lines %d-%d) ===",
-    relative_path,
-    ctx.current.start_line + 1,
-    ctx.current.end_line + 1
-  ))
-  table.insert(parts, "```")
+  local project_root = M.get_project_root()
+
+  -- Detect language from filepath
+  local ext = ctx.current.filepath:match("%.(%w+)$") or "unknown"
+  local lang_map = {
+    lua = "lua", py = "python", js = "javascript", ts = "typescript",
+    tsx = "tsx", jsx = "jsx", go = "go", rs = "rust", rb = "ruby",
+    java = "java", c = "c", cpp = "cpp", h = "c", hpp = "cpp",
+  }
+  local language = lang_map[ext] or ext
+
+  -- Current file context (full file)
+  local relative_path = ctx.current.filepath:gsub(project_root .. "/", "")
+  table.insert(parts, string.format("=== Current File: %s (%d lines) ===",
+    relative_path, ctx.current.line_count))
+  table.insert(parts, "```" .. language)
   table.insert(parts, ctx.current.content)
   table.insert(parts, "```")
   table.insert(parts, "")
 
-  -- External definitions
+  metadata.total_tokens = project_scanner.estimate_tokens(ctx.current.content)
+
+  -- External definitions (deduped, full files when possible)
   if ctx.external and #ctx.external > 0 then
-    table.insert(parts, "=== Related Definitions from Project ===")
+    table.insert(parts, string.format("=== Related Files from Project (%d files) ===", #ctx.external))
     table.insert(parts, "")
 
     for _, def in ipairs(ctx.external) do
-      local def_relative = def.filepath:gsub(M.get_project_root() .. "/", "")
-      table.insert(parts, string.format("--- %s (lines %d-%d) ---",
-        def_relative,
-        def.start_line + 1,
-        def.end_line + 1
-      ))
-      table.insert(parts, "```")
+      local def_relative = def.filepath:gsub(project_root .. "/", "")
+      local def_ext = def.filepath:match("%.(%w+)$") or ext
+      local def_lang = lang_map[def_ext] or def_ext
+
+      local status = def.is_full_file and "full" or "truncated"
+      table.insert(parts, string.format("--- %s (%d lines, %s) ---",
+        def_relative, def.line_count, status))
+      table.insert(parts, "```" .. def_lang)
       table.insert(parts, def.content)
       table.insert(parts, "```")
       table.insert(parts, "")
+
+      table.insert(metadata.external_files, {
+        path = def_relative,
+        lines = def.line_count,
+        is_full = def.is_full_file,
+        tokens = project_scanner.estimate_tokens(def.content),
+      })
+
+      metadata.total_tokens = metadata.total_tokens + project_scanner.estimate_tokens(def.content)
     end
   end
 
@@ -442,13 +466,7 @@ function M.format_for_prompt(ctx)
     table.insert(parts, "")
   end
 
-  return table.concat(parts, "\n")
-end
-
----Clear cache (call on buffer change)
-function M.clear_cache()
-  M._cache = {}
-  M._cache_bufnr = nil
+  return table.concat(parts, "\n"), metadata
 end
 
 return M

@@ -1,6 +1,6 @@
 -- editutor/init.lua
 -- ai-editutor - A Neovim plugin that teaches you to code better
--- Simplified v1.0: Just Q: prefix, one unified experience
+-- v1.1.0: Enhanced context extraction (full project < 20k tokens or LSP selective)
 
 local M = {}
 
@@ -13,17 +13,14 @@ local comment_writer = require("editutor.comment_writer")
 local hints = require("editutor.hints")
 local knowledge = require("editutor.knowledge")
 local conversation = require("editutor.conversation")
-local project_context = require("editutor.project_context")
-
--- v0.9.0: New modules
 local cache = require("editutor.cache")
 local loading = require("editutor.loading")
-local indexer_available, indexer = pcall(require, "editutor.indexer")
+local debug_log = require("editutor.debug_log")
+local project_scanner = require("editutor.project_scanner")
 
 M._name = "EduTutor"
-M._version = "1.0.0"
+M._version = "1.1.0"
 M._setup_called = false
-M._indexer_ready = false
 
 -- UI Messages for internationalization
 M._messages = {
@@ -49,43 +46,37 @@ M._messages = {
     conversation_continued = "Continuing conversation (%d messages)",
     conversation_new = "Starting new conversation",
     conversation_cleared = "Conversation cleared",
-    -- Indexer messages
-    indexing_started = "Indexing project...",
-    indexing_progress = "Indexing: %d/%d files",
-    indexing_complete = "Indexing complete: %d files, %d chunks",
-    indexing_failed = "Indexing failed: %s",
-    indexer_not_available = "Indexer not available (sqlite.lua required)",
     gathering_context = "Gathering context...",
+    context_mode_full = "Using full project context (%d tokens)",
+    context_mode_lsp = "Using LSP selective context (%d tokens)",
+    context_over_budget = "Warning: Context exceeds budget (%d > %d tokens)",
   },
   vi = {
-    no_comment = "Không tìm thấy câu hỏi. Viết: // Q: câu hỏi của bạn",
-    thinking = "Đang xử lý...",
-    error = "Lỗi: ",
-    no_response = "Không nhận được phản hồi",
-    response_inserted = "Đã chèn response",
-    history_title = "ai-editutor - Lịch Sử",
-    history_empty = "Không có lịch sử",
-    search_prompt = "Tìm kiếm: ",
-    search_results = "Kết quả: '%s'",
-    search_found = "Tìm thấy %d mục",
-    search_empty = "Không tìm thấy: ",
-    export_success = "Đã xuất ra: ",
-    export_failed = "Xuất thất bại: ",
-    stats_title = "ai-editutor - Thống Kê",
-    stats_total = "Tổng số Q&A",
-    hint_level = "Gợi ý level %d/%d",
-    hint_more = "Chạy :EduTutorHint lần nữa để có thêm gợi ý",
-    hint_final = "Đã đến gợi ý cuối cùng",
-    conversation_continued = "Tiếp tục hội thoại (%d tin nhắn)",
-    conversation_new = "Bắt đầu hội thoại mới",
-    conversation_cleared = "Đã xóa hội thoại",
-    -- Indexer messages
-    indexing_started = "Đang index dự án...",
-    indexing_progress = "Đang index: %d/%d files",
-    indexing_complete = "Index hoàn tất: %d files, %d chunks",
-    indexing_failed = "Index thất bại: %s",
-    indexer_not_available = "Indexer không khả dụng (cần sqlite.lua)",
-    gathering_context = "Đang thu thập context...",
+    no_comment = "Khong tim thay cau hoi. Viet: // Q: cau hoi cua ban",
+    thinking = "Dang xu ly...",
+    error = "Loi: ",
+    no_response = "Khong nhan duoc phan hoi",
+    response_inserted = "Da chen response",
+    history_title = "ai-editutor - Lich Su",
+    history_empty = "Khong co lich su",
+    search_prompt = "Tim kiem: ",
+    search_results = "Ket qua: '%s'",
+    search_found = "Tim thay %d muc",
+    search_empty = "Khong tim thay: ",
+    export_success = "Da xuat ra: ",
+    export_failed = "Xuat that bai: ",
+    stats_title = "ai-editutor - Thong Ke",
+    stats_total = "Tong so Q&A",
+    hint_level = "Goi y level %d/%d",
+    hint_more = "Chay :EduTutorHint lan nua de co them goi y",
+    hint_final = "Da den goi y cuoi cung",
+    conversation_continued = "Tiep tuc hoi thoai (%d tin nhan)",
+    conversation_new = "Bat dau hoi thoai moi",
+    conversation_cleared = "Da xoa hoi thoai",
+    gathering_context = "Dang thu thap context...",
+    context_mode_full = "Su dung full project context (%d tokens)",
+    context_mode_lsp = "Su dung LSP selective context (%d tokens)",
+    context_over_budget = "Canh bao: Context vuot budget (%d > %d tokens)",
   },
 }
 
@@ -113,19 +104,10 @@ function M.setup(opts)
   -- Initialize cache
   cache.setup()
 
-  -- Initialize indexer (async, non-blocking)
-  if indexer_available then
-    vim.schedule(function()
-      local ok, err = indexer.setup(opts and opts.indexer)
-      if ok then
-        M._indexer_ready = true
-        -- Start background indexing after 1s
-        vim.defer_fn(function()
-          M._background_index()
-        end, 1000)
-      end
-    end)
-  end
+  -- Ensure .editutor.log is in .gitignore
+  vim.schedule(function()
+    debug_log.ensure_gitignore()
+  end)
 
   -- Check provider on setup
   local ready, err = provider.check_provider()
@@ -134,24 +116,7 @@ function M.setup(opts)
   end
 end
 
----Background index project (non-blocking)
-function M._background_index()
-  if not indexer_available or not M._indexer_ready then
-    return
-  end
-
-  indexer.index_project({
-    progress = function(current, total, _)
-      if current % 50 == 0 or current == total then
-        vim.schedule(function()
-          vim.notify(string.format("[ai-editutor] " .. M._msg("indexing_progress"), current, total), vim.log.levels.INFO)
-        end)
-      end
-    end,
-  })
-end
-
----Create user commands (simplified - no mode commands)
+---Create user commands
 function M._create_commands()
   -- Main command
   vim.api.nvim_create_user_command("EduTutorAsk", function()
@@ -200,18 +165,20 @@ function M._create_commands()
     M.clear_conversation()
   end, { desc = "Clear conversation" })
 
-  -- Indexer commands
-  vim.api.nvim_create_user_command("EduTutorIndex", function(opts)
-    M.index_project(opts.bang)
-  end, { bang = true, desc = "Index project (! to force re-index)" })
-
-  vim.api.nvim_create_user_command("EduTutorIndexStats", function()
-    M.show_index_stats()
-  end, { desc = "Show indexer statistics" })
-
+  -- Cache command
   vim.api.nvim_create_user_command("EduTutorClearCache", function()
     M.clear_cache()
   end, { desc = "Clear context cache" })
+
+  -- Debug log command
+  vim.api.nvim_create_user_command("EduTutorLog", function()
+    debug_log.open()
+  end, { desc = "Open debug log file" })
+
+  vim.api.nvim_create_user_command("EduTutorClearLog", function()
+    debug_log.clear()
+    vim.notify("[ai-editutor] Debug log cleared", vim.log.levels.INFO)
+  end, { desc = "Clear debug log file" })
 end
 
 ---Setup keymaps
@@ -258,62 +225,29 @@ function M.ask()
   end
 
   -- Start loading
-  loading.start(loading.states.gathering_context)
+  loading.start(M._msg("gathering_context"))
 
-  -- Check cache
-  local cache_key = cache.context_key(filepath, cursor_line)
-  local cached_context, cache_hit = cache.get(cache_key)
+  -- Extract context (auto-selects full project or LSP mode)
+  context.extract(function(full_context, metadata)
+    -- Log context mode
+    if metadata.mode == "full_project" then
+      vim.notify(string.format("[ai-editutor] " .. M._msg("context_mode_full"), metadata.total_tokens), vim.log.levels.INFO)
+    else
+      vim.notify(string.format("[ai-editutor] " .. M._msg("context_mode_lsp"), metadata.total_tokens), vim.log.levels.INFO)
+    end
 
-  if cache_hit then
+    -- Warn if over budget
+    if not metadata.within_budget then
+      vim.notify(string.format("[ai-editutor] " .. M._msg("context_over_budget"),
+        metadata.total_tokens, metadata.budget), vim.log.levels.WARN)
+    end
+
     loading.update(loading.states.connecting)
-    M._process_ask(query, filepath, bufnr, cached_context)
-  else
-    M._extract_context_async(query.question, filepath, cursor_line, function(full_context)
-      cache.set(cache_key, full_context, {
-        ttl = cache.config.context_ttl,
-        tags = { "file:" .. filepath, "context" },
-      })
-
-      loading.update(loading.states.connecting)
-      M._process_ask(query, filepath, bufnr, full_context)
-    end)
-  end
-end
-
----Extract context using multi-signal approach
----@param question string
----@param filepath string
----@param cursor_line number
----@param callback function
-function M._extract_context_async(question, filepath, cursor_line, callback)
-  -- Try indexer first
-  if indexer_available and M._indexer_ready and indexer.is_ready() then
-    local indexer_context, _ = indexer.get_context({
-      question = question,
-      current_file = filepath,
-      cursor_line = cursor_line,
-      budget = config.options.indexer and config.options.indexer.context_budget or 4000,
-    })
-
-    if indexer_context and indexer_context ~= "" then
-      callback(indexer_context)
-      return
-    end
-  end
-
-  -- Fallback: LSP-based context
-  context.extract_with_lsp(function(context_formatted, has_lsp)
-    if not has_lsp then
-      vim.notify("[ai-editutor] LSP not available - using file context only", vim.log.levels.WARN)
-    end
-
-    local project_summary = project_context.get_project_summary()
-    if project_summary ~= "" then
-      context_formatted = context_formatted .. "\n\n" .. project_summary
-    end
-
-    callback(context_formatted)
-  end)
+    M._process_ask(query, filepath, bufnr, full_context, metadata)
+  end, {
+    current_file = filepath,
+    question_line = cursor_line,
+  })
 end
 
 ---Process ask with context
@@ -321,7 +255,8 @@ end
 ---@param filepath string
 ---@param bufnr number
 ---@param full_context string
-function M._process_ask(query, filepath, bufnr, full_context)
+---@param metadata table
+function M._process_ask(query, filepath, bufnr, full_context, metadata)
   -- Add conversation history
   local conv_history = conversation.get_history_as_context()
   if conv_history ~= "" then
@@ -332,11 +267,39 @@ function M._process_ask(query, filepath, bufnr, full_context)
   local system_prompt = prompts.get_system_prompt()
   local user_prompt = prompts.build_user_prompt(query.question, full_context)
 
+  -- Get provider info
+  local provider_config = config.get_provider()
+  local provider_name = provider_config and provider_config.name or "unknown"
+  local model_name = config.options.model or (provider_config and provider_config.model) or "unknown"
+
+  -- Log request to debug file
+  debug_log.log_request({
+    question = query.question,
+    current_file = metadata.current_file or filepath,
+    question_line = query.line,
+    mode = metadata.mode,
+    metadata = metadata,
+    system_prompt = system_prompt,
+    user_prompt = user_prompt,
+    provider = provider_name,
+    model = model_name,
+  })
+
   loading.update(loading.states.thinking)
+  local start_time = vim.loop.hrtime()
 
   -- Query LLM
   provider.query_async(system_prompt, user_prompt, function(response, err)
     loading.stop()
+
+    local duration_ms = math.floor((vim.loop.hrtime() - start_time) / 1000000)
+
+    -- Log response
+    debug_log.log_response({
+      response = response,
+      error = err,
+      duration_ms = duration_ms,
+    })
 
     if err then
       vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
@@ -400,16 +363,19 @@ function M.ask_visual()
   end
 
   -- Start loading
-  loading.start(loading.states.gathering_context)
+  loading.start(M._msg("gathering_context"))
 
   -- The selected code becomes the primary context
   local selected_code = selection.text
 
-  -- Also get surrounding context
-  M._extract_context_async(query.question, filepath, query.line, function(full_context)
+  -- Extract full context
+  context.extract(function(full_context, metadata)
     loading.update(loading.states.connecting)
-    M._process_ask_visual(query, filepath, bufnr, full_context, selected_code)
-  end)
+    M._process_ask_visual(query, filepath, bufnr, full_context, selected_code, metadata)
+  end, {
+    current_file = filepath,
+    question_line = query.line,
+  })
 end
 
 ---Process visual ask with selected code
@@ -418,7 +384,8 @@ end
 ---@param bufnr number
 ---@param full_context string
 ---@param selected_code string
-function M._process_ask_visual(query, filepath, bufnr, full_context, selected_code)
+---@param metadata table
+function M._process_ask_visual(query, filepath, bufnr, full_context, selected_code, metadata)
   -- Add conversation history
   local conv_history = conversation.get_history_as_context()
   if conv_history ~= "" then
@@ -429,11 +396,39 @@ function M._process_ask_visual(query, filepath, bufnr, full_context, selected_co
   local system_prompt = prompts.get_system_prompt()
   local user_prompt = prompts.build_user_prompt(query.question, full_context, nil, selected_code)
 
+  -- Get provider info
+  local provider_config = config.get_provider()
+  local provider_name = provider_config and provider_config.name or "unknown"
+  local model_name = config.options.model or (provider_config and provider_config.model) or "unknown"
+
+  -- Log request
+  debug_log.log_request({
+    question = query.question .. " [with visual selection]",
+    current_file = metadata.current_file or filepath,
+    question_line = query.line,
+    mode = metadata.mode,
+    metadata = metadata,
+    system_prompt = system_prompt,
+    user_prompt = user_prompt,
+    provider = provider_name,
+    model = model_name,
+  })
+
   loading.update(loading.states.thinking)
+  local start_time = vim.loop.hrtime()
 
   -- Query LLM
   provider.query_async(system_prompt, user_prompt, function(response, err)
     loading.stop()
+
+    local duration_ms = math.floor((vim.loop.hrtime() - start_time) / 1000000)
+
+    -- Log response
+    debug_log.log_response({
+      response = response,
+      error = err,
+      duration_ms = duration_ms,
+    })
 
     if err then
       vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
@@ -482,9 +477,9 @@ function M.ask_with_hints()
   local filepath = vim.api.nvim_buf_get_name(0)
   local cursor_line = query.line
 
-  loading.start(loading.states.gathering_context)
+  loading.start(M._msg("gathering_context"))
 
-  M._extract_context_async(query.question, filepath, cursor_line, function(context_formatted)
+  context.extract(function(context_formatted, metadata)
     local session = hints.get_session(query.question, nil, context_formatted)
     local level = session.level + 1
 
@@ -526,7 +521,10 @@ function M.ask_with_hints()
       vim.notify(string.format("[ai-editutor] " .. M._msg("hint_level") .. " - %s",
         hint_level, hints.MAX_LEVEL, msg), vim.log.levels.INFO)
     end)
-  end)
+  end, {
+    current_file = filepath,
+    question_line = cursor_line,
+  })
 end
 
 -- =============================================================================
@@ -603,6 +601,7 @@ end
 ---Show stats
 function M.show_stats()
   local stats = knowledge.get_stats()
+  local cache_stats = cache.get_stats()
 
   local lines = {
     M._msg("stats_title"),
@@ -615,6 +614,17 @@ function M.show_stats()
     for lang, count in pairs(stats.by_language) do
       table.insert(lines, string.format("  %s: %d", lang, count))
     end
+    table.insert(lines, "")
+  end
+
+  table.insert(lines, "Cache:")
+  table.insert(lines, string.format("  Active entries: %d", cache_stats.active))
+
+  -- Show debug log size
+  local log_size = debug_log.get_size()
+  if log_size > 0 then
+    table.insert(lines, "")
+    table.insert(lines, string.format("Debug log size: %.1f KB", log_size / 1024))
   end
 
   print(table.concat(lines, "\n"))
@@ -644,7 +654,7 @@ function M.set_language(lang)
   end
 
   config.options.language = normalized
-  local msg = normalized == "English" and "Language set to English" or "Đã chuyển sang tiếng Việt"
+  local msg = normalized == "English" and "Language set to English" or "Da chuyen sang tieng Viet"
   vim.notify("[ai-editutor] " .. msg, vim.log.levels.INFO)
 end
 
@@ -670,83 +680,12 @@ end
 ---Clear conversation
 function M.clear_conversation()
   conversation.clear_session()
-  project_context.clear_cache()
   vim.notify("[ai-editutor] " .. M._msg("conversation_cleared"), vim.log.levels.INFO)
-end
-
--- =============================================================================
--- INDEXER FUNCTIONS
--- =============================================================================
-
----Index project
-function M.index_project(force)
-  if not indexer_available then
-    vim.notify("[ai-editutor] " .. M._msg("indexer_not_available"), vim.log.levels.ERROR)
-    return
-  end
-
-  if not M._indexer_ready then
-    local ok, err = indexer.setup()
-    if not ok then
-      vim.notify("[ai-editutor] " .. M._msg("indexing_failed") .. (err or ""), vim.log.levels.ERROR)
-      return
-    end
-    M._indexer_ready = true
-  end
-
-  vim.notify("[ai-editutor] " .. M._msg("indexing_started"), vim.log.levels.INFO)
-
-  if force then
-    indexer.rebuild()
-  end
-
-  local success, stats = indexer.index_project({
-    force = force,
-    progress = function(current, total, _)
-      if current % 20 == 0 or current == total then
-        vim.schedule(function()
-          vim.notify(string.format("[ai-editutor] " .. M._msg("indexing_progress"), current, total), vim.log.levels.INFO)
-        end)
-      end
-    end,
-  })
-
-  if success then
-    vim.notify(string.format("[ai-editutor] " .. M._msg("indexing_complete"),
-      stats.files_indexed, stats.chunks_created), vim.log.levels.INFO)
-  else
-    vim.notify("[ai-editutor] " .. M._msg("indexing_failed") .. (stats.error or ""), vim.log.levels.ERROR)
-  end
-end
-
----Show index stats
-function M.show_index_stats()
-  if not indexer_available then
-    vim.notify("[ai-editutor] " .. M._msg("indexer_not_available"), vim.log.levels.WARN)
-    return
-  end
-
-  local stats = indexer.get_stats()
-
-  if not stats.initialized then
-    vim.notify("[ai-editutor] Indexer not initialized. Run :EduTutorIndex first.", vim.log.levels.WARN)
-    return
-  end
-
-  local lines = {
-    "ai-editutor - Index Statistics",
-    string.rep("=", 40), "",
-    string.format("Files indexed: %d", stats.file_count or 0),
-    string.format("Chunks created: %d", stats.chunk_count or 0), "",
-  }
-
-  print(table.concat(lines, "\n"))
 end
 
 ---Clear cache
 function M.clear_cache()
   cache.clear()
-  project_context.clear_cache()
   vim.notify("[ai-editutor] Cache cleared", vim.log.levels.INFO)
 end
 

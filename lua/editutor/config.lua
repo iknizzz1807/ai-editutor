@@ -1,5 +1,6 @@
 -- editutor/config.lua
 -- Configuration management for ai-editutor
+-- v1.1.0: Simplified config (removed indexer, added token budget)
 
 local M = {}
 
@@ -7,14 +8,16 @@ local M = {}
 ---@field provider string LLM provider ("claude" | "openai" | "ollama")
 ---@field api_key string|function API key or function returning key
 ---@field model string Model identifier
----@field context_lines number Lines of context around question
----@field include_imports boolean Include file imports in context
 ---@field language string Language for explanations
 ---@field keymaps EditutorKeymaps Keymap configuration
+---@field context EditutorContextConfig Context extraction config
 ---@field providers table<string, EditutorProvider> Provider configurations
 
 ---@class EditutorKeymaps
 ---@field ask string Trigger mentor ask
+
+---@class EditutorContextConfig
+---@field token_budget number Max tokens for context (default 20000)
 
 ---@class EditutorProvider
 ---@field name string Provider name
@@ -31,17 +34,12 @@ M.defaults = {
   provider = "claude",
   model = "claude-sonnet-4-20250514",
 
-  -- Behavior
-  context_lines = 50,
-  include_imports = true,
-  -- Language for responses: "English", "Vietnamese", "vi", "en", "Tiếng Việt"
+  -- Language for responses: "English", "Vietnamese", "vi", "en"
   language = "English",
 
-  -- Context extraction (LSP-based)
+  -- Context extraction
   context = {
-    lines_around_cursor = 100, -- Lines to include around cursor (50 above + 50 below)
-    external_context_lines = 30, -- Lines to include around each external definition
-    max_external_symbols = 20, -- Max number of external definitions to fetch
+    token_budget = 20000, -- 20k tokens max for context
   },
 
   -- Keymaps
