@@ -1,53 +1,49 @@
 -- editutor/parser.lua
--- Comment parsing for tutor triggers
+-- Comment parsing for mentor triggers
+-- Simplified: Only Q: prefix (ask any question naturally)
 
 local M = {}
 
 ---@class MentorQuery
----@field mode string The mode (Q|S|R|D|E)
----@field mode_name string Full mode name
 ---@field question string The question/request text
 ---@field line number Line number of the comment
 ---@field col number Column position
 
--- Mode definitions
-M.modes = {
-  Q = { name = "question", description = "Direct question - get educational answer" },
-  S = { name = "socratic", description = "Socratic mode - guided discovery through questions" },
-  R = { name = "review", description = "Code review - get feedback on code quality" },
-  D = { name = "debug", description = "Debug mode - guided debugging assistance" },
-  E = { name = "explain", description = "Explain mode - deep concept explanation" },
-}
-
 -- Pattern to match mentor comments: // Q: question text
 -- Supports various comment styles: //, #, --, /* */
+-- Only Q: (or q:) is supported - users can naturally express intent in the question
 local PATTERNS = {
-  -- Single line comments
-  "^%s*//[%s]*([QSRDE]):[%s]*(.+)$",      -- // Q: question
-  "^%s*#[%s]*([QSRDE]):[%s]*(.+)$",        -- # Q: question
-  "^%s*%-%-[%s]*([QSRDE]):[%s]*(.+)$",     -- -- Q: question
-  "^%s*;[%s]*([QSRDE]):[%s]*(.+)$",        -- ; Q: question (lisp, asm)
-  -- Block comment start (just the opening line)
-  "^%s*/%*[%s]*([QSRDE]):[%s]*(.+)",       -- /* Q: question
-  "^%s*%-%-%[[%s]*([QSRDE]):[%s]*(.+)",    -- --[[ Q: question (lua)
+  -- Single line comments (Q or q, case insensitive)
+  "^%s*//[%s]*[Qq]:[%s]*(.+)$",       -- // Q: question  or // q: question
+  "^%s*#[%s]*[Qq]:[%s]*(.+)$",         -- # Q: question
+  "^%s*%-%-[%s]*[Qq]:[%s]*(.+)$",      -- -- Q: question
+  "^%s*;[%s]*[Qq]:[%s]*(.+)$",         -- ; Q: question (lisp, asm)
+  -- Block comment start
+  "^%s*/%*[%s]*[Qq]:[%s]*(.+)",        -- /* Q: question
+  "^%s*%-%-%[%[[%s]*[Qq]:[%s]*(.+)",   -- --[[ Q: question (lua)
+  "^%s*<!%-%-%s*[Qq]:[%s]*(.+)",       -- <!-- Q: question (html)
 }
 
 ---Parse a single line for mentor trigger
 ---@param line string The line content
----@return string|nil mode The mode character (Q, S, R, D, E)
----@return string|nil question The question text
+---@return string|nil question The question text (nil if no match)
 function M.parse_line(line)
   for _, pattern in ipairs(PATTERNS) do
-    local mode, question = line:match(pattern)
-    if mode and question then
+    local question = line:match(pattern)
+    if question then
       -- Clean up question (remove trailing comment closers)
       question = question:gsub("%s*%*/[%s]*$", "")
       question = question:gsub("%s*%]%][%s]*$", "")
+      question = question:gsub("%s*%-%->[%s]*$", "")
       question = question:gsub("%s*$", "")
-      return mode, question
+
+      -- Don't match empty questions
+      if question ~= "" then
+        return question
+      end
     end
   end
-  return nil, nil
+  return nil
 end
 
 ---Find mentor query at cursor position or nearby
@@ -75,12 +71,9 @@ function M.find_query(bufnr, start_line)
   for _, line_num in ipairs(search_order) do
     local line = lines[line_num]
     if line then
-      local mode, question = M.parse_line(line)
-      if mode and question then
-        local mode_info = M.modes[mode]
+      local question = M.parse_line(line)
+      if question then
         return {
-          mode = mode,
-          mode_name = mode_info and mode_info.name or "question",
           question = question,
           line = line_num,
           col = 1,
@@ -101,12 +94,9 @@ function M.find_all_queries(bufnr)
   local queries = {}
 
   for line_num, line in ipairs(lines) do
-    local mode, question = M.parse_line(line)
-    if mode and question then
-      local mode_info = M.modes[mode]
+    local question = M.parse_line(line)
+    if question then
       table.insert(queries, {
-        mode = mode,
-        mode_name = mode_info and mode_info.name or "question",
         question = question,
         line = line_num,
         col = 1,
@@ -115,28 +105,6 @@ function M.find_all_queries(bufnr)
   end
 
   return queries
-end
-
----Get mode description
----@param mode string Mode character
----@return string description
-function M.get_mode_description(mode)
-  local info = M.modes[mode]
-  if info then
-    return info.description
-  end
-  return "Unknown mode"
-end
-
----Get all available modes as formatted string
----@return string
-function M.get_modes_help()
-  local help = {}
-  for mode, info in pairs(M.modes) do
-    table.insert(help, string.format("// %s: %s", mode, info.description))
-  end
-  table.sort(help)
-  return table.concat(help, "\n")
 end
 
 return M

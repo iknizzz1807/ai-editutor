@@ -1,5 +1,6 @@
 -- editutor/init.lua
 -- ai-editutor - A Neovim plugin that teaches you to code better
+-- Simplified v1.0: Just Q: prefix, one unified experience
 
 local M = {}
 
@@ -20,26 +21,20 @@ local loading = require("editutor.loading")
 local indexer_available, indexer = pcall(require, "editutor.indexer")
 
 M._name = "EduTutor"
-M._version = "0.9.0"
+M._version = "1.0.0"
 M._setup_called = false
 M._indexer_ready = false
 
 -- UI Messages for internationalization
 M._messages = {
   en = {
-    no_comment = "No mentor comment found near cursor. Use // Q: your question",
+    no_comment = "No question found. Write: // Q: your question",
     thinking = "Thinking...",
     error = "Error: ",
     no_response = "No response received",
-    response_inserted = "Response inserted as comment",
-    modes_title = "ai-editutor - Available Modes",
-    modes_instruction = "Write a comment with one of these prefixes, then press ",
-    examples = "Examples:",
-    hints_title = "Incremental Hints:",
-    hints_instruction = "Use :EduTutorHint to get progressive hints (level 1-4)",
+    response_inserted = "Response inserted",
     history_title = "ai-editutor - Recent History",
     history_empty = "No history found",
-    history_language = "Language",
     search_prompt = "Search knowledge: ",
     search_results = "Search Results: '%s'",
     search_found = "Found %d entries",
@@ -48,64 +43,48 @@ M._messages = {
     export_failed = "Export failed: ",
     stats_title = "ai-editutor - Statistics",
     stats_total = "Total Q&A entries",
-    stats_by_mode = "By Mode:",
-    stats_by_language = "By Language:",
-    getting_hint = "Getting hint level %d...",
-    lsp_context = "Gathering context from LSP...",
-    lsp_not_available = "LSP not available - using current file context only",
-    lsp_found_defs = "Found %d related definitions",
+    hint_level = "Hint level %d/%d",
+    hint_more = "Run :EduTutorHint again for more hints",
+    hint_final = "Final hint reached",
     conversation_continued = "Continuing conversation (%d messages)",
     conversation_new = "Starting new conversation",
     conversation_cleared = "Conversation cleared",
-    conversation_info = "Conversation: %d messages, %s",
-    -- v0.9.0: Indexer messages
+    -- Indexer messages
     indexing_started = "Indexing project...",
     indexing_progress = "Indexing: %d/%d files",
     indexing_complete = "Indexing complete: %d files, %d chunks",
     indexing_failed = "Indexing failed: %s",
     indexer_not_available = "Indexer not available (sqlite.lua required)",
-    indexer_stats = "Index: %d files, %d chunks",
     gathering_context = "Gathering context...",
   },
   vi = {
-    no_comment = "Không tìm thấy comment mentor gần con trỏ. Sử dụng // Q: câu hỏi của bạn",
+    no_comment = "Không tìm thấy câu hỏi. Viết: // Q: câu hỏi của bạn",
     thinking = "Đang xử lý...",
     error = "Lỗi: ",
     no_response = "Không nhận được phản hồi",
-    response_inserted = "Đã chèn response dưới dạng comment",
-    modes_title = "ai-editutor - Các Chế Độ",
-    modes_instruction = "Viết comment với một trong các tiền tố sau, rồi nhấn ",
-    examples = "Ví dụ:",
-    hints_title = "Gợi Ý Từng Bước:",
-    hints_instruction = "Dùng :EduTutorHint để nhận gợi ý từng bước (cấp 1-4)",
-    history_title = "ai-editutor - Lịch Sử Gần Đây",
+    response_inserted = "Đã chèn response",
+    history_title = "ai-editutor - Lịch Sử",
     history_empty = "Không có lịch sử",
-    history_language = "Ngôn ngữ",
-    search_prompt = "Tìm kiếm kiến thức: ",
-    search_results = "Kết quả tìm kiếm: '%s'",
+    search_prompt = "Tìm kiếm: ",
+    search_results = "Kết quả: '%s'",
     search_found = "Tìm thấy %d mục",
-    search_empty = "Không tìm thấy kết quả cho: ",
+    search_empty = "Không tìm thấy: ",
     export_success = "Đã xuất ra: ",
     export_failed = "Xuất thất bại: ",
     stats_title = "ai-editutor - Thống Kê",
     stats_total = "Tổng số Q&A",
-    stats_by_mode = "Theo Chế Độ:",
-    stats_by_language = "Theo Ngôn Ngữ:",
-    getting_hint = "Đang lấy gợi ý cấp %d...",
-    lsp_context = "Đang thu thập context từ LSP...",
-    lsp_not_available = "LSP không khả dụng - chỉ sử dụng context file hiện tại",
-    lsp_found_defs = "Tìm thấy %d definitions liên quan",
+    hint_level = "Gợi ý level %d/%d",
+    hint_more = "Chạy :EduTutorHint lần nữa để có thêm gợi ý",
+    hint_final = "Đã đến gợi ý cuối cùng",
     conversation_continued = "Tiếp tục hội thoại (%d tin nhắn)",
     conversation_new = "Bắt đầu hội thoại mới",
     conversation_cleared = "Đã xóa hội thoại",
-    conversation_info = "Hội thoại: %d tin nhắn, %s",
-    -- v0.9.0: Indexer messages
+    -- Indexer messages
     indexing_started = "Đang index dự án...",
     indexing_progress = "Đang index: %d/%d files",
     indexing_complete = "Index hoàn tất: %d files, %d chunks",
     indexing_failed = "Index thất bại: %s",
     indexer_not_available = "Indexer không khả dụng (cần sqlite.lua)",
-    indexer_stats = "Index: %d files, %d chunks",
     gathering_context = "Đang thu thập context...",
   },
 }
@@ -131,21 +110,19 @@ function M.setup(opts)
   -- Setup keymaps
   M._setup_keymaps()
 
-  -- v0.9.0: Initialize cache
+  -- Initialize cache
   cache.setup()
 
-  -- v0.9.0: Initialize indexer (async, non-blocking)
+  -- Initialize indexer (async, non-blocking)
   if indexer_available then
     vim.schedule(function()
       local ok, err = indexer.setup(opts and opts.indexer)
       if ok then
         M._indexer_ready = true
-        -- Start background indexing
+        -- Start background indexing after 1s
         vim.defer_fn(function()
           M._background_index()
-        end, 1000) -- Delay 1s after startup
-      else
-        vim.notify("[ai-editutor] " .. M._msg("indexer_not_available") .. ": " .. (err or ""), vim.log.levels.WARN)
+        end, 1000)
       end
     end)
   end
@@ -163,10 +140,8 @@ function M._background_index()
     return
   end
 
-  -- Index in background without blocking UI
   indexer.index_project({
-    progress = function(current, total, filepath)
-      -- Optional: show progress occasionally
+    progress = function(current, total, _)
       if current % 50 == 0 or current == total then
         vim.schedule(function()
           vim.notify(string.format("[ai-editutor] " .. M._msg("indexing_progress"), current, total), vim.log.levels.INFO)
@@ -176,39 +151,17 @@ function M._background_index()
   })
 end
 
----Create user commands
+---Create user commands (simplified - no mode commands)
 function M._create_commands()
+  -- Main command
   vim.api.nvim_create_user_command("EduTutorAsk", function()
     M.ask()
-  end, { desc = "Ask ai-editutor about the current comment" })
+  end, { desc = "Ask ai-editutor (write // Q: your question first)" })
 
+  -- Hint command (progressive hints)
   vim.api.nvim_create_user_command("EduTutorHint", function()
     M.ask_with_hints()
-  end, { desc = "Ask with incremental hints" })
-
-  vim.api.nvim_create_user_command("EduTutorQuestion", function()
-    M.ask_mode("question")
-  end, { desc = "Ask in Question mode" })
-
-  vim.api.nvim_create_user_command("EduTutorSocratic", function()
-    M.ask_mode("socratic")
-  end, { desc = "Ask in Socratic mode" })
-
-  vim.api.nvim_create_user_command("EduTutorReview", function()
-    M.ask_mode("review")
-  end, { desc = "Review current function" })
-
-  vim.api.nvim_create_user_command("EduTutorDebug", function()
-    M.ask_mode("debug")
-  end, { desc = "Debug assistance" })
-
-  vim.api.nvim_create_user_command("EduTutorExplain", function()
-    M.ask_mode("explain")
-  end, { desc = "Explain concept" })
-
-  vim.api.nvim_create_user_command("EduTutorModes", function()
-    M.show_modes()
-  end, { desc = "Show available modes" })
+  end, { desc = "Get progressive hints (run multiple times for more detail)" })
 
   -- Knowledge commands
   vim.api.nvim_create_user_command("EduTutorHistory", function()
@@ -225,7 +178,7 @@ function M._create_commands()
 
   vim.api.nvim_create_user_command("EduTutorStats", function()
     M.show_stats()
-  end, { desc = "Show knowledge stats" })
+  end, { desc = "Show statistics" })
 
   -- Language command
   vim.api.nvim_create_user_command("EduTutorLang", function(opts)
@@ -235,19 +188,19 @@ function M._create_commands()
     complete = function()
       return { "English", "Vietnamese", "en", "vi" }
     end,
-    desc = "Set response language (English/Vietnamese)",
+    desc = "Set response language",
   })
 
   -- Conversation commands
   vim.api.nvim_create_user_command("EduTutorConversation", function()
     M.show_conversation()
-  end, { desc = "Show current conversation info" })
+  end, { desc = "Show conversation info" })
 
   vim.api.nvim_create_user_command("EduTutorClearConversation", function()
     M.clear_conversation()
-  end, { desc = "Clear current conversation" })
+  end, { desc = "Clear conversation" })
 
-  -- v0.9.0: Indexer commands
+  -- Indexer commands
   vim.api.nvim_create_user_command("EduTutorIndex", function(opts)
     M.index_project(opts.bang)
   end, { bang = true, desc = "Index project (! to force re-index)" })
@@ -265,19 +218,17 @@ end
 function M._setup_keymaps()
   local keymaps = config.options.keymaps
 
-  -- Main ask keymap
   if keymaps.ask then
     vim.keymap.set("n", keymaps.ask, M.ask, { desc = "ai-editutor: Ask" })
   end
 end
 
----Main ask function - detect and respond to mentor comments
----Uses multi-signal context (v0.9.0): BM25 + LSP + imports
----Supports conversation memory for follow-up questions
----Includes project documentation for better codebase understanding
----Response is inserted as inline comment below the question
+-- =============================================================================
+-- MAIN ASK FUNCTION
+-- =============================================================================
+
+---Main ask function - find Q: comment and respond
 function M.ask()
-  -- Find query at or near cursor
   local query = parser.find_query()
 
   if not query then
@@ -285,59 +236,49 @@ function M.ask()
     return
   end
 
-  -- Get mode from query
-  local mode = query.mode_name or config.options.default_mode
   local filepath = vim.api.nvim_buf_get_name(0)
   local bufnr = vim.api.nvim_get_current_buf()
   local cursor_line = query.line
 
-  -- Check if we should continue existing conversation
-  local is_continuation = conversation.continue_or_start(filepath, cursor_line, mode)
+  -- Check conversation continuation
+  local is_continuation = conversation.continue_or_start(filepath, cursor_line, "question")
   if is_continuation then
     local info = conversation.get_session_info()
     vim.notify(string.format("[ai-editutor] " .. M._msg("conversation_continued"), info.message_count), vim.log.levels.INFO)
   end
 
-  -- v0.9.0: Start loading indicator
+  -- Start loading
   loading.start(loading.states.gathering_context)
 
-  -- v0.9.0: Use cache for context extraction
+  -- Check cache
   local cache_key = cache.context_key(filepath, cursor_line)
-
-  -- Try to get cached context first
   local cached_context, cache_hit = cache.get(cache_key)
 
   if cache_hit then
-    -- Use cached context
     loading.update(loading.states.connecting)
-    M._process_ask_with_context(query, mode, filepath, bufnr, cached_context, is_continuation)
+    M._process_ask(query, filepath, bufnr, cached_context)
   else
-    -- Extract fresh context
     M._extract_context_async(query.question, filepath, cursor_line, function(full_context)
-      -- Cache the context
       cache.set(cache_key, full_context, {
         ttl = cache.config.context_ttl,
         tags = { "file:" .. filepath, "context" },
       })
 
       loading.update(loading.states.connecting)
-      M._process_ask_with_context(query, mode, filepath, bufnr, full_context, is_continuation)
+      M._process_ask(query, filepath, bufnr, full_context)
     end)
   end
 end
 
----Extract context using multi-signal approach (v0.9.0)
----@param question string The user's question
----@param filepath string Current file path
----@param cursor_line number Cursor line
----@param callback function Callback with full context
+---Extract context using multi-signal approach
+---@param question string
+---@param filepath string
+---@param cursor_line number
+---@param callback function
 function M._extract_context_async(question, filepath, cursor_line, callback)
-  -- v0.9.0: Try indexer first for BM25 + multi-signal context
+  -- Try indexer first
   if indexer_available and M._indexer_ready and indexer.is_ready() then
-    local project_root = indexer._project_root or vim.fn.getcwd()
-
-    -- Build context using indexer (BM25 + LSP + imports)
-    local indexer_context, metadata = indexer.get_context({
+    local indexer_context, _ = indexer.get_context({
       question = question,
       current_file = filepath,
       cursor_line = cursor_line,
@@ -350,13 +291,12 @@ function M._extract_context_async(question, filepath, cursor_line, callback)
     end
   end
 
-  -- Fallback: Use traditional LSP-based context extraction
+  -- Fallback: LSP-based context
   context.extract_with_lsp(function(context_formatted, has_lsp)
     if not has_lsp then
-      vim.notify("[ai-editutor] " .. M._msg("lsp_not_available"), vim.log.levels.WARN)
+      vim.notify("[ai-editutor] LSP not available - using file context only", vim.log.levels.WARN)
     end
 
-    -- Add project documentation
     local project_summary = project_context.get_project_summary()
     if project_summary ~= "" then
       context_formatted = context_formatted .. "\n\n" .. project_summary
@@ -366,30 +306,26 @@ function M._extract_context_async(question, filepath, cursor_line, callback)
   end)
 end
 
----Process ask with extracted context
----@param query table Parsed query
----@param mode string Mode name
----@param filepath string Current file path
----@param bufnr number Buffer number
----@param full_context string Formatted context
----@param is_continuation boolean Whether continuing conversation
-function M._process_ask_with_context(query, mode, filepath, bufnr, full_context, is_continuation)
-  -- Add conversation history if continuing
+---Process ask with context
+---@param query table
+---@param filepath string
+---@param bufnr number
+---@param full_context string
+function M._process_ask(query, filepath, bufnr, full_context)
+  -- Add conversation history
   local conv_history = conversation.get_history_as_context()
   if conv_history ~= "" then
     full_context = conv_history .. "\n" .. full_context
   end
 
   -- Build prompts
-  local system_prompt = prompts.get_system_prompt(mode)
-  local user_prompt = prompts.build_user_prompt(query.question, full_context, mode)
+  local system_prompt = prompts.get_system_prompt()
+  local user_prompt = prompts.build_user_prompt(query.question, full_context)
 
-  -- v0.9.0: Update loading state
   loading.update(loading.states.thinking)
 
   -- Query LLM
   provider.query_async(system_prompt, user_prompt, function(response, err)
-    -- Stop loading indicator
     loading.stop()
 
     if err then
@@ -402,29 +338,30 @@ function M._process_ask_with_context(query, mode, filepath, bufnr, full_context,
       return
     end
 
-    -- Add to conversation history
+    -- Add to conversation
     conversation.add_message("user", query.question)
     conversation.add_message("assistant", response)
 
-    -- Save to knowledge base
-    local lang = vim.bo.filetype
+    -- Save to knowledge
     knowledge.save({
-      mode = mode,
+      mode = "question",
       question = query.question,
       answer = response,
-      language = lang,
+      language = vim.bo.filetype,
       filepath = filepath,
     })
 
-    -- Insert response as inline comment
+    -- Insert response
     comment_writer.insert_or_replace(response, query.line, bufnr)
     vim.notify("[ai-editutor] " .. M._msg("response_inserted"), vim.log.levels.INFO)
   end)
 end
 
----Ask with incremental hints system (5 levels in v0.9.0)
----Uses multi-signal context for better hints
----Response is inserted as inline comment with hint level indicator
+-- =============================================================================
+-- HINTS FUNCTION
+-- =============================================================================
+
+---Ask with incremental hints (5 levels)
 function M.ask_with_hints()
   local query = parser.find_query()
 
@@ -433,25 +370,19 @@ function M.ask_with_hints()
     return
   end
 
-  local mode = query.mode_name or config.options.default_mode
   local bufnr = vim.api.nvim_get_current_buf()
   local filepath = vim.api.nvim_buf_get_name(0)
   local cursor_line = query.line
 
-  -- v0.9.0: Start loading indicator
   loading.start(loading.states.gathering_context)
 
-  -- Extract context using multi-signal approach (v0.9.0)
   M._extract_context_async(query.question, filepath, cursor_line, function(context_formatted)
-    -- Get or create hint session
-    local session = hints.get_session(query.question, mode, context_formatted)
-
-    -- Get the next hint level
+    local session = hints.get_session(query.question, nil, context_formatted)
     local level = session.level + 1
+
     loading.update(string.format("Getting hint level %d...", level))
 
     hints.request_next_hint(session, function(response, hint_level, has_more, err)
-      -- Stop loading indicator
       loading.stop()
 
       if err then
@@ -466,210 +397,35 @@ function M.ask_with_hints()
 
       -- Save to knowledge if final hint
       if hint_level == hints.MAX_LEVEL then
-        local lang = vim.bo.filetype
         knowledge.save({
-          mode = mode,
+          mode = "question",
           question = query.question,
           answer = response,
-          language = lang,
+          language = vim.bo.filetype,
           filepath = filepath,
           tags = { "hint", "level-" .. hint_level },
         })
       end
 
-      -- Prepend hint level indicator to response
-      local hint_prefix = string.format("[Hint %d/%d - %s]\n", hint_level, hints.MAX_LEVEL, hints.LEVEL_NAMES[hint_level] or "")
+      -- Add hint level indicator
+      local hint_prefix = string.format("[Hint %d/%d - %s]\n",
+        hint_level, hints.MAX_LEVEL, hints.LEVEL_NAMES[hint_level] or "")
       local full_response = hint_prefix .. response
 
-      -- Insert response as inline comment
       comment_writer.insert_or_replace(full_response, query.line, bufnr)
 
-      local msg = has_more
-        and string.format("Hint level %d inserted. Run :EduTutorHint again for more hints.", hint_level)
-        or string.format("Final hint (level %d) inserted.", hint_level)
-      vim.notify("[ai-editutor] " .. msg, vim.log.levels.INFO)
+      local msg = has_more and M._msg("hint_more") or M._msg("hint_final")
+      vim.notify(string.format("[ai-editutor] " .. M._msg("hint_level") .. " - %s",
+        hint_level, hints.MAX_LEVEL, msg), vim.log.levels.INFO)
     end)
   end)
 end
 
----Ask with a specific mode override
----@param mode string Mode name
-function M.ask_mode(mode)
-  -- Prompt user for question if no comment found
-  local query = parser.find_query()
+-- =============================================================================
+-- KNOWLEDGE FUNCTIONS
+-- =============================================================================
 
-  if query then
-    -- Override mode
-    query.mode_name = mode
-  else
-    -- Prompt for question
-    vim.ui.input({ prompt = string.format("[%s] Enter question: ", mode:upper()) }, function(input)
-      if not input or input == "" then
-        return
-      end
-
-      -- Create synthetic query
-      local cursor_line = vim.api.nvim_win_get_cursor(0)[1]
-      M._process_question(input, mode, cursor_line)
-    end)
-    return
-  end
-
-  -- Process found query with mode override
-  M._process_query(query, mode)
-end
-
----Process a query
----@param query table Parsed query
----@param mode_override? string Mode override
-function M._process_query(query, mode_override)
-  local mode = mode_override or query.mode_name or config.options.default_mode
-  local bufnr = vim.api.nvim_get_current_buf()
-
-  -- Extract context
-  local ctx = context.extract(nil, query.line)
-
-  -- Build prompts
-  local system_prompt = prompts.get_system_prompt(mode)
-  local context_formatted = context.format_for_prompt(ctx)
-  local user_prompt = prompts.build_user_prompt(query.question, context_formatted, mode)
-
-  -- Show thinking notification
-  vim.notify("[ai-editutor] " .. M._msg("thinking"), vim.log.levels.INFO)
-
-  -- Query LLM
-  provider.query_async(system_prompt, user_prompt, function(response, err)
-    if err then
-      vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
-      return
-    end
-
-    if not response then
-      vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
-      return
-    end
-
-    -- Save to knowledge base
-    knowledge.save({
-      mode = mode,
-      question = query.question,
-      answer = response,
-      language = ctx.language,
-      filepath = ctx.filepath,
-    })
-
-    -- Insert response as inline comment
-    comment_writer.insert_or_replace(response, query.line, bufnr)
-    vim.notify("[ai-editutor] " .. M._msg("response_inserted"), vim.log.levels.INFO)
-  end)
-end
-
----Process a direct question
----@param question string Question text
----@param mode string Mode name
----@param line number Line number for context
-function M._process_question(question, mode, line)
-  local bufnr = vim.api.nvim_get_current_buf()
-
-  -- Extract context
-  local ctx = context.extract(nil, line)
-
-  -- Build prompts
-  local system_prompt = prompts.get_system_prompt(mode)
-  local context_formatted = context.format_for_prompt(ctx)
-  local user_prompt = prompts.build_user_prompt(question, context_formatted, mode)
-
-  -- Show thinking notification
-  vim.notify("[ai-editutor] " .. M._msg("thinking"), vim.log.levels.INFO)
-
-  -- Query LLM
-  provider.query_async(system_prompt, user_prompt, function(response, err)
-    if err then
-      vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
-      return
-    end
-
-    if not response then
-      vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
-      return
-    end
-
-    -- Save to knowledge base
-    knowledge.save({
-      mode = mode,
-      question = question,
-      answer = response,
-      language = ctx.language,
-      filepath = ctx.filepath,
-    })
-
-    -- Insert response as inline comment
-    comment_writer.insert_or_replace(response, line, bufnr)
-    vim.notify("[ai-editutor] " .. M._msg("response_inserted"), vim.log.levels.INFO)
-  end)
-end
-
----Show available modes
-function M.show_modes()
-  local lang = prompts.get_language()
-  local is_vi = lang == "vi"
-
-  local help = {
-    M._msg("modes_title"),
-    "================================",
-    "",
-    M._msg("modes_instruction") .. (config.options.keymaps.ask or "<leader>ma"),
-    "",
-  }
-
-  -- Mode descriptions based on language
-  local mode_descriptions = {
-    en = {
-      Q = "Question - Direct answers with explanations",
-      S = "Socratic - Guided discovery through questions",
-      R = "Review - Code review and best practices",
-      D = "Debug - Guided debugging assistance",
-      E = "Explain - Deep concept explanations",
-    },
-    vi = {
-      Q = "Hỏi Đáp - Trả lời trực tiếp với giải thích",
-      S = "Socratic - Khám phá qua câu hỏi dẫn dắt",
-      R = "Review - Đánh giá code và best practices",
-      D = "Debug - Hỗ trợ debug có hướng dẫn",
-      E = "Giải Thích - Giải thích khái niệm sâu",
-    },
-  }
-
-  local descs = mode_descriptions[lang] or mode_descriptions.en
-  for mode_char, desc in pairs(descs) do
-    table.insert(help, string.format("// %s: %s", mode_char, desc))
-  end
-
-  table.insert(help, "")
-  table.insert(help, M._msg("examples"))
-
-  if is_vi then
-    table.insert(help, "  // Q: Độ phức tạp thời gian của function này là gì?")
-    table.insert(help, "  // S: Tại sao async/await có thể tốt hơn ở đây?")
-    table.insert(help, "  // R: Review function này về vấn đề bảo mật")
-    table.insert(help, "  // D: Function này đôi khi trả về nil, tại sao?")
-    table.insert(help, "  // E: Giải thích closures trong JavaScript")
-  else
-    table.insert(help, "  // Q: What is the time complexity of this function?")
-    table.insert(help, "  // S: Why might async/await be better here?")
-    table.insert(help, "  // R: Review this function for security issues")
-    table.insert(help, "  // D: This function returns nil sometimes, why?")
-    table.insert(help, "  // E: Explain closures in JavaScript")
-  end
-
-  table.insert(help, "")
-  table.insert(help, M._msg("hints_title"))
-  table.insert(help, "  " .. M._msg("hints_instruction"))
-
-  print(table.concat(help, "\n"))
-end
-
----Show recent Q&A history
+---Show recent history
 function M.show_history()
   local entries = knowledge.get_recent(20)
 
@@ -678,29 +434,20 @@ function M.show_history()
     return
   end
 
-  local lines = {
-    M._msg("history_title"),
-    "============================",
-    "",
-  }
+  local lines = { M._msg("history_title"), string.rep("=", 40), "" }
 
   for i, entry in ipairs(entries) do
-    table.insert(lines, string.format("%d. [%s] %s", i, entry.mode:upper(), entry.question:sub(1, 60)))
+    table.insert(lines, string.format("%d. %s", i, entry.question:sub(1, 60)))
     if entry.language then
-      table.insert(lines, string.format("   %s: %s", M._msg("history_language"), entry.language))
+      table.insert(lines, string.format("   [%s]", entry.language))
     end
     table.insert(lines, "")
   end
 
-  table.insert(lines, "---")
-  table.insert(lines, "Use :EduTutorSearch <query> to search")
-  table.insert(lines, "Use :EduTutorExport to export to markdown")
-
   print(table.concat(lines, "\n"))
 end
 
----Search knowledge base
----@param query? string Search query
+---Search knowledge
 function M.search_knowledge(query)
   if not query or query == "" then
     vim.ui.input({ prompt = M._msg("search_prompt") }, function(input)
@@ -721,29 +468,19 @@ function M.search_knowledge(query)
   local lines = {
     string.format(M._msg("search_results"), query),
     string.format(M._msg("search_found"), #results),
-    "========================",
-    "",
+    string.rep("=", 40), "",
   }
 
   for i, entry in ipairs(results) do
-    table.insert(lines, string.format("## %d. [%s] %s", i, entry.mode:upper(), entry.question))
-    table.insert(lines, "")
-    -- Truncate answer
-    local answer_preview = entry.answer:sub(1, 200):gsub("\n", " ")
-    if #entry.answer > 200 then
-      answer_preview = answer_preview .. "..."
-    end
-    table.insert(lines, answer_preview)
-    table.insert(lines, "")
-    table.insert(lines, "---")
+    table.insert(lines, string.format("## %d. %s", i, entry.question))
+    table.insert(lines, entry.answer:sub(1, 200):gsub("\n", " ") .. "...")
     table.insert(lines, "")
   end
 
   print(table.concat(lines, "\n"))
 end
 
----Export knowledge to markdown
----@param filepath? string Output path
+---Export knowledge
 function M.export_knowledge(filepath)
   local success, err = knowledge.export_markdown(filepath)
 
@@ -751,122 +488,59 @@ function M.export_knowledge(filepath)
     local path = filepath or (os.getenv("HOME") .. "/editutor_export.md")
     vim.notify("[ai-editutor] " .. M._msg("export_success") .. path, vim.log.levels.INFO)
   else
-    vim.notify("[ai-editutor] " .. M._msg("export_failed") .. (err or "unknown error"), vim.log.levels.ERROR)
+    vim.notify("[ai-editutor] " .. M._msg("export_failed") .. (err or ""), vim.log.levels.ERROR)
   end
 end
 
----Show knowledge statistics
+---Show stats
 function M.show_stats()
   local stats = knowledge.get_stats()
 
   local lines = {
     M._msg("stats_title"),
-    "========================",
-    "",
-    string.format("%s: %d", M._msg("stats_total"), stats.total),
-    "",
-    M._msg("stats_by_mode"),
+    string.rep("=", 40), "",
+    string.format("%s: %d", M._msg("stats_total"), stats.total), "",
   }
 
-  for mode, count in pairs(stats.by_mode) do
-    table.insert(lines, string.format("  %s: %d", mode:upper(), count))
-  end
-
-  table.insert(lines, "")
-  table.insert(lines, M._msg("stats_by_language"))
-
-  for lang, count in pairs(stats.by_language) do
-    table.insert(lines, string.format("  %s: %d", lang, count))
+  if next(stats.by_language) then
+    table.insert(lines, "By Language:")
+    for lang, count in pairs(stats.by_language) do
+      table.insert(lines, string.format("  %s: %d", lang, count))
+    end
   end
 
   print(table.concat(lines, "\n"))
 end
 
----Get plugin version
----@return string
-function M.version()
-  return M._version
-end
-
 -- =============================================================================
--- Language Functions
+-- LANGUAGE & CONVERSATION
 -- =============================================================================
 
----Set the response language
----@param lang? string Language to set (English, Vietnamese, en, vi)
+---Set language
 function M.set_language(lang)
   if not lang then
-    -- Show current language and options
     local current = config.options.language
-    local available = prompts.get_available_languages()
-
-    local lines = {
-      "ai-editutor - Language Settings",
-      "============================",
-      "",
-      string.format("Current language: %s", current),
-      "",
-      "Available languages:",
-    }
-
-    for _, l in ipairs(available) do
-      local marker = (l.name == current or l.key == current) and " (current)" or ""
-      table.insert(lines, string.format("  - %s (%s)%s", l.name, l.key, marker))
-    end
-
-    table.insert(lines, "")
-    table.insert(lines, "Usage:")
-    table.insert(lines, "  :EduTutorLang Vietnamese  - Switch to Vietnamese")
-    table.insert(lines, "  :EduTutorLang English     - Switch to English")
-    table.insert(lines, "  :EduTutorLang vi          - Switch to Vietnamese")
-    table.insert(lines, "  :EduTutorLang en          - Switch to English")
-
-    print(table.concat(lines, "\n"))
+    print(string.format("Current language: %s\nUsage: :EduTutorLang English or :EduTutorLang Vietnamese", current))
     return
   end
 
-  -- Validate and set language
-  local valid_langs = {
-    ["English"] = "English",
-    ["english"] = "English",
-    ["en"] = "English",
-    ["Vietnamese"] = "Vietnamese",
-    ["vietnamese"] = "Vietnamese",
-    ["vi"] = "Vietnamese",
-    ["Tiếng Việt"] = "Vietnamese",
+  local valid = {
+    ["English"] = "English", ["english"] = "English", ["en"] = "English",
+    ["Vietnamese"] = "Vietnamese", ["vietnamese"] = "Vietnamese", ["vi"] = "Vietnamese",
   }
 
-  local normalized = valid_langs[lang]
+  local normalized = valid[lang]
   if not normalized then
-    vim.notify(
-      string.format("[ai-editutor] Invalid language: %s. Use 'English' or 'Vietnamese'.", lang),
-      vim.log.levels.ERROR
-    )
+    vim.notify("[ai-editutor] Invalid language. Use 'English' or 'Vietnamese'.", vim.log.levels.ERROR)
     return
   end
 
   config.options.language = normalized
-
-  -- Notify in the appropriate language
-  local messages = {
-    ["English"] = "Language set to English",
-    ["Vietnamese"] = "Đã chuyển sang tiếng Việt",
-  }
-
-  vim.notify("[ai-editutor] " .. messages[normalized], vim.log.levels.INFO)
+  local msg = normalized == "English" and "Language set to English" or "Đã chuyển sang tiếng Việt"
+  vim.notify("[ai-editutor] " .. msg, vim.log.levels.INFO)
 end
 
----Get current language
----@return string Current language setting
-function M.get_language()
-  return config.options.language
-end
-
--- =============================================================================
--- Conversation Functions
--- =============================================================================
-
----Show current conversation info
+---Show conversation
 function M.show_conversation()
   local info = conversation.get_session_info()
 
@@ -875,50 +549,17 @@ function M.show_conversation()
     return
   end
 
-  local duration_str
-  if info.duration < 60 then
-    duration_str = string.format("%ds", info.duration)
-  elseif info.duration < 3600 then
-    duration_str = string.format("%dm", math.floor(info.duration / 60))
-  else
-    duration_str = string.format("%dh %dm", math.floor(info.duration / 3600), math.floor((info.duration % 3600) / 60))
-  end
-
   local lines = {
     "ai-editutor - Conversation",
-    "==========================",
-    "",
+    string.rep("=", 40), "",
     string.format("Messages: %d", info.message_count),
-    string.format("Mode: %s", info.mode),
-    string.format("Duration: %s", duration_str),
-    string.format("File: %s", info.file or "unknown"),
-    "",
-    "---",
-    "",
-    "Recent messages:",
+    string.format("File: %s", info.file or "unknown"), "",
   }
-
-  local history = conversation.get_history()
-  local start_idx = math.max(1, #history - 3) -- Show last 4 messages
-  for i = start_idx, #history do
-    local msg = history[i]
-    local role_label = msg.role == "user" and "You" or "AI"
-    local content = msg.content:sub(1, 100)
-    if #msg.content > 100 then
-      content = content .. "..."
-    end
-    content = content:gsub("\n", " ")
-    table.insert(lines, string.format("[%s]: %s", role_label, content))
-    table.insert(lines, "")
-  end
-
-  table.insert(lines, "---")
-  table.insert(lines, "Use :EduTutorClearConversation to start fresh")
 
   print(table.concat(lines, "\n"))
 end
 
----Clear current conversation
+---Clear conversation
 function M.clear_conversation()
   conversation.clear_session()
   project_context.clear_cache()
@@ -926,11 +567,10 @@ function M.clear_conversation()
 end
 
 -- =============================================================================
--- Indexer Functions (v0.9.0)
+-- INDEXER FUNCTIONS
 -- =============================================================================
 
----Index the project
----@param force boolean Force re-index even if up-to-date
+---Index project
 function M.index_project(force)
   if not indexer_available then
     vim.notify("[ai-editutor] " .. M._msg("indexer_not_available"), vim.log.levels.ERROR)
@@ -938,7 +578,6 @@ function M.index_project(force)
   end
 
   if not M._indexer_ready then
-    -- Try to setup indexer first
     local ok, err = indexer.setup()
     if not ok then
       vim.notify("[ai-editutor] " .. M._msg("indexing_failed") .. (err or ""), vim.log.levels.ERROR)
@@ -949,14 +588,13 @@ function M.index_project(force)
 
   vim.notify("[ai-editutor] " .. M._msg("indexing_started"), vim.log.levels.INFO)
 
-  -- Clear index if force
   if force then
     indexer.rebuild()
   end
 
   local success, stats = indexer.index_project({
     force = force,
-    progress = function(current, total, filepath)
+    progress = function(current, total, _)
       if current % 20 == 0 or current == total then
         vim.schedule(function()
           vim.notify(string.format("[ai-editutor] " .. M._msg("indexing_progress"), current, total), vim.log.levels.INFO)
@@ -966,16 +604,14 @@ function M.index_project(force)
   })
 
   if success then
-    vim.notify(
-      string.format("[ai-editutor] " .. M._msg("indexing_complete"), stats.files_indexed, stats.chunks_created),
-      vim.log.levels.INFO
-    )
+    vim.notify(string.format("[ai-editutor] " .. M._msg("indexing_complete"),
+      stats.files_indexed, stats.chunks_created), vim.log.levels.INFO)
   else
     vim.notify("[ai-editutor] " .. M._msg("indexing_failed") .. (stats.error or ""), vim.log.levels.ERROR)
   end
 end
 
----Show indexer statistics
+---Show index stats
 function M.show_index_stats()
   if not indexer_available then
     vim.notify("[ai-editutor] " .. M._msg("indexer_not_available"), vim.log.levels.WARN)
@@ -991,52 +627,24 @@ function M.show_index_stats()
 
   local lines = {
     "ai-editutor - Index Statistics",
-    "==============================",
-    "",
-    string.format("Database: %s", stats.db_path or "unknown"),
+    string.rep("=", 40), "",
     string.format("Files indexed: %d", stats.file_count or 0),
-    string.format("Chunks created: %d", stats.chunk_count or 0),
-    string.format("Imports tracked: %d", stats.import_count or 0),
-    "",
+    string.format("Chunks created: %d", stats.chunk_count or 0), "",
   }
-
-  if stats.by_type and #stats.by_type > 0 then
-    table.insert(lines, "By Chunk Type:")
-    for _, item in ipairs(stats.by_type) do
-      table.insert(lines, string.format("  %s: %d", item.type, item.count))
-    end
-    table.insert(lines, "")
-  end
-
-  if stats.by_language and #stats.by_language > 0 then
-    table.insert(lines, "By Language:")
-    for _, item in ipairs(stats.by_language) do
-      table.insert(lines, string.format("  %s: %d", item.language or "unknown", item.count))
-    end
-    table.insert(lines, "")
-  end
-
-  -- Cache stats
-  local cache_stats = cache.get_stats()
-  table.insert(lines, "Cache Statistics:")
-  table.insert(lines, string.format("  Active entries: %d/%d", cache_stats.active, cache_stats.max_entries))
-  table.insert(lines, string.format("  Expired: %d", cache_stats.expired))
 
   print(table.concat(lines, "\n"))
 end
 
----Clear context cache
+---Clear cache
 function M.clear_cache()
   cache.clear()
   project_context.clear_cache()
   vim.notify("[ai-editutor] Cache cleared", vim.log.levels.INFO)
 end
 
----Check if indexer is available and ready
----@return boolean available
----@return boolean ready
-function M.indexer_status()
-  return indexer_available, M._indexer_ready
+---Get version
+function M.version()
+  return M._version
 end
 
 return M

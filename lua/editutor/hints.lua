@@ -1,19 +1,17 @@
 -- editutor/hints.lua
--- Incremental hints system - progressive assistance
+-- Incremental hints system - progressive assistance (5 levels)
+-- Simplified: No mode dependency
 
 local M = {}
 
-local config = require("editutor.config")
 local prompts = require("editutor.prompts")
 local provider = require("editutor.provider")
 
 -- Store hint sessions (question -> hint state)
--- Each session tracks hint level and previous responses
 local sessions = {}
 
 ---@class HintSession
 ---@field question string Original question
----@field mode string Mode used
 ---@field context string Formatted context
 ---@field level number Current hint level (1-5)
 ---@field responses string[] Responses at each level
@@ -22,7 +20,7 @@ local sessions = {}
 -- Maximum hint levels (5-level progressive system)
 M.MAX_LEVEL = 5
 
--- Hint level names and descriptions
+-- Hint level names
 M.LEVEL_NAMES = {
   [1] = "conceptual",
   [2] = "strategic",
@@ -39,81 +37,24 @@ M.LEVEL_DESCRIPTIONS = {
   [5] = "Solution - Complete answer with explanation",
 }
 
--- Hint level prompts (5 levels of progressively more revealing hints)
-M.LEVEL_PROMPTS = {
-  -- Level 1: Conceptual - Point to relevant concepts without explaining how to apply them
-  [1] = [[
-Give a CONCEPTUAL hint (Level 1/5) - What concepts are relevant?
-- Mention 1-2 programming concepts that relate to this problem
-- Use a question to guide thinking: "Have you considered...?"
-- DO NOT explain how to apply these concepts
-- DO NOT point to specific code locations
-- Keep it to 2-3 sentences maximum
-- Example: "This seems related to closure scope. What happens to variables when a function returns?"]],
-
-  -- Level 2: Strategic - Suggest an approach or strategy
-  [2] = [[
-Give a STRATEGIC hint (Level 2/5) - What approach to consider?
-- Build on the conceptual hint (don't repeat it)
-- Suggest a general strategy or pattern to investigate
-- Mention what type of solution might work (but not the specific solution)
-- Keep it to 3-4 sentences
-- Example: "You might want to look into how async/await handles errors differently from callbacks. Consider what happens if a promise rejects..."]],
-
-  -- Level 3: Directional - Point to specific code locations or patterns
-  [3] = [[
-Give a DIRECTIONAL hint (Level 3/5) - Where in the code to look?
-- Point to specific areas in the provided code context
-- Identify which function, line, or pattern to focus on
-- Explain what to look for (but not the fix)
-- You can reference line numbers from the context
-- Keep it to 4-5 sentences
-- Example: "Look at line 42 where the callback is registered. Notice how the variable 'count' is accessed. What value does 'count' have when the callback actually runs?"]],
-
-  -- Level 4: Specific - Give specific techniques but not the full answer
-  [4] = [[
-Give a SPECIFIC hint (Level 4/5) - What techniques to try?
-- Provide a specific technique or pattern to apply
-- Show a small code example or pseudocode (not the complete solution)
-- Explain the "why" behind this technique
-- Let the developer apply it to their specific case
-- Keep it to 5-7 sentences with a short code snippet
-- Example: "To capture the current value, you can use an IIFE or pass it as a parameter. Like this:
-  for (let i = 0; i < 5; i++) { ((current) => { setTimeout(() => console.log(current), 100); })(i); }
-  Now apply this pattern to your situation..."]],
-
-  -- Level 5: Solution - Complete answer with explanation
-  [5] = [[
-Give the FULL SOLUTION (Level 5/5) - Complete answer with explanation.
-- Provide the complete, working solution
-- Explain each part of the solution and why it works
-- Show before/after code if applicable
-- Mention edge cases and potential pitfalls
-- Suggest one related concept to learn next
-- Be thorough but concise (aim for clear, not long)]],
-}
-
----Generate session key from question and context
+---Generate session key from question
 ---@param question string
----@param mode string
 ---@return string
-local function get_session_key(question, mode)
-  -- Simple hash based on question and mode
-  return mode .. ":" .. question:sub(1, 100)
+local function get_session_key(question)
+  return "hint:" .. question:sub(1, 100)
 end
 
 ---Get or create hint session
 ---@param question string
----@param mode string
+---@param _ any Ignored (backwards compat for mode)
 ---@param context string Formatted context
 ---@return HintSession
-function M.get_session(question, mode, context)
-  local key = get_session_key(question, mode)
+function M.get_session(question, _, context)
+  local key = get_session_key(question)
 
   if not sessions[key] then
     sessions[key] = {
       question = question,
-      mode = mode,
       context = context,
       level = 0,
       responses = {},
@@ -142,18 +83,17 @@ end
 ---Build hint prompt for specific level
 ---@param question string
 ---@param context string
----@param mode string
 ---@param level number
 ---@param previous_responses string[]
 ---@return string system_prompt
 ---@return string user_prompt
-function M.build_hint_prompt(question, context, mode, level, previous_responses)
-  -- Base system prompt
+function M.build_hint_prompt(question, context, level, previous_responses)
+  -- Base system prompt + hint level instruction
   local system_parts = {
-    prompts.get_system_prompt(mode),
+    prompts.get_system_prompt(),
     "",
     "HINT LEVEL: " .. level .. "/" .. M.MAX_LEVEL,
-    M.LEVEL_PROMPTS[level],
+    prompts.get_hint_prompt(level),
   }
 
   -- Add previous hint context if available
@@ -161,7 +101,7 @@ function M.build_hint_prompt(question, context, mode, level, previous_responses)
     table.insert(system_parts, "")
     table.insert(system_parts, "Previous hints given (do not repeat, build upon them):")
     for i, resp in ipairs(previous_responses) do
-      table.insert(system_parts, string.format("Level %d hint: %s", i, resp:sub(1, 200) .. "..."))
+      table.insert(system_parts, string.format("Level %d: %s", i, resp:sub(1, 150) .. "..."))
     end
   end
 
@@ -199,7 +139,6 @@ function M.request_next_hint(session, callback)
   local system_prompt, user_prompt = M.build_hint_prompt(
     session.question,
     session.context,
-    session.mode,
     next_level,
     session.responses
   )
@@ -221,9 +160,9 @@ end
 
 ---Clear a specific session
 ---@param question string
----@param mode string
-function M.clear_session(question, mode)
-  local key = get_session_key(question, mode)
+---@param _ any Ignored
+function M.clear_session(question, _)
+  local key = get_session_key(question)
   sessions[key] = nil
 end
 

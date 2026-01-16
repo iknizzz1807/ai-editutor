@@ -7,7 +7,6 @@ local M = {}
 ---@field provider string LLM provider ("claude" | "openai" | "ollama")
 ---@field api_key string|function API key or function returning key
 ---@field model string Model identifier
----@field default_mode string Default interaction mode
 ---@field context_lines number Lines of context around question
 ---@field include_imports boolean Include file imports in context
 ---@field language string Language for explanations
@@ -33,7 +32,6 @@ M.defaults = {
   model = "claude-sonnet-4-20250514",
 
   -- Behavior
-  default_mode = "question",
   context_lines = 50,
   include_imports = true,
   -- Language for responses: "English", "Vietnamese", "vi", "en", "Tiếng Việt"
