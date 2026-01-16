@@ -85,20 +85,21 @@ M.CONFIG_FILES = {
   "Dockerfile", "Containerfile",
   "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml",
   "Vagrantfile", "Procfile", "Caddyfile",
-  -- Package managers
-  "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
-  "Gemfile", "Gemfile.lock",
-  "Cargo.toml", "Cargo.lock",
+  -- Package managers (excluding lock files - they are data, not useful for context)
+  "package.json",
+  "Gemfile",
+  "Cargo.toml",
   "go.mod", "go.sum",
   "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt",
-  "Pipfile", "Pipfile.lock", "poetry.lock",
+  "Pipfile",
   "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts",
   "pom.xml", "build.xml",
   "mix.exs", "rebar.config",
   "dune", "dune-project",
   "pubspec.yaml",
-  "composer.json", "composer.lock",
-  "Podfile", "Podfile.lock",
+  "composer.json",
+  "Podfile",
+  -- Note: Lock files (*.lock, *-lock.*, *.lockb) are excluded as data
   -- Editor/Linter config
   ".editorconfig", ".prettierrc", ".prettierrc.json", ".prettierrc.yml",
   ".eslintrc", ".eslintrc.js", ".eslintrc.json", ".eslintrc.yml",
@@ -124,13 +125,11 @@ M.CONFIG_FILES = {
   ".travis.yml", ".gitlab-ci.yml", "Jenkinsfile",
   "azure-pipelines.yml", "bitbucket-pipelines.yml",
   "appveyor.yml", ".drone.yml", "cloudbuild.yaml",
-  -- Documentation
+  -- Documentation (keep only README and CONTRIBUTING - useful for understanding project)
   "README", "README.md", "README.rst", "README.txt",
-  "CHANGELOG", "CHANGELOG.md", "HISTORY.md",
   "CONTRIBUTING", "CONTRIBUTING.md",
-  "LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING",
-  "AUTHORS", "AUTHORS.md", "CODEOWNERS",
-  "CODE_OF_CONDUCT.md", "SECURITY.md",
+  -- Note: Excluded from config (not useful for code understanding):
+  -- CHANGELOG, HISTORY, LICENSE, AUTHORS, CODE_OF_CONDUCT, SECURITY
   -- Git
   ".gitignore", ".gitattributes", ".gitmodules",
   -- Environment templates
@@ -153,9 +152,9 @@ M.CONFIG_FILES = {
   "tslint.json",
   "biome.json", "biome.jsonc",
   "deno.json", "deno.jsonc",
-  "bun.lockb", "bunfig.toml",
+  "bunfig.toml",
+  -- Note: bun.lockb is binary, excluded
   -- Neovim/Vim
-  "lazy-lock.json",
   "stylua.toml", ".stylua.toml",
   "selene.toml",
   ".luacheckrc", ".luarc.json",
@@ -202,9 +201,58 @@ M.DATA_EXTENSIONS = {
 -- Gitignore Parser
 -- =============================================================================
 
----Parse .gitignore file and return patterns
+---@class GitignorePattern
+---@field pattern string The original pattern
+---@field negated boolean Whether this is a negation pattern (!)
+---@field lua_pattern string The converted Lua pattern
+---@field anchored boolean Whether pattern is anchored to root (starts with /)
+---@field dir_only boolean Whether pattern only matches directories (ends with /)
+
+---Convert a gitignore pattern to Lua pattern
+---@param pattern string
+---@return string lua_pattern
+---@return boolean anchored
+---@return boolean dir_only
+local function convert_gitignore_pattern(pattern)
+  local anchored = false
+  local dir_only = false
+
+  -- Check for directory-only pattern (ends with /)
+  if pattern:match("/$") then
+    dir_only = true
+    pattern = pattern:gsub("/$", "")
+  end
+
+  -- Check for anchored pattern (starts with /)
+  if pattern:match("^/") then
+    anchored = true
+    pattern = pattern:gsub("^/", "")
+  end
+
+  -- If pattern contains / (not at start/end), it's anchored
+  if pattern:match("/") then
+    anchored = true
+  end
+
+  -- Convert to Lua pattern
+  local lua_pattern = pattern
+    -- Escape special characters first
+    :gsub("([%.%+%-%^%$%(%)%[%]%%])", "%%%1")
+    -- Handle **
+    :gsub("%*%*", "<<<GLOBSTAR>>>")
+    -- Handle *
+    :gsub("%*", "[^/]*")
+    -- Handle ?
+    :gsub("%?", "[^/]")
+    -- Restore **
+    :gsub("<<<GLOBSTAR>>>", ".*")
+
+  return lua_pattern, anchored, dir_only
+end
+
+---Parse .gitignore file and return structured patterns
 ---@param gitignore_path string
----@return table patterns
+---@return GitignorePattern[] patterns
 local function parse_gitignore(gitignore_path)
   local patterns = {}
 
@@ -217,43 +265,94 @@ local function parse_gitignore(gitignore_path)
     -- Skip empty lines and comments
     line = vim.trim(line)
     if line ~= "" and not line:match("^#") then
-      table.insert(patterns, line)
+      local negated = false
+      local raw_pattern = line
+
+      -- Check for negation
+      if line:match("^!") then
+        negated = true
+        raw_pattern = line:sub(2)
+      end
+
+      local lua_pattern, anchored, dir_only = convert_gitignore_pattern(raw_pattern)
+
+      table.insert(patterns, {
+        pattern = raw_pattern,
+        negated = negated,
+        lua_pattern = lua_pattern,
+        anchored = anchored,
+        dir_only = dir_only,
+      })
     end
   end
 
   return patterns
 end
 
----Check if a path matches gitignore patterns
+---Check if a single pattern matches a path
 ---@param path string Relative path
----@param patterns table Gitignore patterns
+---@param p GitignorePattern Pattern object
+---@param is_dir boolean Whether the path is a directory
 ---@return boolean
-local function matches_gitignore(path, patterns)
-  for _, pattern in ipairs(patterns) do
-    -- Simple matching (not full gitignore spec but covers most cases)
-    local lua_pattern = pattern
-      :gsub("%.", "%%.")
-      :gsub("%*%*", "<<<GLOBSTAR>>>")
-      :gsub("%*", "[^/]*")
-      :gsub("<<<GLOBSTAR>>>", ".*")
-      :gsub("^/", "^")
+local function pattern_matches(path, p, is_dir)
+  -- If pattern is dir_only and path is not a directory, skip
+  if p.dir_only and not is_dir then
+    return false
+  end
 
-    -- Check if pattern matches
-    if path:match(lua_pattern) then
+  local lua_pattern = p.lua_pattern
+
+  if p.anchored then
+    -- Anchored: must match from start
+    if path:match("^" .. lua_pattern .. "$") then
       return true
     end
-
-    -- Check folder match (pattern without trailing slash)
-    local folder_pattern = pattern:gsub("/$", "")
-    if path:match("^" .. folder_pattern:gsub("%.", "%%."):gsub("%*", ".*") .. "/") then
+    if path:match("^" .. lua_pattern .. "/") then
       return true
     end
-    if path:match("/" .. folder_pattern:gsub("%.", "%%."):gsub("%*", ".*") .. "/") then
+  else
+    -- Not anchored: can match anywhere
+    -- Match as full path
+    if path:match("^" .. lua_pattern .. "$") then
+      return true
+    end
+    -- Match as suffix after /
+    if path:match("/" .. lua_pattern .. "$") then
+      return true
+    end
+    -- Match as component
+    if path:match("^" .. lua_pattern .. "/") then
+      return true
+    end
+    if path:match("/" .. lua_pattern .. "/") then
       return true
     end
   end
 
   return false
+end
+
+---Check if a path matches gitignore patterns
+---Patterns are processed in order; negation patterns can un-ignore
+---@param path string Relative path
+---@param patterns GitignorePattern[] Gitignore patterns
+---@param is_dir boolean Whether the path is a directory
+---@return boolean
+local function matches_gitignore(path, patterns, is_dir)
+  local ignored = false
+
+  -- Process patterns in order - later patterns override earlier ones
+  for _, p in ipairs(patterns) do
+    if pattern_matches(path, p, is_dir) then
+      if p.negated then
+        ignored = false
+      else
+        ignored = true
+      end
+    end
+  end
+
+  return ignored
 end
 
 -- =============================================================================
@@ -312,14 +411,89 @@ local function is_data_extension(ext)
   return false
 end
 
+-- Lock file patterns (these are data, not source)
+local LOCK_FILE_PATTERNS = {
+  "%-lock%.yaml$",     -- pnpm-lock.yaml
+  "%-lock%.json$",     -- package-lock.json
+  "%.lock$",           -- Cargo.lock, yarn.lock, etc.
+  "^lockfile$",        -- Some projects use this
+  "%.lockb$",          -- bun.lockb
+}
+
+-- Files to exclude (not useful for code understanding)
+local EXCLUDED_FILES = {
+  -- Changelogs (just lists of changes, often very long)
+  "^changelog",        -- CHANGELOG, CHANGELOG.md, changelog.md
+  "^history",          -- HISTORY.md
+  "^news",             -- NEWS, NEWS.md
+  "^releases",         -- RELEASES.md
+  -- Legal files
+  "^license",          -- LICENSE, LICENSE.md, LICENSE.txt
+  "^licence",          -- British spelling
+  "^copying",          -- COPYING
+  "^copyright",        -- COPYRIGHT
+  "^patents",          -- PATENTS
+  -- Community files
+  "^authors",          -- AUTHORS, AUTHORS.md
+  "^contributors",     -- CONTRIBUTORS.md
+  "^maintainers",      -- MAINTAINERS.md
+  "^codeowners",       -- CODEOWNERS
+  "^code[_-]of[_-]conduct", -- CODE_OF_CONDUCT.md
+  "^security",         -- SECURITY.md
+  "^funding",          -- FUNDING.yml
+  -- Misc non-code docs
+  "^install",          -- INSTALL.md (often long setup instructions)
+  "^upgrading",        -- UPGRADING.md
+  "^migration",        -- MIGRATION.md
+  "^deprecat",         -- DEPRECATED.md
+  -- Localized READMEs (keep main README but skip translations)
+  "^readme%..+%.", -- README.zh-CN.md, README.ko.md, etc. (has dot before extension)
+}
+
+---Check if filename should be excluded
+---@param filename string
+---@return boolean
+local function is_excluded_file(filename)
+  local lower = filename:lower()
+  for _, pattern in ipairs(EXCLUDED_FILES) do
+    if lower:match(pattern) then
+      return true
+    end
+  end
+  return false
+end
+
+---Check if filename is a lock file
+---@param filename string
+---@return boolean
+local function is_lock_file(filename)
+  local lower = filename:lower()
+  for _, pattern in ipairs(LOCK_FILE_PATTERNS) do
+    if lower:match(pattern) then
+      return true
+    end
+  end
+  return false
+end
+
 ---Classify a file
 ---@param filepath string Full path
 ---@param filename string Just the filename
 ---@return string "source"|"config"|"data"|"unknown"
 local function classify_file(filepath, filename)
-  -- Check config files first (exact match)
+  -- Check for excluded files first (not useful for code understanding)
+  if is_excluded_file(filename) then
+    return "data"  -- Treat as data so it won't be included
+  end
+
+  -- Check config files (exact match)
   if is_config_file(filename) then
     return "config"
+  end
+
+  -- Check for lock files (these are data, not useful for context)
+  if is_lock_file(filename) then
+    return "data"
   end
 
   -- Get extension
@@ -503,7 +677,8 @@ function M.scan_project(opts)
       end
 
       -- Skip gitignored
-      if matches_gitignore(item_rel_path, gitignore_patterns) then
+      local is_dir = (item_type == "directory")
+      if matches_gitignore(item_rel_path, gitignore_patterns, is_dir) then
         goto continue
       end
 
@@ -548,18 +723,32 @@ function M.scan_project(opts)
 
         -- Only include source and config files
         if file_type == "source" or file_type == "config" then
-          source_count = source_count + 1
-
           local stat = vim.loop.fs_stat(full_path)
           local size = stat and stat.size or 0
+
+          -- Skip very large files (likely test fixtures, generated data, etc.)
+          -- 100KB is generous for most source files
+          local max_file_size = 100 * 1024  -- 100KB
+
+          -- Allow larger files for main source (not in test directories)
+          local in_test_dir = item_rel_path:match("test") or item_rel_path:match("spec")
+                          or item_rel_path:match("fixture") or item_rel_path:match("__snapshots__")
+          if in_test_dir then
+            max_file_size = 50 * 1024  -- 50KB for test files
+          end
+
+          if size > max_file_size then
+            -- Skip large files (likely generated/fixture data)
+            goto continue
+          end
+
+          source_count = source_count + 1
           local lines = nil
 
           -- Read line count for source/config
-          if size < 1000000 then -- Skip files > 1MB
-            local ok, content = pcall(vim.fn.readfile, full_path)
-            if ok then
-              lines = #content
-            end
+          local ok, content = pcall(vim.fn.readfile, full_path)
+          if ok then
+            lines = #content
           end
 
           table.insert(files, {
