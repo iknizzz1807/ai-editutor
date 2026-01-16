@@ -262,8 +262,11 @@ function M.is_up_to_date(filepath, hash)
     return false
   end
 
-  local result = db:eval("SELECT hash FROM files WHERE path = ?", { filepath })
-  if result and result[1] then
+  local ok, result = pcall(function()
+    return db:eval("SELECT hash FROM files WHERE path = ?", { filepath })
+  end)
+
+  if ok and type(result) == "table" and result[1] then
     return result[1].hash == hash
   end
 
@@ -298,8 +301,11 @@ function M.get_file(filepath)
     return nil
   end
 
-  local result = db:eval("SELECT * FROM files WHERE path = ?", { filepath })
-  if result and result[1] then
+  local ok, result = pcall(function()
+    return db:eval("SELECT * FROM files WHERE path = ?", { filepath })
+  end)
+
+  if ok and type(result) == "table" and result[1] then
     return result[1]
   end
 
@@ -412,12 +418,19 @@ function M.get_importers(imported_name)
     return {}
   end
 
-  return db:eval([[
-    SELECT f.path, i.line_number
-    FROM imports i
-    JOIN files f ON f.id = i.file_id
-    WHERE i.imported_name = ?
-  ]], { imported_name }) or {}
+  local ok, result = pcall(function()
+    return db:eval([[
+      SELECT f.path, i.line_number
+      FROM imports i
+      JOIN files f ON f.id = i.file_id
+      WHERE i.imported_name = ?
+    ]], { imported_name })
+  end)
+
+  if ok and type(result) == "table" then
+    return result
+  end
+  return {}
 end
 
 -- =============================================================================
@@ -436,8 +449,8 @@ function M.search_bm25(query, opts)
   opts = opts or {}
   local limit = opts.limit or 20
 
-  -- Escape special FTS5 characters
-  local escaped_query = query:gsub('[%-%+%*%"%(%)]', function(c)
+  -- Escape special FTS5 characters (including ? which is special in FTS5)
+  local escaped_query = query:gsub('[%-%+%*%"%(%)?:^~]', function(c)
     return " "
   end)
 
@@ -455,29 +468,34 @@ function M.search_bm25(query, opts)
 
   local fts_query = table.concat(terms, " OR ")
 
-  local result = db:eval([[
-    SELECT
-      c.id,
-      c.file_id,
-      c.type,
-      c.name,
-      c.signature,
-      c.start_line,
-      c.end_line,
-      c.content,
-      c.scope_path,
-      f.path as file_path,
-      f.language,
-      bm25(chunks_fts, 10.0, 5.0, 1.0) as score
-    FROM chunks_fts
-    JOIN chunks c ON c.id = chunks_fts.rowid
-    JOIN files f ON f.id = c.file_id
-    WHERE chunks_fts MATCH ?
-    ORDER BY score
-    LIMIT ?
-  ]], { fts_query, limit })
+  local ok, result = pcall(function()
+    return db:eval([[
+      SELECT
+        c.id,
+        c.file_id,
+        c.type,
+        c.name,
+        c.signature,
+        c.start_line,
+        c.end_line,
+        c.content,
+        c.scope_path,
+        f.path as file_path,
+        f.language,
+        bm25(chunks_fts, 10.0, 5.0, 1.0) as score
+      FROM chunks_fts
+      JOIN chunks c ON c.id = chunks_fts.rowid
+      JOIN files f ON f.id = c.file_id
+      WHERE chunks_fts MATCH ?
+      ORDER BY score
+      LIMIT ?
+    ]], { fts_query, limit })
+  end)
 
-  return result or {}
+  if ok and type(result) == "table" then
+    return result
+  end
+  return {}
 end
 
 ---Search by exact name
@@ -488,12 +506,19 @@ function M.search_by_name(name)
     return {}
   end
 
-  return db:eval([[
-    SELECT c.*, f.path as file_path, f.language
-    FROM chunks c
-    JOIN files f ON f.id = c.file_id
-    WHERE c.name = ?
-  ]], { name }) or {}
+  local ok, result = pcall(function()
+    return db:eval([[
+      SELECT c.*, f.path as file_path, f.language
+      FROM chunks c
+      JOIN files f ON f.id = c.file_id
+      WHERE c.name = ?
+    ]], { name })
+  end)
+
+  if ok and type(result) == "table" then
+    return result
+  end
+  return {}
 end
 
 -- =============================================================================

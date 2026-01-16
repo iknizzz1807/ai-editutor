@@ -1,6 +1,6 @@
 -- editutor/indexer/ranker.lua
 -- Multi-signal context ranking for precise LLM context selection
--- Combines: BM25, LSP definitions, git recency, directory proximity, import graph, recent access
+-- Combines: BM25, LSP definitions, file recency, directory proximity, import graph, recent access
 
 local M = {}
 
@@ -12,10 +12,10 @@ M.DEFAULT_WEIGHTS = {
   lsp_definition = 1.0, -- Direct LSP go-to-definition match
   lsp_reference = 0.3, -- LSP references
   bm25_score = 0.5, -- FTS5 BM25 relevance score
-  git_recency = 0.2, -- Recently modified files in git
+  file_recency = 0.2, -- Recently modified files (mtime from filesystem)
   directory_proximity = 0.3, -- Same/nearby directory
   import_distance = 0.2, -- Import graph distance
-  recent_access = 0.1, -- Recently opened in editor
+  recent_access = 0.15, -- Recently opened in editor
   type_priority = 0.15, -- Chunk type (function > class > variable)
   name_match = 0.4, -- Exact/partial name match
 }
@@ -71,29 +71,19 @@ local function calc_directory_proximity(file1, file2, project_root)
   return common / max_depth
 end
 
----Calculate git recency score
+---Calculate file recency score using mtime from database
 ---@param filepath string
----@param project_root string
 ---@return number 0-1 score (1 = modified recently)
-local function calc_git_recency(filepath, project_root)
-  -- Get last commit timestamp for file
-  local cmd = string.format(
-    "cd %s && git log -1 --format=%%ct -- %s 2>/dev/null",
-    vim.fn.shellescape(project_root),
-    vim.fn.shellescape(filepath)
-  )
-
-  local result = vim.fn.system(cmd)
-  local timestamp = tonumber(vim.trim(result))
-
-  if not timestamp then
+local function calc_file_recency(filepath)
+  local file_info = db.get_file(filepath)
+  if not file_info or not file_info.mtime then
     return 0
   end
 
-  -- Score based on age (decay over 30 days)
-  local age_seconds = os.time() - timestamp
+  -- Score based on age (decay over 7 days)
+  local age_seconds = os.time() - file_info.mtime
   local age_days = age_seconds / (24 * 60 * 60)
-  local decay_days = 30
+  local decay_days = 7 -- Files modified within a week get higher scores
 
   return math.max(0, 1 - (age_days / decay_days))
 end
@@ -184,7 +174,8 @@ end
 ---@param opts table {query, current_file, weights, project_root}
 ---@return number score
 local function calc_chunk_score(chunk, opts)
-  local weights = opts.weights or M.DEFAULT_WEIGHTS
+  -- Merge custom weights with defaults to ensure all keys exist
+  local weights = vim.tbl_deep_extend("force", M.DEFAULT_WEIGHTS, opts.weights or {})
   local score = 0
 
   -- BM25 score (already from FTS5, normalize to 0-1)
@@ -208,10 +199,10 @@ local function calc_chunk_score(chunk, opts)
     score = score + weights.directory_proximity * proximity
   end
 
-  -- Git recency
-  if chunk.file_path and opts.project_root then
-    local git_score = calc_git_recency(chunk.file_path, opts.project_root)
-    score = score + weights.git_recency * git_score
+  -- File recency (using mtime from database - fast!)
+  if chunk.file_path then
+    local recency_score = calc_file_recency(chunk.file_path)
+    score = score + weights.file_recency * recency_score
   end
 
   -- Import distance

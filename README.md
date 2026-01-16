@@ -115,22 +115,57 @@ Ask follow-up questions without repeating context:
 
 ## Installation
 
-### lazy.nvim
+### Requirements
+
+| Dependency | Required? | Purpose |
+|------------|-----------|---------|
+| `nvim-lua/plenary.nvim` | **Required** | HTTP requests, async utilities |
+| `nvim-treesitter/nvim-treesitter` | Recommended | Better code chunking |
+| `kkharji/sqlite.lua` | Recommended | BM25 search, project indexing |
+
+**Without sqlite.lua**: Plugin works with LSP-only context (still very capable)
+**With sqlite.lua**: Enables BM25 full-text search across entire project
+
+### lazy.nvim (Recommended)
 ```lua
 {
   "your-username/ai-editutor",
   dependencies = {
-    "nvim-lua/plenary.nvim",
-    "nvim-treesitter/nvim-treesitter",  -- Recommended: Better chunking
-    "kkharji/sqlite.lua",               -- Recommended: BM25 search
+    "nvim-lua/plenary.nvim",           -- Required
+    "nvim-treesitter/nvim-treesitter", -- Recommended
+    "kkharji/sqlite.lua",              -- Recommended: enables BM25 search
   },
   config = function()
     require("editutor").setup({
       provider = "claude",  -- claude, openai, deepseek, groq, together, openrouter, ollama
-      api_key = os.getenv("ANTHROPIC_API_KEY"),
     })
   end,
 }
+```
+
+### packer.nvim
+```lua
+use {
+  "your-username/ai-editutor",
+  requires = {
+    "nvim-lua/plenary.nvim",
+    "nvim-treesitter/nvim-treesitter",
+    "kkharji/sqlite.lua",
+  },
+  config = function()
+    require("editutor").setup({
+      provider = "claude",
+    })
+  end,
+}
+```
+
+### vim-plug
+```vim
+Plug 'nvim-lua/plenary.nvim'
+Plug 'nvim-treesitter/nvim-treesitter'
+Plug 'kkharji/sqlite.lua'
+Plug 'your-username/ai-editutor'
 ```
 
 ## Quick Start
@@ -251,6 +286,13 @@ The plugin automatically uses the appropriate comment style:
 | `:EduTutorSearch [query]` | Search knowledge base |
 | `:EduTutorExport [path]` | Export to markdown |
 | `:EduTutorStats` | Show statistics |
+
+### Indexer Commands (v0.9.0)
+| Command | Description |
+|---------|-------------|
+| `:EduTutorIndex` | Index current project for BM25 search |
+| `:EduTutorIndexStats` | Show indexer statistics |
+| `:EduTutorClearCache` | Clear context cache |
 
 ### Other Commands
 | Command | Description |

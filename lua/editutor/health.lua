@@ -169,12 +169,83 @@ function M.check()
     end
   end
 
+  -- v0.9.0: Indexer checks
+  start("ai-editutor Indexer (v0.9.0)")
+
+  -- First check sqlite.lua availability
+  local sqlite_ok = pcall(require, "sqlite")
+  if sqlite_ok then
+    ok("sqlite.lua is installed (BM25 search enabled)")
+  else
+    warn("sqlite.lua not installed", {
+      "BM25 full-text search is DISABLED",
+      "Plugin will use LSP-only context (still works well)",
+      "",
+      "To enable BM25 search, install sqlite.lua:",
+      "  lazy.nvim: { 'kkharji/sqlite.lua' }",
+      "  packer: use { 'kkharji/sqlite.lua' }",
+      "  vim-plug: Plug 'kkharji/sqlite.lua'",
+    })
+  end
+
+  local indexer_ok, indexer_mod = pcall(require, "editutor.indexer")
+  if indexer_ok and sqlite_ok then
+    ok("Indexer module loaded")
+
+    -- Check if indexer is initialized
+    if indexer_mod.is_ready and indexer_mod.is_ready() then
+      ok("Indexer is ready")
+
+      -- Get indexer stats
+      local idx_stats = indexer_mod.get_stats()
+      if idx_stats.initialized then
+        info(string.format("Indexed: %d files, %d chunks", idx_stats.file_count or 0, idx_stats.chunk_count or 0))
+
+        if idx_stats.by_language and #idx_stats.by_language > 0 then
+          local langs = {}
+          for _, item in ipairs(idx_stats.by_language) do
+            table.insert(langs, string.format("%s:%d", item.language or "?", item.count))
+          end
+          info("Languages: " .. table.concat(langs, ", "))
+        end
+      else
+        info("Indexer initialized but no files indexed yet")
+        info("Run :EduTutorIndex to index the project")
+      end
+    else
+      info("Indexer not ready - will initialize on first use")
+    end
+  elseif not sqlite_ok then
+    info("Indexer skipped (requires sqlite.lua)")
+  else
+    warn("Indexer module failed to load")
+  end
+
+  -- v0.9.0: Cache checks
+  start("ai-editutor Cache (v0.9.0)")
+
+  local cache_ok, cache_mod = pcall(require, "editutor.cache")
+  if cache_ok then
+    ok("Cache module loaded")
+
+    local cache_stats = cache_mod.get_stats()
+    info(string.format("Cache entries: %d/%d (active/max)", cache_stats.active or 0, cache_stats.max_entries or 0))
+
+    if cache_stats.expired and cache_stats.expired > 0 then
+      info(string.format("Expired entries: %d (will be cleaned)", cache_stats.expired))
+    end
+  else
+    warn("Cache module not loaded")
+  end
+
   -- Summary
   start("ai-editutor Quick Start")
   info("Available modes: Q (Question), S (Socratic), R (Review), D (Debug), E (Explain)")
+  info("Hint levels: 1 (Conceptual) -> 2 (Strategic) -> 3 (Directional) -> 4 (Specific) -> 5 (Solution)")
   info("Example: // Q: What does this function do?")
-  info("Keymap: <leader>ma (or run :ai-editutorAsk)")
-  info("Help: :ai-editutorModes or :h editutor")
+  info("Keymap: <leader>ma (or run :EduTutorAsk)")
+  info("Commands: :EduTutorModes, :EduTutorHint, :EduTutorIndex")
+  info("Help: :h editutor")
 end
 
 return M
