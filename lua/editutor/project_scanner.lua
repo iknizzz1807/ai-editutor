@@ -135,11 +135,33 @@ M.CONFIG_FILES = {
   ".gitignore", ".gitattributes", ".gitmodules",
   -- Environment templates
   ".env.example", ".env.sample", ".env.template",
-  -- Other
+  -- Other config
   ".nvmrc", ".node-version", ".python-version", ".ruby-version", ".tool-versions",
   "netlify.toml", "vercel.json", "fly.toml", "render.yaml",
   "firebase.json", ".firebaserc",
   "serverless.yml",
+  -- Additional frameworks
+  "angular.json", ".angular-cli.json",
+  "ember-cli-build.js", ".ember-cli",
+  "gatsby-config.js", "gatsby-node.js",
+  "remix.config.js",
+  "turbo.json",
+  "lerna.json",
+  "nx.json", "workspace.json", "project.json",
+  "rush.json",
+  ".prettierignore", ".eslintignore", ".dockerignore",
+  "tslint.json",
+  "biome.json", "biome.jsonc",
+  "deno.json", "deno.jsonc",
+  "bun.lockb", "bunfig.toml",
+  -- Neovim/Vim
+  "lazy-lock.json",
+  "stylua.toml", ".stylua.toml",
+  "selene.toml",
+  ".luacheckrc", ".luarc.json",
+  -- Claude/AI
+  "CLAUDE.md", "AGENTS.md", "COPILOT.md",
+  ".cursorrules", ".cursorignore",
 }
 
 -- Data/Binary extensions (never include content)
@@ -369,6 +391,67 @@ function M.estimate_tokens(text)
   return math.ceil(#text / 4)
 end
 
+---Get language identifier for syntax highlighting
+---@param ext string File extension
+---@return string language
+function M.get_language_for_ext(ext)
+  if not ext or ext == "" then return "" end
+  ext = ext:lower()
+
+  local lang_map = {
+    -- Web
+    js = "javascript", jsx = "javascript", mjs = "javascript", cjs = "javascript",
+    ts = "typescript", tsx = "typescript",
+    vue = "vue", svelte = "svelte", astro = "astro",
+    html = "html", htm = "html",
+    css = "css", scss = "scss", sass = "sass", less = "less",
+    -- Systems
+    c = "c", h = "c",
+    cpp = "cpp", cc = "cpp", cxx = "cpp", hpp = "cpp", hxx = "cpp",
+    rs = "rust", go = "go", zig = "zig",
+    -- JVM
+    java = "java", kt = "kotlin", kts = "kotlin", scala = "scala",
+    clj = "clojure", cljs = "clojure", groovy = "groovy",
+    -- .NET
+    cs = "csharp", fs = "fsharp", vb = "vb",
+    -- Scripting
+    py = "python", pyw = "python", pyi = "python",
+    rb = "ruby", rake = "ruby",
+    pl = "perl", pm = "perl",
+    php = "php",
+    lua = "lua",
+    sh = "bash", bash = "bash", zsh = "zsh", fish = "fish",
+    ps1 = "powershell", psm1 = "powershell",
+    -- Mobile
+    swift = "swift", m = "objc", mm = "objc", dart = "dart",
+    -- Functional
+    hs = "haskell", ml = "ocaml", mli = "ocaml",
+    erl = "erlang", ex = "elixir", exs = "elixir",
+    elm = "elm", lisp = "lisp", el = "elisp", scm = "scheme", rkt = "racket",
+    -- Config/Data
+    json = "json", jsonc = "jsonc",
+    yaml = "yaml", yml = "yaml",
+    toml = "toml",
+    xml = "xml",
+    ini = "ini", cfg = "ini", conf = "ini",
+    -- Markup
+    md = "markdown", markdown = "markdown",
+    rst = "rst", adoc = "asciidoc", org = "org", tex = "latex",
+    -- Query
+    sql = "sql", graphql = "graphql", gql = "graphql",
+    -- Templates
+    ejs = "ejs", erb = "erb", haml = "haml", pug = "pug",
+    hbs = "handlebars", jinja = "jinja2", j2 = "jinja2",
+    liquid = "liquid", twig = "twig",
+    -- Shaders
+    glsl = "glsl", hlsl = "hlsl", wgsl = "wgsl", metal = "metal",
+    -- Other
+    r = "r", jl = "julia", proto = "protobuf",
+  }
+
+  return lang_map[ext] or ext
+end
+
 ---Scan project and return structured result
 ---@param opts? table {root?: string, max_file_lines?: number}
 ---@return ProjectScanResult
@@ -518,6 +601,7 @@ function M.scan_project(opts)
 end
 
 ---Build tree structure string for display
+---Shows source folders in detail, data folders as summary
 ---@param root string
 ---@param files ProjectFile[]
 ---@param folders ProjectFolder[]
@@ -544,82 +628,68 @@ function M.build_tree_structure(root, files, folders)
     table.insert(files_by_folder[parent], file)
   end
 
-  -- Sort folders by path
-  local sorted_folders = vim.tbl_values(folders)
-  table.sort(sorted_folders, function(a, b) return a.path < b.path end)
+  -- Get direct children of a folder path
+  local function get_children(parent_path)
+    local children_folders = {}
+    local children_files = files_by_folder[parent_path] or {}
 
-  -- Track which folders to show
-  local shown_folders = {}
-  for _, folder in ipairs(sorted_folders) do
-    -- Always show folders with source files or that are parents of source folders
-    if folder.has_source then
-      shown_folders[folder.path] = true
-      -- Mark all parent folders as shown
-      local parts = vim.split(folder.path, "/")
-      local parent = ""
-      for i = 1, #parts - 1 do
-        parent = parent == "" and parts[i] or (parent .. "/" .. parts[i])
-        shown_folders[parent] = true
+    for _, folder in ipairs(folders) do
+      local folder_parent = vim.fn.fnamemodify(folder.path, ":h")
+      if folder_parent == "." then folder_parent = "" end
+      if folder_parent == parent_path then
+        table.insert(children_folders, folder)
       end
     end
+
+    -- Sort alphabetically
+    table.sort(children_folders, function(a, b) return a.name < b.name end)
+    table.sort(children_files, function(a, b) return a.name < b.name end)
+
+    return children_folders, children_files
   end
 
-  ---Get indent for path depth
-  ---@param path string
-  ---@return string
-  local function get_indent(path)
-    local depth = #vim.split(path, "/")
-    return string.rep("  ", depth)
-  end
+  -- Recursive function to build tree
+  local function build_subtree(parent_path, prefix)
+    local child_folders, child_files = get_children(parent_path)
 
-  ---Add folder and its contents to tree
-  ---@param folder_path string
-  ---@param is_last boolean
-  local function add_folder_to_tree(folder_path, is_last)
-    local folder = folder_lookup[folder_path]
-    if not folder then return end
+    -- Combine into one list for proper last-item detection
+    local items = {}
+    for _, folder in ipairs(child_folders) do
+      table.insert(items, { type = "folder", data = folder })
+    end
+    for _, file in ipairs(child_files) do
+      table.insert(items, { type = "file", data = file })
+    end
 
-    local indent = get_indent(folder_path)
-    local prefix = is_last and "`-- " or "|-- "
+    for i, item in ipairs(items) do
+      local is_last = (i == #items)
+      local connector = is_last and "`-- " or "|-- "
+      local child_prefix = prefix .. (is_last and "    " or "|   ")
 
-    if folder.truncated and not folder.has_source then
-      -- Data folder with many files - just show count
-      table.insert(lines, indent .. prefix .. folder.name .. "/  (" .. folder.file_count .. " files)")
-    else
-      table.insert(lines, indent .. prefix .. folder.name .. "/")
-
-      -- Add files in this folder
-      local folder_files = files_by_folder[folder_path] or {}
-      for i, file in ipairs(folder_files) do
-        local file_indent = get_indent(folder_path) .. "  "
-        local file_prefix = (i == #folder_files) and "`-- " or "|-- "
+      if item.type == "folder" then
+        local folder = item.data
+        if folder.has_source then
+          -- Source folder: show in detail
+          table.insert(lines, prefix .. connector .. folder.name .. "/")
+          build_subtree(folder.path, child_prefix)
+        elseif folder.file_count > 0 then
+          -- Data folder: show summary only
+          table.insert(lines, prefix .. connector .. folder.name .. "/  (" .. folder.file_count .. " files)")
+        else
+          -- Empty folder (rare)
+          table.insert(lines, prefix .. connector .. folder.name .. "/")
+        end
+      else
+        -- File
+        local file = item.data
         local size_info = file.lines and string.format(" (%d lines)", file.lines) or ""
-        table.insert(lines, file_indent .. file_prefix .. file.name .. size_info)
+        table.insert(lines, prefix .. connector .. file.name .. size_info)
       end
     end
   end
 
-  -- Add root-level files first
-  local root_files = files_by_folder[""] or {}
-  for i, file in ipairs(root_files) do
-    local prefix = "|-- "
-    local size_info = file.lines and string.format(" (%d lines)", file.lines) or ""
-    table.insert(lines, prefix .. file.name .. size_info)
-  end
-
-  -- Process folders in order
-  local processed = {}
-  for _, folder in ipairs(sorted_folders) do
-    if shown_folders[folder.path] and not processed[folder.path] then
-      processed[folder.path] = true
-      add_folder_to_tree(folder.path, false)
-    elseif not folder.has_source and folder.file_count > 0 then
-      -- Show data folders with just count
-      local indent = get_indent(folder.path)
-      table.insert(lines, indent .. "|-- " .. folder.name .. "/  (" .. folder.file_count .. " files)")
-      processed[folder.path] = true
-    end
-  end
+  -- Build from root
+  build_subtree("", "")
 
   return table.concat(lines, "\n")
 end
@@ -638,6 +708,9 @@ function M.read_all_sources(scan_result, opts)
   local total_lines = 0
   local total_tokens = 0
 
+  -- Get project root name for file path prefix
+  local root_name = vim.fn.fnamemodify(scan_result.root, ":t")
+
   for _, file in ipairs(scan_result.files) do
     if file.type == "source" or file.type == "config" then
       local full_path = scan_result.root .. "/" .. file.path
@@ -654,14 +727,21 @@ function M.read_all_sources(scan_result, opts)
           line_count = max_lines
         end
 
-        table.insert(parts, string.format("### %s", file.path))
-        table.insert(parts, "```" .. (file.name:match("%.([^.]+)$") or ""))
+        -- Get language for syntax highlighting
+        local ext = file.name:match("%.([^.]+)$") or ""
+        local lang = M.get_language_for_ext(ext)
+
+        -- File path from project root: ai-editutor/lua/editutor/file.lua
+        local display_path = root_name .. "/" .. file.path
+
+        table.insert(parts, string.format("// File: %s", display_path))
+        table.insert(parts, "```" .. lang)
         table.insert(parts, content)
         table.insert(parts, "```")
         table.insert(parts, "")
 
         table.insert(files_included, {
-          path = file.path,
+          path = display_path,
           lines = line_count,
           tokens = M.estimate_tokens(content),
         })

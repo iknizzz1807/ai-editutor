@@ -402,6 +402,9 @@ end
 ---@return table metadata
 function M.format_for_prompt(ctx)
   local parts = {}
+  local project_root = M.get_project_root()
+  local root_name = vim.fn.fnamemodify(project_root, ":t")
+
   local metadata = {
     current_file = ctx.current.filepath,
     current_lines = ctx.current.line_count,
@@ -409,21 +412,16 @@ function M.format_for_prompt(ctx)
     total_tokens = 0,
   }
 
-  local project_root = M.get_project_root()
-
-  -- Detect language from filepath
-  local ext = ctx.current.filepath:match("%.(%w+)$") or "unknown"
-  local lang_map = {
-    lua = "lua", py = "python", js = "javascript", ts = "typescript",
-    tsx = "tsx", jsx = "jsx", go = "go", rs = "rust", rb = "ruby",
-    java = "java", c = "c", cpp = "cpp", h = "c", hpp = "cpp",
-  }
-  local language = lang_map[ext] or ext
+  -- Get language from extension
+  local ext = ctx.current.filepath:match("%.(%w+)$") or ""
+  local language = project_scanner.get_language_for_ext(ext)
 
   -- Current file context (full file)
   local relative_path = ctx.current.filepath:gsub(project_root .. "/", "")
-  table.insert(parts, string.format("=== Current File: %s (%d lines) ===",
-    relative_path, ctx.current.line_count))
+  local display_path = root_name .. "/" .. relative_path
+
+  table.insert(parts, "=== Current File ===")
+  table.insert(parts, string.format("// File: %s (%d lines)", display_path, ctx.current.line_count))
   table.insert(parts, "```" .. language)
   table.insert(parts, ctx.current.content)
   table.insert(parts, "```")
@@ -438,19 +436,19 @@ function M.format_for_prompt(ctx)
 
     for _, def in ipairs(ctx.external) do
       local def_relative = def.filepath:gsub(project_root .. "/", "")
-      local def_ext = def.filepath:match("%.(%w+)$") or ext
-      local def_lang = lang_map[def_ext] or def_ext
+      local def_display = root_name .. "/" .. def_relative
+      local def_ext = def.filepath:match("%.(%w+)$") or ""
+      local def_lang = project_scanner.get_language_for_ext(def_ext)
 
       local status = def.is_full_file and "full" or "truncated"
-      table.insert(parts, string.format("--- %s (%d lines, %s) ---",
-        def_relative, def.line_count, status))
+      table.insert(parts, string.format("// File: %s (%d lines, %s)", def_display, def.line_count, status))
       table.insert(parts, "```" .. def_lang)
       table.insert(parts, def.content)
       table.insert(parts, "```")
       table.insert(parts, "")
 
       table.insert(metadata.external_files, {
-        path = def_relative,
+        path = def_display,
         lines = def.line_count,
         is_full = def.is_full_file,
         tokens = project_scanner.estimate_tokens(def.content),

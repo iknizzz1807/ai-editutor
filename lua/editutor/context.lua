@@ -96,22 +96,18 @@ function M.build_full_project_context(current_file, question_line)
   end
 
   -- Detect language
-  local ext = current_file:match("%.(%w+)$") or "txt"
-  local lang_map = {
-    lua = "lua", py = "python", js = "javascript", ts = "typescript",
-    tsx = "tsx", jsx = "jsx", go = "go", rs = "rust", rb = "ruby",
-    java = "java", c = "c", cpp = "cpp", h = "c", hpp = "cpp",
-    md = "markdown", json = "json", yaml = "yaml", yml = "yaml",
-  }
-  local language = lang_map[ext] or ext
+  local ext = current_file:match("%.(%w+)$") or ""
+  local language = project_scanner.get_language_for_ext(ext)
 
   -- Build formatted context
   local parts = {}
+  local root_name = vim.fn.fnamemodify(project_root, ":t")
   local relative_current = current_file:gsub(project_root .. "/", "")
+  local display_current = root_name .. "/" .. relative_current
 
   -- Current file first (with question line marked)
-  table.insert(parts, string.format("=== CURRENT FILE: %s (line %d) ===", relative_current, question_line))
-  table.insert(parts, "This is the file where the question was asked.")
+  table.insert(parts, "=== CURRENT FILE (question location) ===")
+  table.insert(parts, string.format("// File: %s (line %d is where the question was asked)", display_current, question_line))
   table.insert(parts, "```" .. language)
   if current_content then
     -- Add line numbers and mark question line
@@ -142,7 +138,7 @@ function M.build_full_project_context(current_file, question_line)
 
   local metadata = {
     mode = "full_project",
-    current_file = relative_current,
+    current_file = display_current,
     current_lines = current_lines,
     question_line = question_line,
     project_root = project_root,
@@ -166,6 +162,9 @@ end
 ---@param callback function Callback(formatted_context, metadata)
 function M.build_lsp_context(current_file, question_line, callback)
   local project_root = project_scanner.get_project_root()
+  local root_name = vim.fn.fnamemodify(project_root, ":t")
+  local relative_current = current_file:gsub(project_root .. "/", "")
+  local display_current = root_name .. "/" .. relative_current
 
   -- Get project tree (cached)
   local scan_result = cache.get_project(project_root, function()
@@ -178,13 +177,8 @@ function M.build_lsp_context(current_file, question_line, callback)
 
     -- Build final context
     local parts = {}
-    local relative_current = current_file:gsub(project_root .. "/", "")
 
-    -- Header
-    table.insert(parts, string.format("=== CURRENT FILE: %s (line %d) ===", relative_current, question_line))
-    table.insert(parts, "")
-
-    -- LSP context (current file + external definitions)
+    -- LSP context already includes current file with proper // File: format
     table.insert(parts, lsp_formatted)
 
     -- Project tree structure (always include)
@@ -198,7 +192,7 @@ function M.build_lsp_context(current_file, question_line, callback)
 
     local metadata = {
       mode = "lsp_selective",
-      current_file = relative_current,
+      current_file = display_current,
       current_lines = lsp_metadata.current_lines,
       question_line = question_line,
       project_root = project_root,
