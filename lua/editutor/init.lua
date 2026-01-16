@@ -16,6 +16,7 @@ local project_context = require("editutor.project_context")
 
 -- v0.9.0: New modules
 local cache = require("editutor.cache")
+local loading = require("editutor.loading")
 local indexer_available, indexer = pcall(require, "editutor.indexer")
 
 M._name = "EduTutor"
@@ -297,8 +298,8 @@ function M.ask()
     vim.notify(string.format("[ai-editutor] " .. M._msg("conversation_continued"), info.message_count), vim.log.levels.INFO)
   end
 
-  -- Show thinking notification
-  vim.notify("[ai-editutor] " .. M._msg("gathering_context"), vim.log.levels.INFO)
+  -- v0.9.0: Start loading indicator
+  loading.start(loading.states.gathering_context)
 
   -- v0.9.0: Use cache for context extraction
   local cache_key = cache.context_key(filepath, cursor_line)
@@ -308,6 +309,7 @@ function M.ask()
 
   if cache_hit then
     -- Use cached context
+    loading.update(loading.states.connecting)
     M._process_ask_with_context(query, mode, filepath, bufnr, cached_context, is_continuation)
   else
     -- Extract fresh context
@@ -318,6 +320,7 @@ function M.ask()
         tags = { "file:" .. filepath, "context" },
       })
 
+      loading.update(loading.states.connecting)
       M._process_ask_with_context(query, mode, filepath, bufnr, full_context, is_continuation)
     end)
   end
@@ -381,10 +384,14 @@ function M._process_ask_with_context(query, mode, filepath, bufnr, full_context,
   local system_prompt = prompts.get_system_prompt(mode)
   local user_prompt = prompts.build_user_prompt(query.question, full_context, mode)
 
-  vim.notify("[ai-editutor] " .. M._msg("thinking"), vim.log.levels.INFO)
+  -- v0.9.0: Update loading state
+  loading.update(loading.states.thinking)
 
   -- Query LLM
   provider.query_async(system_prompt, user_prompt, function(response, err)
+    -- Stop loading indicator
+    loading.stop()
+
     if err then
       vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
       return
@@ -431,8 +438,8 @@ function M.ask_with_hints()
   local filepath = vim.api.nvim_buf_get_name(0)
   local cursor_line = query.line
 
-  -- Show gathering context notification
-  vim.notify("[ai-editutor] " .. M._msg("gathering_context"), vim.log.levels.INFO)
+  -- v0.9.0: Start loading indicator
+  loading.start(loading.states.gathering_context)
 
   -- Extract context using multi-signal approach (v0.9.0)
   M._extract_context_async(query.question, filepath, cursor_line, function(context_formatted)
@@ -441,9 +448,12 @@ function M.ask_with_hints()
 
     -- Get the next hint level
     local level = session.level + 1
-    vim.notify(string.format("[ai-editutor] " .. M._msg("getting_hint"), level), vim.log.levels.INFO)
+    loading.update(string.format("Getting hint level %d...", level))
 
     hints.request_next_hint(session, function(response, hint_level, has_more, err)
+      -- Stop loading indicator
+      loading.stop()
+
       if err then
         vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
         return

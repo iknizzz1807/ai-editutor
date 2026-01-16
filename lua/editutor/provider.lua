@@ -561,7 +561,9 @@ local function parse_sse_line(line, provider_name)
     if json.choices and json.choices[1] and json.choices[1].delta then
       text = json.choices[1].delta.content
     end
-    if json.choices and json.choices[1] and json.choices[1].finish_reason then
+    -- Check for finish_reason (vim.NIL from JSON null is truthy, so check explicitly)
+    local finish_reason = json.choices and json.choices[1] and json.choices[1].finish_reason
+    if finish_reason and finish_reason ~= vim.NIL then
       return text, true
     end
   elseif provider_name == "ollama" then

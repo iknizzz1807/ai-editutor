@@ -7,6 +7,157 @@ local M = {}
 local db = require("editutor.indexer.db")
 local chunker = require("editutor.indexer.chunker")
 
+-- =============================================================================
+-- Query Preprocessing & Synonym Expansion
+-- =============================================================================
+
+-- Common programming synonyms for better search
+M.SYNONYMS = {
+  -- Authentication
+  auth = { "authentication", "login", "logout", "signin", "signout", "session" },
+  login = { "auth", "signin", "authenticate" },
+  logout = { "signout", "auth" },
+  session = { "token", "auth", "cookie" },
+
+  -- Validation
+  validate = { "check", "verify", "ensure", "assert", "sanitize" },
+  check = { "validate", "verify", "test" },
+
+  -- Error handling
+  error = { "exception", "throw", "catch", "fail", "invalid" },
+  handle = { "process", "manage", "catch" },
+
+  -- Data operations
+  fetch = { "get", "retrieve", "load", "request", "query" },
+  save = { "store", "persist", "write", "update", "insert" },
+  delete = { "remove", "destroy", "clear", "drop" },
+  update = { "modify", "change", "edit", "patch" },
+
+  -- Functions/Methods
+  func = { "function", "method", "procedure", "handler" },
+  callback = { "handler", "listener", "hook" },
+
+  -- Data structures
+  array = { "list", "collection", "items" },
+  object = { "dict", "map", "hash", "record" },
+
+  -- Async
+  async = { "await", "promise", "future", "coroutine" },
+  sync = { "synchronous", "blocking" },
+
+  -- Security
+  encrypt = { "hash", "cipher", "crypto", "secure" },
+  password = { "pass", "pwd", "secret", "credential" },
+
+  -- Common concepts
+  config = { "configuration", "settings", "options", "prefs" },
+  init = { "initialize", "setup", "bootstrap", "start" },
+  parse = { "decode", "deserialize", "extract" },
+  format = { "serialize", "encode", "stringify" },
+}
+
+-- Stop words to remove from queries (as set for O(1) lookup)
+M.STOP_WORDS = {}
+for _, word in ipairs({
+  "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+  "have", "has", "had", "do", "does", "did", "will", "would", "could",
+  "should", "may", "might", "must", "shall", "can", "need", "dare",
+  "to", "of", "in", "for", "on", "with", "at", "by", "from", "as",
+  "into", "through", "during", "before", "after", "above", "below",
+  "between", "under", "again", "further", "then", "once", "here",
+  "there", "when", "where", "why", "how", "all", "each", "few", "more",
+  "most", "other", "some", "such", "no", "nor", "not", "only", "own",
+  "same", "so", "than", "too", "very", "just", "also", "now", "this",
+  "that", "these", "those", "i", "me", "my", "myself", "we", "our",
+  "what", "which", "who", "whom", "if", "or", "and", "but", "because",
+}) do
+  M.STOP_WORDS[word] = true
+end
+
+---Convert camelCase/PascalCase to words
+---@param str string
+---@return string[]
+local function split_camel_case(str)
+  local words = {}
+  -- Insert space before uppercase letters and split
+  local spaced = str:gsub("(%l)(%u)", "%1 %2")
+    :gsub("(%u)(%u%l)", "%1 %2")
+    :gsub("_", " ")
+    :gsub("-", " ")
+  for word in spaced:gmatch("%S+") do
+    table.insert(words, word:lower())
+  end
+  return words
+end
+
+---Extract key terms from natural language query
+---@param query string
+---@return string[] terms
+local function extract_query_terms(query)
+  local terms = {}
+  local seen = {}
+
+  -- Extract words (preserve case for camelCase splitting)
+  for word in query:gmatch("[%w_]+") do
+    local word_lower = word:lower()
+    if #word > 1 and not M.STOP_WORDS[word_lower] then
+      -- Split camelCase/snake_case (this needs original case)
+      local parts = split_camel_case(word)
+      for _, part in ipairs(parts) do
+        local part_lower = part:lower()
+        if #part > 1 and not M.STOP_WORDS[part_lower] and not seen[part_lower] then
+          seen[part_lower] = true
+          table.insert(terms, part_lower)
+        end
+      end
+    end
+  end
+
+  return terms
+end
+
+---Expand query with synonyms
+---@param terms string[]
+---@return string[] expanded
+local function expand_with_synonyms(terms)
+  local expanded = {}
+  local seen = {}
+
+  for _, term in ipairs(terms) do
+    if not seen[term] then
+      seen[term] = true
+      table.insert(expanded, term)
+
+      -- Add synonyms
+      local syns = M.SYNONYMS[term]
+      if syns then
+        for _, syn in ipairs(syns) do
+          if not seen[syn] then
+            seen[syn] = true
+            table.insert(expanded, syn)
+          end
+        end
+      end
+    end
+  end
+
+  return expanded
+end
+
+---Preprocess query for better search
+---@param query string
+---@return string processed_query
+---@return string[] terms
+function M.preprocess_query(query)
+  local terms = extract_query_terms(query)
+  local expanded = expand_with_synonyms(terms)
+  return table.concat(expanded, " "), expanded
+end
+
+-- =============================================================================
+-- Ranking Configuration
+-- =============================================================================
+
 -- Default weights for ranking signals
 M.DEFAULT_WEIGHTS = {
   lsp_definition = 1.0, -- Direct LSP go-to-definition match
@@ -88,10 +239,10 @@ local function calc_file_recency(filepath)
   return math.max(0, 1 - (age_days / decay_days))
 end
 
----Calculate import graph distance
+---Calculate import graph distance (supports 2-hop)
 ---@param from_file string
 ---@param to_file string
----@return number 0-1 score (1 = directly imported)
+---@return number 0-1 score (1 = directly imported, 0.5 = 2-hop)
 local function calc_import_distance(from_file, to_file)
   -- Check if to_file is directly imported by from_file
   local from_info = db.get_file(from_file)
@@ -102,7 +253,7 @@ local function calc_import_distance(from_file, to_file)
   -- Get the filename/module name of to_file
   local to_name = vim.fn.fnamemodify(to_file, ":t:r")
 
-  -- Check imports
+  -- Check direct imports (1-hop)
   local importers = db.get_importers(to_name)
   for _, imp in ipairs(importers) do
     if imp.path == from_file then
@@ -110,11 +261,27 @@ local function calc_import_distance(from_file, to_file)
     end
   end
 
-  -- TODO: Could implement multi-hop distance calculation
+  -- Check 2-hop imports (from_file imports X, X imports to_file)
+  -- Get what from_file imports
+  local from_name = vim.fn.fnamemodify(from_file, ":t:r")
+  local from_importers = db.get_importers(from_name)
+
+  -- For each file that from_file imports, check if it imports to_file
+  for _, mid_imp in ipairs(from_importers) do
+    if mid_imp.path and mid_imp.path ~= from_file then
+      -- Check if this intermediate file imports to_file
+      for _, to_imp in ipairs(importers) do
+        if to_imp.path == mid_imp.path then
+          return 0.5 -- 2-hop connection
+        end
+      end
+    end
+  end
+
   return 0
 end
 
----Calculate name match score
+---Calculate name match score (improved with camelCase/snake_case handling)
 ---@param query string
 ---@param chunk_name string|nil
 ---@return number 0-1 score
@@ -133,21 +300,44 @@ local function calc_name_match(query, chunk_name)
 
   -- Contains match
   if name_lower:find(query_lower, 1, true) then
-    return 0.7
+    return 0.8
   end
 
-  -- Word match (query words appear in name)
-  local words_matched = 0
-  local total_words = 0
-  for word in query_lower:gmatch("%w+") do
-    total_words = total_words + 1
-    if name_lower:find(word, 1, true) then
-      words_matched = words_matched + 1
+  -- Split both into words (handle camelCase, snake_case, PascalCase)
+  local query_words = split_camel_case(query)
+  local name_words = split_camel_case(chunk_name)
+
+  -- Calculate word overlap score
+  local matched = 0
+  for _, qw in ipairs(query_words) do
+    if #qw > 1 then -- Skip single chars
+      for _, nw in ipairs(name_words) do
+        if nw == qw then
+          matched = matched + 1
+          break
+        elseif nw:find(qw, 1, true) or qw:find(nw, 1, true) then
+          matched = matched + 0.5
+          break
+        end
+      end
     end
   end
 
-  if total_words > 0 then
-    return 0.5 * (words_matched / total_words)
+  if #query_words > 0 then
+    local overlap = matched / #query_words
+    return 0.6 * overlap
+  end
+
+  -- Check synonyms
+  for _, qw in ipairs(query_words) do
+    local syns = M.SYNONYMS[qw]
+    if syns then
+      for _, syn in ipairs(syns) do
+        if name_lower:find(syn, 1, true) then
+          return 0.4
+        end
+      end
+    end
   end
 
   return 0
@@ -228,25 +418,48 @@ function M.search_and_rank(query, opts)
   opts = opts or {}
   local limit = opts.limit or 20
 
-  -- Get BM25 results from FTS5
-  local bm25_results = db.search_bm25(query, { limit = limit * 2 })
+  -- Preprocess query for better search
+  local processed_query, terms = M.preprocess_query(query)
 
-  -- Also search by exact name
-  local name_results = db.search_by_name(query)
+  -- Get BM25 results from FTS5 (use both original and processed)
+  local bm25_results = db.search_bm25(processed_query, { limit = limit * 2 })
+
+  -- Also search with original query if different
+  if processed_query ~= query:lower() then
+    local original_results = db.search_bm25(query, { limit = limit })
+    for _, r in ipairs(original_results) do
+      table.insert(bm25_results, r)
+    end
+  end
+
+  -- Also search by exact name (try each term)
+  local name_results = {}
+  for _, term in ipairs(terms) do
+    local results = db.search_by_name(term)
+    for _, r in ipairs(results) do
+      table.insert(name_results, r)
+    end
+  end
+
+  -- Add original query name search
+  local orig_name = db.search_by_name(query)
+  for _, r in ipairs(orig_name) do
+    table.insert(name_results, r)
+  end
 
   -- Merge results (avoid duplicates)
   local seen = {}
   local all_results = {}
 
   for _, chunk in ipairs(bm25_results) do
-    if not seen[chunk.id] then
+    if chunk.id and not seen[chunk.id] then
       seen[chunk.id] = true
       table.insert(all_results, chunk)
     end
   end
 
   for _, chunk in ipairs(name_results) do
-    if not seen[chunk.id] then
+    if chunk.id and not seen[chunk.id] then
       seen[chunk.id] = true
       table.insert(all_results, chunk)
     end

@@ -94,8 +94,8 @@ function M.get(key)
     return nil, false
   end
 
-  -- Check expiration
-  if entry.expires < os.time() then
+  -- Check expiration (use <= to ensure TTL=0 expires immediately)
+  if entry.expires <= os.time() then
     M._remove_entry(key)
     return nil, false
   end
