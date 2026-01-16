@@ -173,12 +173,13 @@ M.DEFAULT_WEIGHTS = {
 
 -- Context budget allocation (percentage of total budget)
 M.BUDGET_ALLOCATION = {
-  current_file = 0.30, -- 30% for current file context
-  lsp_definitions = 0.25, -- 25% for LSP definitions
+  current_file = 0.25, -- 25% for current file context
+  lsp_definitions = 0.20, -- 20% for LSP definitions
   bm25_results = 0.20, -- 20% for BM25 search results
-  imports = 0.10, -- 10% for import graph
-  project_docs = 0.10, -- 10% for README, package.json, etc.
-  diagnostics = 0.05, -- 5% for LSP diagnostics/errors
+  call_graph = 0.15, -- 15% for callers/callees (NEW)
+  imports = 0.08, -- 8% for import graph
+  project_docs = 0.08, -- 8% for README, package.json, etc.
+  diagnostics = 0.04, -- 4% for LSP diagnostics/errors
 }
 
 ---Calculate directory proximity score
@@ -489,6 +490,72 @@ function M.search_and_rank(query, opts)
   return results
 end
 
+-- =============================================================================
+-- Call Graph Context
+-- =============================================================================
+
+---Get related chunks via call graph (callers and callees)
+---@param chunk table The chunk to find relations for
+---@param opts table {max_callers, max_callees}
+---@return table[] related_chunks
+local function get_call_graph_context(chunk, opts)
+  opts = opts or {}
+  local max_callers = opts.max_callers or 3
+  local max_callees = opts.max_callees or 5
+
+  local related = {}
+
+  -- Get callers (functions that call this one)
+  if chunk.name then
+    local callers = db.get_callers(chunk.name)
+    for i, caller in ipairs(callers) do
+      if i > max_callers then
+        break
+      end
+      caller.relation = "caller"
+      table.insert(related, caller)
+    end
+  end
+
+  -- Get callees (functions this one calls)
+  if chunk.id then
+    local callees = db.get_callees(chunk.id)
+    for i, callee in ipairs(callees) do
+      if i > max_callees then
+        break
+      end
+      callee.relation = "callee"
+      table.insert(related, callee)
+    end
+  end
+
+  return related
+end
+
+---Get type definitions used by a chunk
+---@param chunk table
+---@param opts table
+---@return table[] type_chunks
+local function get_type_context(chunk, opts)
+  opts = opts or {}
+  local max_types = opts.max_types or 3
+
+  local types = {}
+
+  -- If chunk has type_refs, get their definitions
+  if chunk.id then
+    -- Get type refs from database
+    local ok, result = pcall(function()
+      return db.get_call_names(chunk.id) -- Reuse as placeholder, ideally separate query
+    end)
+
+    -- For now, search for types by name in the chunk content
+    -- This is a heuristic approach
+  end
+
+  return types
+end
+
 ---Get LSP definitions for current context
 ---@param current_file string
 ---@param cursor_line number
@@ -514,6 +581,56 @@ local function get_lsp_definitions(current_file, cursor_line)
   return context.external_definitions or {}
 end
 
+-- =============================================================================
+-- Context Deduplication
+-- =============================================================================
+
+---Simple hash for content deduplication
+---@param content string
+---@return string hash
+local function content_hash(content)
+  -- Normalize: remove whitespace variations
+  local normalized = content:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+  -- Simple hash based on content
+  local hash = 0
+  for i = 1, math.min(#normalized, 500) do
+    hash = (hash * 31 + normalized:byte(i)) % 2147483647
+  end
+  return string.format("%x_%d", hash, #normalized)
+end
+
+---Check if content is similar to already seen content
+---@param content string
+---@param seen_hashes table
+---@param threshold number Similarity threshold (0.8 = 80% similar)
+---@return boolean is_duplicate
+local function is_duplicate_content(content, seen_hashes, threshold)
+  threshold = threshold or 0.8
+  local hash = content_hash(content)
+
+  -- Exact hash match
+  if seen_hashes[hash] then
+    return true
+  end
+
+  -- Check for substring containment (one contains most of the other)
+  for seen_hash, seen_content in pairs(seen_hashes) do
+    -- If this content is mostly contained in seen content
+    local shorter = #content < #seen_content and content or seen_content
+    local longer = #content >= #seen_content and content or seen_content
+
+    -- Quick length check
+    if #shorter > 50 and #shorter / #longer > threshold then
+      -- Check if shorter is a substring of longer
+      if longer:find(shorter:sub(1, 100), 1, true) then
+        return true
+      end
+    end
+  end
+
+  return false
+end
+
 ---Build formatted context for LLM prompt
 ---@param query string
 ---@param opts table {current_file, cursor_line, project_root, budget, weights}
@@ -528,7 +645,11 @@ function M.build_context(query, opts)
   local metadata = {
     chunks_included = 0,
     sources = {},
+    deduplicated = 0, -- Track deduplication stats
   }
+
+  -- Track seen content for deduplication
+  local seen_content = {}
 
   -- Estimate tokens (rough: 4 chars per token)
   local function estimate_tokens(text)
@@ -591,9 +712,10 @@ function M.build_context(query, opts)
     end
   end
 
-  -- 3. BM25 search results (20%)
+  -- 3. BM25 search results (20%) and 4. Call graph context (15%)
+  local search_results = {}
   if query and query ~= "" then
-    local search_results = M.search_and_rank(query, {
+    search_results = M.search_and_rank(query, {
       limit = 10,
       current_file = opts.current_file,
       project_root = opts.project_root,
@@ -602,28 +724,95 @@ function M.build_context(query, opts)
 
     if #search_results > 0 then
       local search_parts = {}
+      local deduped_count = 0
+
       for _, chunk in ipairs(search_results) do
-        local header = string.format(
-          "-- %s %s (%s:%d-%d) [score: %.2f]",
-          chunk.type or "chunk",
-          chunk.name or "",
-          vim.fn.fnamemodify(chunk.file_path or "", ":t"),
-          chunk.start_line or 0,
-          chunk.end_line or 0,
-          chunk.combined_score or 0
-        )
-        table.insert(search_parts, header .. "\n" .. (chunk.content or ""))
+        local content = chunk.content or ""
+
+        -- Skip if duplicate content
+        if is_duplicate_content(content, seen_content) then
+          deduped_count = deduped_count + 1
+        else
+          -- Mark as seen
+          local hash = content_hash(content)
+          seen_content[hash] = content
+
+          local header = string.format(
+            "-- %s %s (%s:%d-%d) [score: %.2f]",
+            chunk.type or "chunk",
+            chunk.name or "",
+            vim.fn.fnamemodify(chunk.file_path or "", ":t"),
+            chunk.start_line or 0,
+            chunk.end_line or 0,
+            chunk.combined_score or 0
+          )
+          table.insert(search_parts, header .. "\n" .. content)
+        end
       end
 
-      local bm25_budget = math.floor(budget * allocation.bm25_results)
-      used_tokens = used_tokens + add_context("Related Code (BM25)", table.concat(search_parts, "\n\n"), bm25_budget)
+      if #search_parts > 0 then
+        local bm25_budget = math.floor(budget * allocation.bm25_results)
+        used_tokens = used_tokens + add_context("Related Code (BM25)", table.concat(search_parts, "\n\n"), bm25_budget)
+      end
 
-      metadata.chunks_included = #search_results
-      table.insert(metadata.sources, { type = "bm25_search", count = #search_results })
+      metadata.chunks_included = #search_parts
+      metadata.deduplicated = (metadata.deduplicated or 0) + deduped_count
+      table.insert(metadata.sources, { type = "bm25_search", count = #search_parts, deduped = deduped_count })
+
+      -- 4. Call graph context (15%) - callers and callees of relevant functions
+      local call_graph_parts = {}
+      local seen_ids = {}
+      local call_deduped = 0
+
+      for _, chunk in ipairs(search_results) do
+        if #call_graph_parts >= 10 then
+          break
+        end
+
+        -- Get related functions via call graph
+        local related = get_call_graph_context(chunk, {
+          max_callers = 2,
+          max_callees = 3,
+        })
+
+        for _, rel in ipairs(related) do
+          if rel.id and not seen_ids[rel.id] then
+            seen_ids[rel.id] = true
+            local content = rel.content or ""
+
+            -- Check for duplicate content
+            if is_duplicate_content(content, seen_content) then
+              call_deduped = call_deduped + 1
+            else
+              local hash = content_hash(content)
+              seen_content[hash] = content
+
+              local header = string.format(
+                "-- %s %s (%s of %s) [%s:%d]",
+                rel.type or "chunk",
+                rel.name or "",
+                rel.relation or "related",
+                chunk.name or "?",
+                vim.fn.fnamemodify(rel.file_path or "", ":t"),
+                rel.start_line or 0
+              )
+              table.insert(call_graph_parts, header .. "\n" .. content)
+            end
+          end
+        end
+      end
+
+      if #call_graph_parts > 0 then
+        local call_budget = math.floor(budget * allocation.call_graph)
+        used_tokens = used_tokens + add_context("Related Functions (Call Graph)", table.concat(call_graph_parts, "\n\n"), call_budget)
+
+        metadata.deduplicated = (metadata.deduplicated or 0) + call_deduped
+        table.insert(metadata.sources, { type = "call_graph", count = #call_graph_parts, deduped = call_deduped })
+      end
     end
   end
 
-  -- 4. Import graph (10%)
+  -- 5. Import graph (8%)
   if opts.current_file then
     local file_info = db.get_file(opts.current_file)
     if file_info and file_info.id then
@@ -645,7 +834,7 @@ function M.build_context(query, opts)
     end
   end
 
-  -- 5. Project docs (10%)
+  -- 6. Project docs (8%)
   if opts.project_root then
     local doc_files = { "README.md", "package.json", "Cargo.toml", "pyproject.toml", "go.mod" }
     local doc_content = {}
@@ -670,7 +859,7 @@ function M.build_context(query, opts)
     end
   end
 
-  -- 6. Diagnostics (5%) - LSP errors/warnings
+  -- 7. Diagnostics (4%) - LSP errors/warnings
   if opts.current_file then
     local diagnostics = vim.diagnostic.get(0, { severity = { min = vim.diagnostic.severity.WARN } })
 

@@ -7,7 +7,7 @@ local db = nil
 local db_path = nil
 
 -- Schema version for migrations
-M.SCHEMA_VERSION = 1
+M.SCHEMA_VERSION = 2
 
 ---Get database path for project
 ---@param project_root string
@@ -87,6 +87,13 @@ function M._run_migrations()
     local schema_ok = M._apply_schema_v1()
     if not schema_ok then
       return false, "Failed to apply schema v1"
+    end
+  end
+
+  if version < 2 then
+    local schema_ok = M._apply_schema_v2()
+    if not schema_ok then
+      return false, "Failed to apply schema v2"
     end
   end
 
@@ -203,6 +210,54 @@ function M._apply_schema_v1()
       -- Some statements may fail (e.g., IF NOT EXISTS already exists)
       -- Continue anyway
     end
+  end
+
+  return true
+end
+
+---Apply schema version 2 (call graph & type refs)
+---@return boolean success
+function M._apply_schema_v2()
+  local statements = {
+    -- Call graph table (which function calls which)
+    [[
+    CREATE TABLE IF NOT EXISTS calls (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+      called_name TEXT NOT NULL,
+      UNIQUE(chunk_id, called_name)
+    )
+    ]],
+
+    -- Type references table
+    [[
+    CREATE TABLE IF NOT EXISTS type_refs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+      type_name TEXT NOT NULL,
+      UNIQUE(chunk_id, type_name)
+    )
+    ]],
+
+    -- Add docstring column to chunks (if not exists)
+    [[
+    ALTER TABLE chunks ADD COLUMN docstring TEXT
+    ]],
+
+    -- Indexes for call graph queries
+    [[CREATE INDEX IF NOT EXISTS idx_calls_chunk ON calls(chunk_id)]],
+    [[CREATE INDEX IF NOT EXISTS idx_calls_name ON calls(called_name)]],
+    [[CREATE INDEX IF NOT EXISTS idx_type_refs_chunk ON type_refs(chunk_id)]],
+    [[CREATE INDEX IF NOT EXISTS idx_type_refs_name ON type_refs(type_name)]],
+
+    -- Update schema version
+    [[INSERT OR REPLACE INTO schema_version (version) VALUES (2)]],
+  }
+
+  for _, sql in ipairs(statements) do
+    pcall(function()
+      db:eval(sql)
+    end)
   end
 
   return true
@@ -513,6 +568,190 @@ function M.search_by_name(name)
       JOIN files f ON f.id = c.file_id
       WHERE c.name = ?
     ]], { name })
+  end)
+
+  if ok and type(result) == "table" then
+    return result
+  end
+  return {}
+end
+
+-- =============================================================================
+-- Call Graph Operations
+-- =============================================================================
+
+---Insert a function call relationship
+---@param chunk_id number
+---@param called_name string
+function M.insert_call(chunk_id, called_name)
+  if not db then
+    return
+  end
+
+  pcall(function()
+    db:eval([[
+      INSERT OR IGNORE INTO calls (chunk_id, called_name)
+      VALUES (?, ?)
+    ]], { chunk_id, called_name })
+  end)
+end
+
+---Remove all calls for a chunk
+---@param chunk_id number
+function M.remove_calls(chunk_id)
+  if not db then
+    return
+  end
+
+  pcall(function()
+    db:eval("DELETE FROM calls WHERE chunk_id = ?", { chunk_id })
+  end)
+end
+
+---Get chunks that call a specific function
+---@param function_name string
+---@return table[] callers
+function M.get_callers(function_name)
+  if not db then
+    return {}
+  end
+
+  local ok, result = pcall(function()
+    return db:eval([[
+      SELECT c.*, f.path as file_path, f.language
+      FROM calls cl
+      JOIN chunks c ON c.id = cl.chunk_id
+      JOIN files f ON f.id = c.file_id
+      WHERE cl.called_name = ? OR cl.called_name LIKE ?
+    ]], { function_name, "%." .. function_name })
+  end)
+
+  if ok and type(result) == "table" then
+    return result
+  end
+  return {}
+end
+
+---Get functions called by a chunk
+---@param chunk_id number
+---@return table[] callees
+function M.get_callees(chunk_id)
+  if not db then
+    return {}
+  end
+
+  local ok, result = pcall(function()
+    return db:eval([[
+      SELECT c.*, f.path as file_path, f.language
+      FROM calls cl
+      JOIN chunks c ON c.name = cl.called_name OR c.name LIKE '%.' || cl.called_name
+      JOIN files f ON f.id = c.file_id
+      WHERE cl.chunk_id = ?
+    ]], { chunk_id })
+  end)
+
+  if ok and type(result) == "table" then
+    return result
+  end
+  return {}
+end
+
+---Get call names for a chunk
+---@param chunk_id number
+---@return string[] called_names
+function M.get_call_names(chunk_id)
+  if not db then
+    return {}
+  end
+
+  local ok, result = pcall(function()
+    return db:eval("SELECT called_name FROM calls WHERE chunk_id = ?", { chunk_id })
+  end)
+
+  if ok and type(result) == "table" then
+    local names = {}
+    for _, r in ipairs(result) do
+      table.insert(names, r.called_name)
+    end
+    return names
+  end
+  return {}
+end
+
+-- =============================================================================
+-- Type Reference Operations
+-- =============================================================================
+
+---Insert a type reference
+---@param chunk_id number
+---@param type_name string
+function M.insert_type_ref(chunk_id, type_name)
+  if not db then
+    return
+  end
+
+  pcall(function()
+    db:eval([[
+      INSERT OR IGNORE INTO type_refs (chunk_id, type_name)
+      VALUES (?, ?)
+    ]], { chunk_id, type_name })
+  end)
+end
+
+---Remove all type refs for a chunk
+---@param chunk_id number
+function M.remove_type_refs(chunk_id)
+  if not db then
+    return
+  end
+
+  pcall(function()
+    db:eval("DELETE FROM type_refs WHERE chunk_id = ?", { chunk_id })
+  end)
+end
+
+---Get chunks that reference a type
+---@param type_name string
+---@return table[]
+function M.get_type_users(type_name)
+  if not db then
+    return {}
+  end
+
+  local ok, result = pcall(function()
+    return db:eval([[
+      SELECT c.*, f.path as file_path, f.language
+      FROM type_refs tr
+      JOIN chunks c ON c.id = tr.chunk_id
+      JOIN files f ON f.id = c.file_id
+      WHERE tr.type_name = ?
+    ]], { type_name })
+  end)
+
+  if ok and type(result) == "table" then
+    return result
+  end
+  return {}
+end
+
+---Get type definitions (chunks that define a type)
+---@param type_name string
+---@return table[]
+function M.get_type_definition(type_name)
+  if not db then
+    return {}
+  end
+
+  local ok, result = pcall(function()
+    return db:eval([[
+      SELECT c.*, f.path as file_path, f.language
+      FROM chunks c
+      JOIN files f ON f.id = c.file_id
+      WHERE c.name = ?
+      AND c.type IN ('type_alias_declaration', 'interface_declaration',
+                     'class_declaration', 'struct_item', 'enum_item',
+                     'type_declaration', 'enum_declaration')
+    ]], { type_name })
   end)
 
   if ok and type(result) == "table" then

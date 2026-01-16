@@ -468,6 +468,409 @@ function M.extract_imports(filepath, content, language)
   return imports
 end
 
+-- =============================================================================
+-- Call Graph Analysis
+-- =============================================================================
+
+-- Node types that represent function calls by language
+local CALL_TYPES = {
+  lua = { "function_call" },
+  python = { "call" },
+  javascript = { "call_expression" },
+  typescript = { "call_expression" },
+  tsx = { "call_expression" },
+  go = { "call_expression" },
+  rust = { "call_expression", "macro_invocation" },
+  java = { "method_invocation" },
+  c = { "call_expression" },
+  cpp = { "call_expression" },
+}
+
+---Extract function calls from a chunk
+---@param node userdata Tree-sitter node
+---@param content string
+---@param language string
+---@return string[] called_functions
+local function extract_calls_from_node(node, content, language)
+  local calls = {}
+  local call_types = CALL_TYPES[language] or {}
+
+  local function traverse(n)
+    local type = n:type()
+
+    -- Check if this is a call expression
+    for _, ct in ipairs(call_types) do
+      if type == ct then
+        -- Try to extract the function name
+        local name = nil
+
+        -- Look for identifier or member expression
+        for child in n:iter_children() do
+          local child_type = child:type()
+          if child_type == "identifier" or child_type == "name" then
+            local start_row, start_col, end_row, end_col = child:range()
+            local lines = vim.split(content, "\n")
+            if lines[start_row + 1] then
+              name = lines[start_row + 1]:sub(start_col + 1, end_col)
+            end
+            break
+          elseif child_type == "member_expression" or child_type == "dot_index_expression"
+              or child_type == "attribute" then
+            -- Get the full member expression (e.g., obj.method)
+            local start_row, start_col, end_row, end_col = child:range()
+            local lines = vim.split(content, "\n")
+            if lines[start_row + 1] then
+              name = lines[start_row + 1]:sub(start_col + 1, end_col)
+            end
+            break
+          end
+        end
+
+        if name and name ~= "" then
+          table.insert(calls, name)
+        end
+      end
+    end
+
+    -- Recurse
+    for child in n:iter_children() do
+      traverse(child)
+    end
+  end
+
+  traverse(node)
+
+  -- Dedupe
+  local seen = {}
+  local unique = {}
+  for _, c in ipairs(calls) do
+    if not seen[c] then
+      seen[c] = true
+      table.insert(unique, c)
+    end
+  end
+
+  return unique
+end
+
+---Extract function calls from content
+---@param content string
+---@param language string
+---@return table[] calls {caller_name, called_names[], line_start, line_end}
+function M.extract_call_graph(content, language)
+  local parser_map = {
+    javascript = "javascript",
+    typescript = "typescript",
+    tsx = "tsx",
+    jsx = "javascript",
+    python = "python",
+    lua = "lua",
+    go = "go",
+    rust = "rust",
+    c = "c",
+    cpp = "cpp",
+    java = "java",
+  }
+
+  local ts_lang = parser_map[language]
+  if not ts_lang then
+    return {}
+  end
+
+  local ok, parser = pcall(vim.treesitter.get_string_parser, content, ts_lang)
+  if not ok or not parser then
+    return {}
+  end
+
+  local tree = parser:parse()[1]
+  if not tree then
+    return {}
+  end
+
+  local root = tree:root()
+  local graph = {}
+  local chunk_types = CHUNK_TYPES[language] or CHUNK_TYPES[ts_lang] or {}
+
+  local function extract_from_node(node)
+    local type = node:type()
+
+    -- Check if this is a function definition
+    local is_func = false
+    for _, ct in ipairs(chunk_types) do
+      if type == ct and (ct:find("function") or ct:find("method")) then
+        is_func = true
+        break
+      end
+    end
+
+    if is_func then
+      local start_row, _, end_row, _ = node:range()
+      local name = get_chunk_name(node, content, language)
+      local calls = extract_calls_from_node(node, content, language)
+
+      if name or #calls > 0 then
+        table.insert(graph, {
+          name = name or "anonymous",
+          calls = calls,
+          start_line = start_row + 1,
+          end_line = end_row + 1,
+        })
+      end
+    end
+
+    -- Recurse
+    for child in node:iter_children() do
+      extract_from_node(child)
+    end
+  end
+
+  extract_from_node(root)
+  return graph
+end
+
+-- =============================================================================
+-- Docstring/Comment Extraction
+-- =============================================================================
+
+---Extract docstring or leading comment for a function
+---@param node userdata Tree-sitter node
+---@param content string
+---@param language string
+---@return string|nil docstring
+local function extract_docstring(node, content, language)
+  local lines = vim.split(content, "\n")
+  local start_row, _, _, _ = node:range()
+
+  -- Look for comments/docstrings before the function
+  local doc_lines = {}
+
+  -- Check previous sibling for comment
+  local prev = node:prev_sibling()
+  if prev then
+    local prev_type = prev:type()
+    if prev_type:find("comment") or prev_type == "string" then
+      local ps, _, pe, _ = prev:range()
+      for i = ps + 1, pe + 1 do
+        if lines[i] then
+          table.insert(doc_lines, lines[i])
+        end
+      end
+    end
+  end
+
+  -- Also check lines immediately before (for languages without tree-sitter comment nodes)
+  if #doc_lines == 0 and start_row > 0 then
+    local comment_patterns = {
+      lua = "^%s*%-%-",
+      python = "^%s*#",
+      javascript = "^%s*//",
+      typescript = "^%s*//",
+      go = "^%s*//",
+      rust = "^%s*//",
+      java = "^%s*//",
+      c = "^%s*//",
+      cpp = "^%s*//",
+    }
+
+    local pattern = comment_patterns[language] or "^%s*[/#%-]"
+    local i = start_row -- 0-indexed, so this is line before
+
+    while i > 0 and i > start_row - 10 do
+      local line = lines[i]
+      if line and line:match(pattern) then
+        table.insert(doc_lines, 1, line)
+        i = i - 1
+      else
+        break
+      end
+    end
+  end
+
+  if #doc_lines > 0 then
+    return table.concat(doc_lines, "\n")
+  end
+
+  return nil
+end
+
+-- =============================================================================
+-- Type Reference Extraction
+-- =============================================================================
+
+-- Type annotation node types by language
+local TYPE_REF_TYPES = {
+  typescript = { "type_identifier", "predefined_type", "generic_type" },
+  tsx = { "type_identifier", "predefined_type", "generic_type" },
+  rust = { "type_identifier", "generic_type" },
+  java = { "type_identifier", "generic_type" },
+  go = { "type_identifier" },
+  python = { "identifier" }, -- Python type hints are just identifiers
+}
+
+---Extract type references from a chunk
+---@param node userdata Tree-sitter node
+---@param content string
+---@param language string
+---@return string[] type_names
+local function extract_type_refs(node, content, language)
+  local type_refs = {}
+  local ref_types = TYPE_REF_TYPES[language] or {}
+
+  if #ref_types == 0 then
+    return {}
+  end
+
+  local function traverse(n)
+    local type = n:type()
+
+    for _, rt in ipairs(ref_types) do
+      if type == rt then
+        local start_row, start_col, end_row, end_col = n:range()
+        local lines = vim.split(content, "\n")
+        if lines[start_row + 1] then
+          local name = lines[start_row + 1]:sub(start_col + 1, end_col)
+          -- Filter out primitive types
+          local primitives = {
+            string = true, number = true, boolean = true, void = true,
+            int = true, float = true, double = true, char = true,
+            bool = true, i32 = true, i64 = true, u32 = true, u64 = true,
+            str = true, any = true, null = true, undefined = true,
+          }
+          if name and not primitives[name:lower()] then
+            table.insert(type_refs, name)
+          end
+        end
+      end
+    end
+
+    for child in n:iter_children() do
+      traverse(child)
+    end
+  end
+
+  traverse(node)
+
+  -- Dedupe
+  local seen = {}
+  local unique = {}
+  for _, t in ipairs(type_refs) do
+    if not seen[t] then
+      seen[t] = true
+      table.insert(unique, t)
+    end
+  end
+
+  return unique
+end
+
+-- =============================================================================
+-- Enhanced Chunk Extraction
+-- =============================================================================
+
+---Extract chunks with enhanced metadata (calls, docstring, types)
+---@param filepath string
+---@param content string
+---@param opts? table
+---@return table[] chunks
+function M.extract_chunks_enhanced(filepath, content, opts)
+  opts = opts or {}
+  local language = opts.language
+
+  if not language then
+    return {}
+  end
+
+  local parser_map = {
+    javascript = "javascript",
+    typescript = "typescript",
+    tsx = "tsx",
+    jsx = "javascript",
+    python = "python",
+    lua = "lua",
+    go = "go",
+    rust = "rust",
+    c = "c",
+    cpp = "cpp",
+    java = "java",
+    ruby = "ruby",
+    php = "php",
+  }
+
+  local ts_lang = parser_map[language]
+  if not ts_lang then
+    return M._fallback_chunks(filepath, content, opts)
+  end
+
+  local ok, parser = pcall(vim.treesitter.get_string_parser, content, ts_lang)
+  if not ok or not parser then
+    return M._fallback_chunks(filepath, content, opts)
+  end
+
+  local tree = parser:parse()[1]
+  if not tree then
+    return M._fallback_chunks(filepath, content, opts)
+  end
+
+  local root = tree:root()
+  local chunks = {}
+  local chunk_types = CHUNK_TYPES[language] or CHUNK_TYPES[ts_lang] or {}
+  local max_chunks = opts.max_chunks or 100
+
+  local function extract_from_node(node)
+    if #chunks >= max_chunks then
+      return
+    end
+
+    local type = node:type()
+
+    local is_chunk = false
+    for _, ct in ipairs(chunk_types) do
+      if type == ct then
+        is_chunk = true
+        break
+      end
+    end
+
+    if is_chunk and is_valid_chunk(node, content, opts) then
+      local start_row, _, end_row, _ = node:range()
+      local name = get_chunk_name(node, content, language)
+      local signature = get_signature(node, content)
+      local node_content = get_node_content(node, content)
+      local scope_path = get_scope_path(node, content, language)
+
+      -- Enhanced metadata
+      local docstring = extract_docstring(node, content, language)
+      local calls = extract_calls_from_node(node, content, language)
+      local type_refs = extract_type_refs(node, content, language)
+
+      table.insert(chunks, {
+        type = type,
+        name = name,
+        signature = signature,
+        start_line = start_row + 1,
+        end_line = end_row + 1,
+        content = node_content,
+        scope_path = scope_path ~= "" and scope_path or nil,
+        -- Enhanced fields
+        docstring = docstring,
+        calls = calls,
+        type_refs = type_refs,
+      })
+    end
+
+    for child in node:iter_children() do
+      extract_from_node(child)
+    end
+  end
+
+  extract_from_node(root)
+  return chunks
+end
+
+-- =============================================================================
+-- Ranking Helpers
+-- =============================================================================
+
 ---Get chunk type priority for ranking
 ---@param chunk_type string
 ---@return number Higher is more important

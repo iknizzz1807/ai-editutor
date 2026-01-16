@@ -257,20 +257,43 @@ function M._index_file(filepath)
     return false
   end
 
-  -- Extract chunks using Tree-sitter
-  local chunks = chunker.extract_chunks(filepath, content, {
+  -- Extract chunks using enhanced Tree-sitter chunker (with call graph & type refs)
+  local chunks = chunker.extract_chunks_enhanced(filepath, content, {
     language = language,
     max_chunks = M.config.max_chunks_per_file,
     max_chunk_size = M.config.max_chunk_size,
   })
 
+  -- Fallback to basic chunker if enhanced returns empty
+  if #chunks == 0 then
+    chunks = chunker.extract_chunks(filepath, content, {
+      language = language,
+      max_chunks = M.config.max_chunks_per_file,
+      max_chunk_size = M.config.max_chunk_size,
+    })
+  end
+
   -- Remove old chunks for this file
   db.remove_chunks(file_id)
 
-  -- Insert new chunks
+  -- Insert new chunks with enhanced metadata
   for _, chunk in ipairs(chunks) do
     chunk.file_id = file_id
-    db.insert_chunk(chunk)
+    local chunk_id = db.insert_chunk(chunk)
+
+    -- Store call graph
+    if chunk_id and chunk.calls then
+      for _, called_name in ipairs(chunk.calls) do
+        db.insert_call(chunk_id, called_name)
+      end
+    end
+
+    -- Store type references
+    if chunk_id and chunk.type_refs then
+      for _, type_name in ipairs(chunk.type_refs) do
+        db.insert_type_ref(chunk_id, type_name)
+      end
+    end
   end
 
   -- Extract imports
