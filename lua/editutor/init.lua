@@ -48,8 +48,8 @@ M._messages = {
     conversation_cleared = "Conversation cleared",
     gathering_context = "Gathering context...",
     context_mode_full = "Using full project context (%d tokens)",
-    context_mode_lsp = "Using LSP selective context (%d tokens)",
-    context_over_budget = "Warning: Context exceeds budget (%d > %d tokens)",
+    context_mode_adaptive = "Using adaptive context (%d tokens)",
+    context_budget_exceeded = "Context exceeds budget (%d > %d tokens). Reduce scope or increase budget.",
   },
   vi = {
     no_comment = "Khong tim thay cau hoi. Viet: // Q: cau hoi cua ban",
@@ -75,8 +75,8 @@ M._messages = {
     conversation_cleared = "Da xoa hoi thoai",
     gathering_context = "Dang thu thap context...",
     context_mode_full = "Su dung full project context (%d tokens)",
-    context_mode_lsp = "Su dung LSP selective context (%d tokens)",
-    context_over_budget = "Canh bao: Context vuot budget (%d > %d tokens)",
+    context_mode_adaptive = "Su dung adaptive context (%d tokens)",
+    context_budget_exceeded = "Context vuot budget (%d > %d tokens). Giam scope hoac tang budget.",
   },
 }
 
@@ -240,19 +240,21 @@ function M.ask()
   -- Start loading
   loading.start(M._msg("gathering_context"))
 
-  -- Extract context (auto-selects full project or LSP mode)
+  -- Extract context (auto-selects full project or adaptive mode)
   context.extract(function(full_context, metadata)
+    -- Check if budget exceeded (full_context is nil)
+    if not full_context then
+      loading.stop()
+      vim.notify(string.format("[ai-editutor] " .. M._msg("context_budget_exceeded"),
+        metadata.total_tokens, metadata.budget), vim.log.levels.ERROR)
+      return
+    end
+
     -- Log context mode
     if metadata.mode == "full_project" then
       vim.notify(string.format("[ai-editutor] " .. M._msg("context_mode_full"), metadata.total_tokens), vim.log.levels.INFO)
     else
-      vim.notify(string.format("[ai-editutor] " .. M._msg("context_mode_lsp"), metadata.total_tokens), vim.log.levels.INFO)
-    end
-
-    -- Warn if over budget
-    if not metadata.within_budget then
-      vim.notify(string.format("[ai-editutor] " .. M._msg("context_over_budget"),
-        metadata.total_tokens, metadata.budget), vim.log.levels.WARN)
+      vim.notify(string.format("[ai-editutor] " .. M._msg("context_mode_adaptive"), metadata.total_tokens), vim.log.levels.INFO)
     end
 
     loading.update(loading.states.connecting)
@@ -263,7 +265,7 @@ function M.ask()
   })
 end
 
----Process ask with context
+---Process ask with context (streaming)
 ---@param query table
 ---@param filepath string
 ---@param bufnr number
@@ -298,49 +300,65 @@ function M._process_ask(query, filepath, bufnr, full_context, metadata)
     model = model_name,
   })
 
-  loading.update(loading.states.thinking)
+  -- Start streaming - insert placeholder comment
+  local stream_state = comment_writer.start_streaming(query.line, bufnr)
+  loading.update(loading.states.streaming)
   local start_time = vim.loop.hrtime()
 
-  -- Query LLM
-  provider.query_async(system_prompt, user_prompt, function(response, err)
-    loading.stop()
+  -- Query LLM with streaming
+  provider.query_stream(
+    system_prompt,
+    user_prompt,
+    -- on_chunk (not used, we use on_batch instead)
+    function() end,
+    -- on_done
+    function(response, err)
+      loading.stop()
+      comment_writer.finish_streaming(stream_state)
 
-    local duration_ms = math.floor((vim.loop.hrtime() - start_time) / 1000000)
+      local duration_ms = math.floor((vim.loop.hrtime() - start_time) / 1000000)
 
-    -- Log response
-    debug_log.log_response({
-      response = response,
-      error = err,
-      duration_ms = duration_ms,
-    })
+      -- Log response
+      debug_log.log_response({
+        response = response,
+        error = err,
+        duration_ms = duration_ms,
+      })
 
-    if err then
-      vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
-      return
-    end
+      if err then
+        vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
+        return
+      end
 
-    if not response then
-      vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
-      return
-    end
+      if not response then
+        vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
+        return
+      end
 
-    -- Add to conversation
-    conversation.add_message("user", query.question)
-    conversation.add_message("assistant", response)
+      -- Add to conversation
+      conversation.add_message("user", query.question)
+      conversation.add_message("assistant", response)
 
-    -- Save to knowledge
-    knowledge.save({
-      mode = "question",
-      question = query.question,
-      answer = response,
-      language = vim.bo.filetype,
-      filepath = filepath,
-    })
+      -- Save to knowledge
+      knowledge.save({
+        mode = "question",
+        question = query.question,
+        answer = response,
+        language = vim.bo.filetype,
+        filepath = filepath,
+      })
 
-    -- Insert response
-    comment_writer.insert_or_replace(response, query.line, bufnr)
-    vim.notify("[ai-editutor] " .. M._msg("response_inserted"), vim.log.levels.INFO)
-  end)
+      vim.notify("[ai-editutor] " .. M._msg("response_inserted"), vim.log.levels.INFO)
+    end,
+    -- opts
+    {
+      debounce_ms = 50,
+      on_batch = function(_, full_response_so_far)
+        -- Update comment with full response so far
+        comment_writer.update_streaming(stream_state, full_response_so_far)
+      end,
+    }
+  )
 end
 
 -- =============================================================================
@@ -383,6 +401,14 @@ function M.ask_visual()
 
   -- Extract full context
   context.extract(function(full_context, metadata)
+    -- Check if budget exceeded
+    if not full_context then
+      loading.stop()
+      vim.notify(string.format("[ai-editutor] " .. M._msg("context_budget_exceeded"),
+        metadata.total_tokens, metadata.budget), vim.log.levels.ERROR)
+      return
+    end
+
     loading.update(loading.states.connecting)
     M._process_ask_visual(query, filepath, bufnr, full_context, selected_code, metadata)
   end, {
@@ -391,7 +417,7 @@ function M.ask_visual()
   })
 end
 
----Process visual ask with selected code
+---Process visual ask with selected code (streaming)
 ---@param query table
 ---@param filepath string
 ---@param bufnr number
@@ -427,50 +453,66 @@ function M._process_ask_visual(query, filepath, bufnr, full_context, selected_co
     model = model_name,
   })
 
-  loading.update(loading.states.thinking)
+  -- Start streaming - insert placeholder comment
+  local stream_state = comment_writer.start_streaming(query.line, bufnr)
+  loading.update(loading.states.streaming)
   local start_time = vim.loop.hrtime()
 
-  -- Query LLM
-  provider.query_async(system_prompt, user_prompt, function(response, err)
-    loading.stop()
+  -- Query LLM with streaming
+  provider.query_stream(
+    system_prompt,
+    user_prompt,
+    -- on_chunk (not used, we use on_batch instead)
+    function() end,
+    -- on_done
+    function(response, err)
+      loading.stop()
+      comment_writer.finish_streaming(stream_state)
 
-    local duration_ms = math.floor((vim.loop.hrtime() - start_time) / 1000000)
+      local duration_ms = math.floor((vim.loop.hrtime() - start_time) / 1000000)
 
-    -- Log response
-    debug_log.log_response({
-      response = response,
-      error = err,
-      duration_ms = duration_ms,
-    })
+      -- Log response
+      debug_log.log_response({
+        response = response,
+        error = err,
+        duration_ms = duration_ms,
+      })
 
-    if err then
-      vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
-      return
-    end
+      if err then
+        vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
+        return
+      end
 
-    if not response then
-      vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
-      return
-    end
+      if not response then
+        vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
+        return
+      end
 
-    -- Add to conversation
-    conversation.add_message("user", query.question .. "\n[Selected code]\n" .. selected_code:sub(1, 200))
-    conversation.add_message("assistant", response)
+      -- Add to conversation
+      conversation.add_message("user", query.question .. "\n[Selected code]\n" .. selected_code:sub(1, 200))
+      conversation.add_message("assistant", response)
 
-    -- Save to knowledge
-    knowledge.save({
-      mode = "question",
-      question = query.question,
-      answer = response,
-      language = vim.bo.filetype,
-      filepath = filepath,
-      tags = { "visual-selection" },
-    })
+      -- Save to knowledge
+      knowledge.save({
+        mode = "question",
+        question = query.question,
+        answer = response,
+        language = vim.bo.filetype,
+        filepath = filepath,
+        tags = { "visual-selection" },
+      })
 
-    -- Insert response
-    comment_writer.insert_or_replace(response, query.line, bufnr)
-    vim.notify("[ai-editutor] " .. M._msg("response_inserted"), vim.log.levels.INFO)
-  end)
+      vim.notify("[ai-editutor] " .. M._msg("response_inserted"), vim.log.levels.INFO)
+    end,
+    -- opts
+    {
+      debounce_ms = 50,
+      on_batch = function(_, full_response_so_far)
+        -- Update comment with full response so far
+        comment_writer.update_streaming(stream_state, full_response_so_far)
+      end,
+    }
+  )
 end
 
 -- =============================================================================
@@ -493,6 +535,14 @@ function M.ask_with_hints()
   loading.start(M._msg("gathering_context"))
 
   context.extract(function(context_formatted, metadata)
+    -- Check if budget exceeded
+    if not context_formatted then
+      loading.stop()
+      vim.notify(string.format("[ai-editutor] " .. M._msg("context_budget_exceeded"),
+        metadata.total_tokens, metadata.budget), vim.log.levels.ERROR)
+      return
+    end
+
     local session = hints.get_session(query.question, nil, context_formatted)
     local level = session.level + 1
 

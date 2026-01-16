@@ -29,11 +29,12 @@ Major simplification: **One prefix to rule them all**. Just use `Q:` and express
 ai-editutor/
 ├── lua/
 │   └── editutor/
-│       ├── init.lua              # Plugin entry point (v1.0.0)
+│       ├── init.lua              # Plugin entry point (v1.1.0)
 │       ├── config.lua            # Configuration management
 │       ├── parser.lua            # Comment parsing (Q: only)
-│       ├── context.lua           # Context extraction (Tree-sitter)
+│       ├── context.lua           # Context extraction (full/adaptive)
 │       ├── lsp_context.lua       # LSP-based context (go-to-definition)
+│       ├── import_graph.lua      # Import graph analysis (NEW)
 │       ├── comment_writer.lua    # Insert responses as inline comments
 │       ├── prompts.lua           # Unified pedagogical prompt (bilingual)
 │       ├── provider.lua          # LLM API with inheritance + streaming
@@ -41,14 +42,11 @@ ai-editutor/
 │       ├── knowledge.lua         # Knowledge tracking (SQLite/JSON)
 │       ├── conversation.lua      # Session-based conversation memory
 │       ├── project_context.lua   # Project docs context
+│       ├── project_scanner.lua   # Project file scanning
 │       ├── cache.lua             # LRU cache with TTL + autocmd invalidation
 │       ├── loading.lua           # Loading indicator
-│       ├── health.lua            # :checkhealth editutor
-│       └── indexer/              # Project indexing system
-│           ├── init.lua          # Indexer entry point
-│           ├── db.lua            # SQLite + FTS5 for BM25 search
-│           ├── chunker.lua       # Tree-sitter AST chunking
-│           └── ranker.lua        # Multi-signal context ranking
+│       ├── debug_log.lua         # Debug logging
+│       └── health.lua            # :checkhealth editutor
 ├── plugin/
 │   └── editutor.lua              # Lazy loading entry
 ├── doc/
@@ -116,34 +114,36 @@ The parser automatically detects A: responses (block comments, line comments) an
 
 The selected code becomes the primary context, with surrounding code as secondary context.
 
-### Context Extraction: Multi-Signal Approach
+### Context Extraction: Two-Mode Approach
 
-ai-editutor uses a **hybrid approach** combining LSP + BM25 search + multiple ranking signals:
+ai-editutor uses **adaptive context extraction** based on project size:
 
 ```
-                    User Question
+                    Project Size Check
                          │
-           ┌─────────────┼─────────────┐
-           │             │             │
-           ▼             ▼             ▼
-     LSP Context    BM25 Search   Import Graph
-           │             │             │
-           └─────────────┼─────────────┘
-                         │
-                         ▼
-              Multi-Signal Ranker
-         ┌──────────────────────────┐
-         │ Signals:                 │
-         │ • LSP definition (1.0)   │
-         │ • Name match (0.4)       │
-         │ • BM25 score (0.5)       │
-         │ • Dir proximity (0.3)    │
-         │ • Git recency (0.2)      │
-         │ • Import distance (0.2)  │
-         │ • Recent access (0.1)    │
-         │ • Type priority (0.15)   │
-         └──────────────────────────┘
+           ┌─────────────┴─────────────┐
+           │                           │
+    <= 20K tokens               > 20K tokens
+           │                           │
+           ▼                           ▼
+    FULL_PROJECT                   ADAPTIVE
+           │                           │
+           ▼                           ▼
+    All source files          ┌────────────────┐
+    + Project tree            │ 1. Current file│
+                              │ 2. Import graph│
+                              │ 3. LSP defs    │
+                              │ 4. Project tree│
+                              └────────────────┘
 ```
+
+**ADAPTIVE Mode Details:**
+1. **Current file** - Always included with line numbers
+2. **Import graph (depth=1)** - Files imported by current + files that import current
+3. **LSP definitions** - Deduplicated (skips files already in import graph)
+4. **Project tree** - Always included
+
+If adaptive context > 20K tokens → Error, won't execute
 
 ### Comment Style Detection
 
@@ -206,10 +206,18 @@ Block comments are preferred when available.
 - Built-in: Claude, OpenAI, DeepSeek, Groq, Together, OpenRouter, Ollama
 - Streaming with debounced UI updates
 
-### indexer/ - Project Indexing System
-- SQLite + FTS5 for BM25 search
-- Tree-sitter AST chunking (12+ languages)
-- Multi-signal context ranking
+### import_graph.lua - Import Analysis (NEW in v1.1)
+- Parse import statements for 12+ languages (JS/TS, Python, Lua, Go, Rust, etc.)
+- `get_outgoing_imports()` - Files imported by current file
+- `get_incoming_imports()` - Files that import current file
+- `resolve_import()` - Resolve import path to actual file
+- Library detection (node_modules, stdlib, etc.)
+
+### context.lua - Context Extraction
+- `detect_mode()` - Choose FULL_PROJECT or ADAPTIVE based on token budget
+- `build_full_project_context()` - All source files for small projects
+- `build_adaptive_context()` - Import graph + LSP (deduped) for large projects
+- Budget enforcement: returns error if > 20K tokens
 
 ---
 

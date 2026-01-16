@@ -296,4 +296,116 @@ function M.insert_or_replace(response, question_line, bufnr)
   return M.insert_response(response, question_line, bufnr)
 end
 
+-- =============================================================================
+-- Streaming Support
+-- =============================================================================
+
+---@class StreamingState
+---@field bufnr number Buffer number
+---@field question_line number Question line number
+---@field start_line number Start line of inserted comment
+---@field end_line number Current end line of comment
+---@field style table Comment style
+---@field indent string Indentation
+
+---Start streaming response - inserts placeholder
+---@param question_line number Line number of the question (1-indexed)
+---@param bufnr? number Buffer number
+---@return StreamingState state State object for updates
+function M.start_streaming(question_line, bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local style = M.get_style(bufnr)
+
+  -- Remove existing response first
+  M.remove_existing_response(question_line, bufnr)
+
+  -- Get indentation from question line
+  local line_content = vim.api.nvim_buf_get_lines(bufnr, question_line - 1, question_line, false)[1]
+  local indent = line_content and line_content:match("^(%s*)") or ""
+
+  -- Insert placeholder
+  local placeholder_lines = { "" } -- blank line
+
+  if style.block then
+    table.insert(placeholder_lines, indent .. style.block[1])
+    table.insert(placeholder_lines, indent .. "A: ...")
+    table.insert(placeholder_lines, indent .. style.block[2])
+  elseif style.line then
+    table.insert(placeholder_lines, indent .. style.line .. " A: ...")
+  end
+
+  vim.api.nvim_buf_set_lines(bufnr, question_line, question_line, false, placeholder_lines)
+
+  return {
+    bufnr = bufnr,
+    question_line = question_line,
+    start_line = question_line + 1, -- after blank line
+    end_line = question_line + #placeholder_lines,
+    style = style,
+    indent = indent,
+  }
+end
+
+---Update streaming response with new content
+---@param state StreamingState State from start_streaming
+---@param content string Full content so far (not just new chunk)
+function M.update_streaming(state, content)
+  if not state or not vim.api.nvim_buf_is_valid(state.bufnr) then
+    return
+  end
+
+  local lines = {}
+
+  if state.style.block then
+    -- Block comment format
+    table.insert(lines, state.indent .. state.style.block[1])
+    table.insert(lines, state.indent .. "A:")
+
+    for line in content:gmatch("[^\n]*") do
+      if line == "" then
+        table.insert(lines, "")
+      else
+        table.insert(lines, state.indent .. line)
+      end
+    end
+
+    table.insert(lines, state.indent .. state.style.block[2])
+  elseif state.style.line then
+    -- Line comment format
+    local prefix = state.style.line .. " "
+    local first = true
+
+    for line in content:gmatch("[^\n]*") do
+      if first then
+        table.insert(lines, state.indent .. prefix .. "A: " .. line)
+        first = false
+      elseif line == "" then
+        table.insert(lines, state.indent .. prefix)
+      else
+        table.insert(lines, state.indent .. prefix .. line)
+      end
+    end
+  end
+
+  -- Replace the comment block
+  -- start_line is after the blank line, so we replace from start_line to end_line
+  vim.api.nvim_buf_set_lines(
+    state.bufnr,
+    state.start_line,
+    state.end_line,
+    false,
+    lines
+  )
+
+  -- Update end_line for next update
+  state.end_line = state.start_line + #lines
+end
+
+---Finish streaming (cleanup if needed)
+---@param state StreamingState State from start_streaming
+function M.finish_streaming(state)
+  -- Currently no cleanup needed
+  -- Could add final formatting here if desired
+end
+
 return M

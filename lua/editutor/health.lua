@@ -118,7 +118,7 @@ function M.check()
     if mode_info.mode == "full_project" then
       ok(string.format("Mode: FULL_PROJECT (%d tokens, within budget)", mode_info.project_tokens))
     else
-      info(string.format("Mode: LSP_SELECTIVE (project %d tokens > budget %d)",
+      info(string.format("Mode: ADAPTIVE (project %d tokens > budget %d)",
         mode_info.project_tokens, mode_info.budget))
     end
   else
@@ -223,6 +223,29 @@ function M.check()
     warn("Debug log module not loaded")
   end
 
+  -- Import graph checks
+  start("ai-editutor Import Graph")
+
+  local import_ok, import_mod = pcall(require, "editutor.import_graph")
+  if import_ok then
+    ok("Import graph module loaded")
+
+    -- Check current file's import graph
+    local current_file = vim.api.nvim_buf_get_name(0)
+    if current_file and current_file ~= "" then
+      local lang = import_mod.get_language(current_file)
+      if lang then
+        info(string.format("Current file language: %s", lang))
+        local graph = import_mod.get_import_graph(current_file)
+        info(string.format("Import graph: %d outgoing, %d incoming", #graph.outgoing, #graph.incoming))
+      else
+        info("Current file: language not supported for import analysis")
+      end
+    end
+  else
+    warn("Import graph module not loaded")
+  end
+
   -- Summary
   start("ai-editutor Quick Start")
   info("Write: // Q: your question")
@@ -230,7 +253,7 @@ function M.check()
   info("")
   info("Context modes:")
   info("  - FULL_PROJECT: Sends entire project if < 20k tokens")
-  info("  - LSP_SELECTIVE: Uses LSP definitions for large projects")
+  info("  - ADAPTIVE: Import graph + LSP definitions for large projects")
   info("")
   info("Commands:")
   info("  :EduTutorAsk      - Ask question")

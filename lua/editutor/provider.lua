@@ -549,6 +549,15 @@ local function parse_sse_line(line, provider_name)
   -- Extract text based on provider format
   local text = nil
 
+  -- OpenAI-compatible providers (openai, deepseek, groq, together, openrouter)
+  local openai_compatible = {
+    openai = true,
+    deepseek = true,
+    groq = true,
+    together = true,
+    openrouter = true,
+  }
+
   if provider_name == "claude" then
     -- Claude format: {"type":"content_block_delta","delta":{"type":"text_delta","text":"..."}}
     if json.type == "content_block_delta" and json.delta and json.delta.text then
@@ -556,7 +565,7 @@ local function parse_sse_line(line, provider_name)
     elseif json.type == "message_stop" then
       return nil, true
     end
-  elseif provider_name == "openai" then
+  elseif openai_compatible[provider_name] then
     -- OpenAI format: {"choices":[{"delta":{"content":"..."}}]}
     if json.choices and json.choices[1] and json.choices[1].delta then
       text = json.choices[1].delta.content
