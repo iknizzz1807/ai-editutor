@@ -109,6 +109,9 @@ function M.setup(opts)
     debug_log.ensure_gitignore()
   end)
 
+  -- Setup error logging hook
+  debug_log.setup_error_hook()
+
   -- Check provider on setup
   local ready, err = provider.check_provider()
   if not ready then
@@ -179,6 +182,16 @@ function M._create_commands()
     debug_log.clear()
     vim.notify("[ai-editutor] Debug log cleared", vim.log.levels.INFO)
   end, { desc = "Clear debug log file" })
+
+  -- Error log commands
+  vim.api.nvim_create_user_command("EduTutorErrors", function()
+    debug_log.open_error_log()
+  end, { desc = "Open error log file" })
+
+  vim.api.nvim_create_user_command("EduTutorClearErrors", function()
+    debug_log.clear_error_log()
+    vim.notify("[ai-editutor] Error log cleared", vim.log.levels.INFO)
+  end, { desc = "Clear error log file" })
 end
 
 ---Setup keymaps

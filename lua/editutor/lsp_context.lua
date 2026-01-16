@@ -55,8 +55,8 @@ function M.is_project_file(filepath)
     end
   end
 
-  -- Check if within project root
-  local project_root = M.get_project_root()
+  -- Check if within project root (use the filepath to detect project root)
+  local project_root = M.get_project_root(filepath)
   if filepath:sub(1, #project_root) == project_root then
     return true
   end
@@ -150,7 +150,9 @@ function M.extract_all_identifiers(bufnr)
     query_string = "[(identifier) (dot_index_expression)] @id"
   elseif lang == "python" then
     query_string = "[(identifier) (attribute)] @id"
-  elseif lang == "javascript" or lang == "typescript" or lang == "tsx" then
+  elseif lang == "javascript" then
+    query_string = "[(identifier) (property_identifier)] @id"
+  elseif lang == "typescript" or lang == "tsx" then
     query_string = "[(identifier) (property_identifier) (type_identifier)] @id"
   elseif lang == "go" then
     query_string = "[(identifier) (type_identifier) (field_identifier)] @id"
@@ -379,17 +381,27 @@ function M.get_context(callback, opts)
     },
     external = {},
     has_lsp = M.is_available(),
+    _debug = {}, -- Debug info
   }
 
   -- If no LSP, return just current context
   if not context.has_lsp then
+    context._debug.reason = "no_lsp"
     callback(context)
     return
   end
 
   -- Get external definitions (scans entire file, deduped)
+  local identifiers = M.extract_all_identifiers(bufnr)
+  context._debug.identifiers_found = #identifiers
+  context._debug.sample_identifiers = {}
+  for i = 1, math.min(10, #identifiers) do
+    table.insert(context._debug.sample_identifiers, identifiers[i].name)
+  end
+
   M.get_all_external_definitions(bufnr, function(definitions)
     context.external = definitions
+    context._debug.external_found = #definitions
     callback(context)
   end, {
     max_files = max_external_files,
@@ -403,7 +415,8 @@ end
 ---@return table metadata
 function M.format_for_prompt(ctx)
   local parts = {}
-  local project_root = M.get_project_root()
+  -- Get project root from current file path
+  local project_root = M.get_project_root(ctx.current.filepath)
   local root_name = vim.fn.fnamemodify(project_root, ":t")
 
   local metadata = {
@@ -418,7 +431,12 @@ function M.format_for_prompt(ctx)
   local language = project_scanner.get_language_for_ext(ext)
 
   -- Current file context (full file)
-  local relative_path = ctx.current.filepath:gsub(project_root .. "/", "")
+  local relative_path
+  if ctx.current.filepath:sub(1, #project_root) == project_root then
+    relative_path = ctx.current.filepath:sub(#project_root + 2)  -- +2 to skip /
+  else
+    relative_path = vim.fn.fnamemodify(ctx.current.filepath, ":t")  -- fallback to filename
+  end
   local display_path = root_name .. "/" .. relative_path
 
   table.insert(parts, "=== Current File ===")
@@ -436,7 +454,12 @@ function M.format_for_prompt(ctx)
     table.insert(parts, "")
 
     for _, def in ipairs(ctx.external) do
-      local def_relative = def.filepath:gsub(project_root .. "/", "")
+      local def_relative
+      if def.filepath:sub(1, #project_root) == project_root then
+        def_relative = def.filepath:sub(#project_root + 2)  -- +2 to skip /
+      else
+        def_relative = vim.fn.fnamemodify(def.filepath, ":t")  -- fallback to filename
+      end
       local def_display = root_name .. "/" .. def_relative
       local def_ext = def.filepath:match("%.(%w+)$") or ""
       local def_lang = project_scanner.get_language_for_ext(def_ext)

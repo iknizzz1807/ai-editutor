@@ -1,10 +1,14 @@
 -- editutor/debug_log.lua
 -- Debug logging for ai-editutor
 -- Logs all LLM requests to {project_root}/.editutor.log
+-- Also logs all errors to ~/.local/share/nvim/editutor_errors.log
 
 local M = {}
 
 local project_scanner = require("editutor.project_scanner")
+
+-- Error log (global, not per-project)
+M.ERROR_LOG = vim.fn.stdpath("data") .. "/editutor_errors.log"
 
 ---Get log file path
 ---@return string
@@ -218,6 +222,87 @@ function M.clear()
   local log_path = M.get_log_path()
   if vim.fn.filereadable(log_path) == 1 then
     vim.fn.delete(log_path)
+  end
+end
+
+-- =============================================================================
+-- ERROR LOGGING (Global)
+-- =============================================================================
+
+---Log an error to the global error log
+---@param source string Where the error occurred
+---@param error_msg string Error message
+---@param context? table Additional context
+function M.log_error(source, error_msg, context)
+  local lines = {}
+  
+  table.insert(lines, separator())
+  table.insert(lines, string.format("[%s] ERROR in %s", timestamp(), source))
+  table.insert(lines, separator("-"))
+  table.insert(lines, "")
+  table.insert(lines, "Error: " .. tostring(error_msg))
+  table.insert(lines, "")
+  
+  if context then
+    table.insert(lines, "Context:")
+    for k, v in pairs(context) do
+      local val = type(v) == "table" and vim.inspect(v) or tostring(v)
+      -- Truncate long values
+      if #val > 500 then
+        val = val:sub(1, 500) .. "... (truncated)"
+      end
+      table.insert(lines, string.format("  %s: %s", k, val))
+    end
+    table.insert(lines, "")
+  end
+  
+  -- Stack trace
+  table.insert(lines, "Stack trace:")
+  table.insert(lines, debug.traceback("", 2))
+  table.insert(lines, "")
+  table.insert(lines, separator())
+  table.insert(lines, "")
+  
+  -- Append to error log
+  local content = table.concat(lines, "\n")
+  local f = io.open(M.ERROR_LOG, "a")
+  if f then
+    f:write(content)
+    f:close()
+  end
+end
+
+---Setup vim.notify hook to catch all errors
+function M.setup_error_hook()
+  local original_notify = vim.notify
+  
+  vim.notify = function(msg, level, opts)
+    -- Log errors and warnings
+    if level == vim.log.levels.ERROR or level == vim.log.levels.WARN then
+      -- Only log editutor-related messages
+      if msg and (msg:match("editutor") or msg:match("EduTutor")) then
+        M.log_error("vim.notify", msg, { level = level, opts = opts })
+      end
+    end
+    
+    -- Call original
+    return original_notify(msg, level, opts)
+  end
+end
+
+---Open error log
+function M.open_error_log()
+  if vim.fn.filereadable(M.ERROR_LOG) == 1 then
+    vim.cmd("edit " .. M.ERROR_LOG)
+  else
+    vim.notify("[ai-editutor] No error log found", vim.log.levels.INFO)
+  end
+end
+
+---Clear error log
+function M.clear_error_log()
+  if vim.fn.filereadable(M.ERROR_LOG) == 1 then
+    vim.fn.delete(M.ERROR_LOG)
   end
 end
 

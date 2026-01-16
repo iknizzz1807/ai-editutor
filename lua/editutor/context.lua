@@ -208,6 +208,7 @@ function M.build_lsp_context(current_file, question_line, callback)
       budget = M.get_token_budget(),
       within_budget = total_tokens <= M.get_token_budget(),
       has_lsp = ctx.has_lsp,
+      _debug = ctx._debug,  -- Pass debug info through
     }
 
     callback(formatted, metadata)
