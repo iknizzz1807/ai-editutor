@@ -4,6 +4,17 @@
 
 A Neovim plugin that acts as your personal coding mentor - explaining concepts, guiding your thinking, and helping you truly understand code rather than just generating it.
 
+## What's New in v0.9.0
+
+**Intelligent Context System** - Major upgrade to how ai-editutor understands your code:
+
+- **BM25 Search** via SQLite FTS5 - Find related code across your project
+- **Multi-Signal Ranking** - 8 signals combine for precise context selection
+- **5-Level Hints** - More granular progressive hints system
+- **More Providers** - DeepSeek, Groq, Together, OpenRouter built-in
+- **Streaming Improvements** - Debounced UI updates for smoother experience
+- **Context Caching** - Smart caching with automatic invalidation
+
 ## What's New in v0.8.0
 
 **Inline Comments UI** - Responses are now inserted directly as comments in your code file, right below your question. No floating windows - everything stays in your code.
@@ -67,13 +78,14 @@ const pattern = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,}$/;
 | **Debug** | `// D:` | Learn debugging methodology |
 | **Explain** | `// E:` | Deep concept explanations |
 
-### Incremental Hints
+### 5-Level Progressive Hints (v0.9.0)
 
 Run `:EduTutorHint` multiple times on the same question:
-- Level 1: Subtle hint (concept to research)
-- Level 2: Clearer hint (point to problem area)
-- Level 3: Strong hint (almost the answer)
-- Level 4: Full solution with explanation
+- Level 1: **Conceptual** - What concepts are relevant?
+- Level 2: **Strategic** - What approach to consider?
+- Level 3: **Directional** - Where in the code to look?
+- Level 4: **Specific** - What techniques to try?
+- Level 5: **Solution** - Complete answer with explanation
 
 ### LSP-Powered Context
 
@@ -109,11 +121,12 @@ Ask follow-up questions without repeating context:
   "your-username/ai-editutor",
   dependencies = {
     "nvim-lua/plenary.nvim",
-    "nvim-treesitter/nvim-treesitter",  -- Recommended
+    "nvim-treesitter/nvim-treesitter",  -- Recommended: Better chunking
+    "kkharji/sqlite.lua",               -- Recommended: BM25 search
   },
   config = function()
     require("editutor").setup({
-      provider = "claude",  -- or "openai", "ollama"
+      provider = "claude",  -- claude, openai, deepseek, groq, together, openrouter, ollama
       api_key = os.getenv("ANTHROPIC_API_KEY"),
     })
   end,
@@ -147,8 +160,8 @@ Ask follow-up questions without repeating context:
 
 ```lua
 require("editutor").setup({
-  -- LLM Provider
-  provider = "claude",  -- "claude" | "openai" | "ollama"
+  -- LLM Provider (v0.9.0: more options)
+  provider = "claude",  -- claude, openai, deepseek, groq, together, openrouter, ollama
   api_key = os.getenv("ANTHROPIC_API_KEY"),
   model = "claude-sonnet-4-20250514",
 
@@ -161,6 +174,18 @@ require("editutor").setup({
     lines_around_cursor = 100,
     external_context_lines = 30,
     max_external_symbols = 20,
+  },
+
+  -- Indexer Settings (v0.9.0)
+  indexer = {
+    context_budget = 4000,      -- Total tokens for context
+    debounce_ms = 1000,         -- File change debounce
+    weights = {                 -- Ranking signal weights
+      lsp_definition = 1.0,
+      bm25_score = 0.5,
+      directory_proximity = 0.3,
+      git_recency = 0.2,
+    },
   },
 
   -- Keymaps
@@ -300,17 +325,23 @@ async function fetchUserData(userId: string) {
 ```
 ai-editutor/
 ├── lua/editutor/
-│   ├── init.lua              # Plugin entry (v0.8.0)
+│   ├── init.lua              # Plugin entry (v0.9.0)
 │   ├── comment_writer.lua    # Inline comment insertion
 │   ├── parser.lua            # Comment parsing
 │   ├── context.lua           # Context extraction
 │   ├── lsp_context.lua       # LSP-based context
-│   ├── prompts.lua           # Pedagogical prompts
-│   ├── provider.lua          # LLM providers
-│   ├── hints.lua             # Incremental hints
+│   ├── prompts.lua           # Pedagogical prompts (bilingual)
+│   ├── provider.lua          # LLM providers with inheritance
+│   ├── hints.lua             # 5-level progressive hints
 │   ├── knowledge.lua         # Q&A persistence
 │   ├── conversation.lua      # Conversation memory
-│   └── health.lua            # Health check
+│   ├── cache.lua             # LRU cache with TTL (v0.9.0)
+│   ├── health.lua            # Health check
+│   └── indexer/              # Project indexing (v0.9.0)
+│       ├── init.lua          # Indexer entry point
+│       ├── db.lua            # SQLite + FTS5 (BM25)
+│       ├── chunker.lua       # Tree-sitter AST chunking
+│       └── ranker.lua        # Multi-signal ranking
 ├── doc/editutor.txt          # Vim help
 ├── README.md
 └── CLAUDE.md                 # Development guide
@@ -321,7 +352,8 @@ ai-editutor/
 - [x] **v0.6.0**: LSP-based context extraction
 - [x] **v0.7.0**: Conversation memory
 - [x] **v0.8.0**: Inline comments UI
-- [ ] **Future**: Obsidian integration, Team sharing
+- [x] **v0.9.0**: Intelligent context system (BM25, multi-signal ranking)
+- [ ] **Future**: Obsidian integration, Team sharing, Semantic embeddings
 
 ## Contributing
 

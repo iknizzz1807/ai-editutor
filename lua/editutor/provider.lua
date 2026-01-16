@@ -1,9 +1,252 @@
 -- editutor/provider.lua
--- LLM API client using plenary.curl
+-- LLM API client with declarative provider definitions and streaming support
 
 local M = {}
 
 local config = require("editutor.config")
+
+-- =============================================================================
+-- Provider Registry with Inheritance
+-- =============================================================================
+
+---Base provider template that others inherit from
+M.BASE_PROVIDER = {
+  name = "base",
+  url = "",
+  model = "",
+  headers = {
+    ["content-type"] = "application/json",
+  },
+  api_key = function()
+    return nil
+  end,
+  format_request = function(data)
+    return data
+  end,
+  format_response = function(response)
+    return nil
+  end,
+  format_error = function(response)
+    return "Unknown error"
+  end,
+  -- Streaming configuration
+  stream_enabled = true,
+  stream_parser = nil, -- Override for custom SSE parsing
+}
+
+---Built-in provider definitions (declarative)
+M.PROVIDERS = {
+  -- Claude (Anthropic)
+  claude = {
+    __inherited_from = "BASE_PROVIDER",
+    name = "claude",
+    url = "https://api.anthropic.com/v1/messages",
+    model = "claude-sonnet-4-20250514",
+    headers = {
+      ["content-type"] = "application/json",
+      ["x-api-key"] = "${api_key}",
+      ["anthropic-version"] = "2023-06-01",
+    },
+    api_key = function()
+      return os.getenv("ANTHROPIC_API_KEY")
+    end,
+    format_request = function(data)
+      return {
+        model = data.model,
+        max_tokens = data.max_tokens or 4096,
+        system = data.system,
+        messages = {
+          { role = "user", content = data.message },
+        },
+      }
+    end,
+    format_response = function(response)
+      if response.content and response.content[1] then
+        return response.content[1].text
+      end
+      return nil
+    end,
+    format_error = function(response)
+      if response.error then
+        return response.error.message
+      end
+      return "Unknown error"
+    end,
+  },
+
+  -- OpenAI
+  openai = {
+    __inherited_from = "BASE_PROVIDER",
+    name = "openai",
+    url = "https://api.openai.com/v1/chat/completions",
+    model = "gpt-4o",
+    headers = {
+      ["content-type"] = "application/json",
+      ["Authorization"] = "Bearer ${api_key}",
+    },
+    api_key = function()
+      return os.getenv("OPENAI_API_KEY")
+    end,
+    format_request = function(data)
+      return {
+        model = data.model,
+        max_tokens = data.max_tokens or 4096,
+        messages = {
+          { role = "system", content = data.system },
+          { role = "user", content = data.message },
+        },
+      }
+    end,
+    format_response = function(response)
+      if response.choices and response.choices[1] then
+        return response.choices[1].message.content
+      end
+      return nil
+    end,
+    format_error = function(response)
+      if response.error then
+        return response.error.message
+      end
+      return "Unknown error"
+    end,
+  },
+
+  -- OpenAI-compatible providers (inherit from openai)
+  deepseek = {
+    __inherited_from = "openai",
+    name = "deepseek",
+    url = "https://api.deepseek.com/chat/completions",
+    model = "deepseek-chat",
+    api_key = function()
+      return os.getenv("DEEPSEEK_API_KEY")
+    end,
+  },
+
+  groq = {
+    __inherited_from = "openai",
+    name = "groq",
+    url = "https://api.groq.com/openai/v1/chat/completions",
+    model = "llama-3.3-70b-versatile",
+    api_key = function()
+      return os.getenv("GROQ_API_KEY")
+    end,
+  },
+
+  together = {
+    __inherited_from = "openai",
+    name = "together",
+    url = "https://api.together.xyz/v1/chat/completions",
+    model = "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    api_key = function()
+      return os.getenv("TOGETHER_API_KEY")
+    end,
+  },
+
+  openrouter = {
+    __inherited_from = "openai",
+    name = "openrouter",
+    url = "https://openrouter.ai/api/v1/chat/completions",
+    model = "anthropic/claude-3.5-sonnet",
+    api_key = function()
+      return os.getenv("OPENROUTER_API_KEY")
+    end,
+  },
+
+  -- Ollama (local)
+  ollama = {
+    __inherited_from = "BASE_PROVIDER",
+    name = "ollama",
+    url = "http://localhost:11434/api/chat",
+    model = "llama3.2",
+    headers = {
+      ["content-type"] = "application/json",
+    },
+    api_key = function()
+      return nil -- No API key needed
+    end,
+    format_request = function(data)
+      return {
+        model = data.model,
+        messages = {
+          { role = "system", content = data.system },
+          { role = "user", content = data.message },
+        },
+        stream = false,
+      }
+    end,
+    format_response = function(response)
+      if response.message then
+        return response.message.content
+      end
+      return nil
+    end,
+    format_error = function(response)
+      return response.error or "Unknown error"
+    end,
+  },
+}
+
+---Resolve provider with inheritance
+---@param provider_name string
+---@return table|nil resolved_provider
+function M.resolve_provider(provider_name)
+  local provider = M.PROVIDERS[provider_name]
+  if not provider then
+    -- Check config for custom providers
+    provider = config.options.providers and config.options.providers[provider_name]
+    if not provider then
+      return nil
+    end
+  end
+
+  -- Resolve inheritance chain
+  local resolved = vim.deepcopy(M.BASE_PROVIDER)
+
+  local function inherit_from(prov)
+    if prov.__inherited_from then
+      local parent_name = prov.__inherited_from
+      if parent_name == "BASE_PROVIDER" then
+        -- Already inherited from base
+      elseif M.PROVIDERS[parent_name] then
+        inherit_from(M.PROVIDERS[parent_name])
+      end
+    end
+    -- Apply this provider's overrides
+    for k, v in pairs(prov) do
+      if k ~= "__inherited_from" then
+        resolved[k] = v
+      end
+    end
+  end
+
+  inherit_from(provider)
+  return resolved
+end
+
+---Register a custom provider
+---@param name string Provider name
+---@param definition table Provider definition (can use __inherited_from)
+function M.register_provider(name, definition)
+  M.PROVIDERS[name] = definition
+end
+
+-- =============================================================================
+-- Streaming Debounce State
+-- =============================================================================
+
+M._stream_buffer = {}
+M._stream_timer = nil
+M._stream_debounce_ms = 50 -- Debounce interval for UI updates
+
+---Set streaming debounce interval
+---@param ms number Milliseconds
+function M.set_debounce(ms)
+  M._stream_debounce_ms = ms
+end
+
+-- =============================================================================
+-- Helper Functions
+-- =============================================================================
 
 ---Process headers by replacing ${api_key} placeholders
 ---@param headers table<string, string>
@@ -19,6 +262,21 @@ local function build_headers(headers, api_key)
     end
   end
   return processed
+end
+
+---Get the current provider (resolved with inheritance)
+---@return table|nil provider
+local function get_current_provider()
+  local provider_name = config.options.provider or "claude"
+
+  -- First try to resolve from our registry
+  local resolved = M.resolve_provider(provider_name)
+  if resolved then
+    return resolved
+  end
+
+  -- Fallback to config providers
+  return config.get_provider()
 end
 
 ---Process HTTP response from API
@@ -120,7 +378,7 @@ end
 ---@param user_message string User message
 ---@param callback function Callback(response_text, error)
 function M.query_async(system_prompt, user_message, callback)
-  local provider = config.get_provider()
+  local provider = get_current_provider()
   if not provider then
     callback(nil, "Provider not configured")
     return
@@ -171,7 +429,7 @@ end
 ---@return string|nil response_text
 ---@return string|nil error
 function M.query(system_prompt, user_message)
-  local provider = config.get_provider()
+  local provider = get_current_provider()
   if not provider then
     return nil, "Provider not configured"
   end
@@ -210,7 +468,7 @@ end
 ---@return boolean ready
 ---@return string|nil error
 function M.check_provider()
-  local provider = config.get_provider()
+  local provider = get_current_provider()
   if not provider then
     return false, "No provider configured"
   end
@@ -230,6 +488,32 @@ function M.check_provider()
   end
 
   return true, nil
+end
+
+---Get provider info for display
+---@return table info {name, model, url}
+function M.get_info()
+  local provider = get_current_provider()
+  if not provider then
+    return { name = "none", model = "none", url = "" }
+  end
+
+  return {
+    name = provider.name,
+    model = config.options.model or provider.model,
+    url = provider.url,
+  }
+end
+
+---List available providers
+---@return string[] provider_names
+function M.list_providers()
+  local names = {}
+  for name, _ in pairs(M.PROVIDERS) do
+    table.insert(names, name)
+  end
+  table.sort(names)
+  return names
 end
 
 -- =============================================================================
@@ -293,13 +577,17 @@ local function parse_sse_line(line, provider_name)
   return text, false
 end
 
----Send a streaming query to the LLM
+---Send a streaming query to the LLM with debounced UI updates
 ---@param system_prompt string System prompt
 ---@param user_message string User message
 ---@param on_chunk function Callback(chunk_text) for each text chunk
 ---@param on_done function Callback(full_response, error) when complete
-function M.query_stream(system_prompt, user_message, on_chunk, on_done)
-  local prov = config.get_provider()
+---@param opts? table {debounce_ms?: number, on_batch?: function}
+function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
+  opts = opts or {}
+  local debounce_ms = opts.debounce_ms or M._stream_debounce_ms
+
+  local prov = get_current_provider()
   if not prov then
     on_done(nil, "Provider not configured")
     return
@@ -345,7 +633,8 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done)
     "curl",
     "-sS",
     "--no-buffer",
-    "-X", "POST",
+    "-X",
+    "POST",
     prov.url,
   }
 
@@ -356,9 +645,40 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done)
   table.insert(cmd, "-d")
   table.insert(cmd, vim.json.encode(request_body))
 
-  -- Use vim.fn.jobstart for streaming
+  -- Streaming state with debounce
   local full_response = {}
   local buffer = ""
+  local pending_chunks = {}
+  local debounce_timer = nil
+  local stream_done = false
+
+  -- Debounced flush of pending chunks
+  local function flush_pending()
+    if #pending_chunks > 0 and not stream_done then
+      local batch = table.concat(pending_chunks, "")
+      pending_chunks = {}
+
+      vim.schedule(function()
+        -- Call on_batch if provided (for batched UI updates)
+        if opts.on_batch then
+          opts.on_batch(batch, table.concat(full_response, ""))
+        else
+          on_chunk(batch)
+        end
+      end)
+    end
+  end
+
+  -- Schedule debounced flush
+  local function schedule_flush()
+    if debounce_timer then
+      vim.fn.timer_stop(debounce_timer)
+    end
+
+    debounce_timer = vim.fn.timer_start(debounce_ms, function()
+      flush_pending()
+    end)
+  end
 
   local job_id = vim.fn.jobstart(cmd, {
     on_stdout = function(_, data, _)
@@ -382,12 +702,18 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done)
 
             if text then
               table.insert(full_response, text)
-              vim.schedule(function()
-                on_chunk(text)
-              end)
+              table.insert(pending_chunks, text)
+              schedule_flush()
             end
 
             if done then
+              stream_done = true
+              -- Final flush
+              if debounce_timer then
+                vim.fn.timer_stop(debounce_timer)
+              end
+              flush_pending()
+
               vim.schedule(function()
                 on_done(table.concat(full_response, ""), nil)
               end)
@@ -401,6 +727,7 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done)
       if data and data[1] ~= "" then
         local err_msg = table.concat(data, "\n")
         if err_msg ~= "" then
+          stream_done = true
           vim.schedule(function()
             on_done(nil, "Stream error: " .. err_msg)
           end)
@@ -408,6 +735,12 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done)
       end
     end,
     on_exit = function(_, exit_code, _)
+      stream_done = true
+      if debounce_timer then
+        vim.fn.timer_stop(debounce_timer)
+      end
+      flush_pending()
+
       vim.schedule(function()
         if exit_code ~= 0 and #full_response == 0 then
           on_done(nil, "Stream request failed with exit code: " .. exit_code)

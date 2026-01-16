@@ -9,6 +9,9 @@
 
 Unlike GitHub Copilot which writes code for you, ai-editutor **explains concepts** so you can write better code yourself.
 
+### v0.9.0 - Intelligent Context System
+Major update with **multi-signal context ranking**, **BM25 search via SQLite FTS5**, and **5-level progressive hints**.
+
 ### v0.8.0 - Inline Comments UI
 Responses are now inserted as **inline comments** directly in your code file, right below your question. No floating windows - everything stays in your code.
 
@@ -20,19 +23,25 @@ Responses are now inserted as **inline comments** directly in your code file, ri
 ai-editutor/
 ├── lua/
 │   └── editutor/
-│       ├── init.lua              # Plugin entry point (v0.8.0)
+│       ├── init.lua              # Plugin entry point (v0.9.0)
 │       ├── config.lua            # Configuration management
 │       ├── parser.lua            # Comment parsing (// Q:, // S:, etc.)
 │       ├── context.lua           # Context extraction (Tree-sitter)
 │       ├── lsp_context.lua       # LSP-based context (go-to-definition)
 │       ├── comment_writer.lua    # Insert responses as inline comments
-│       ├── prompts.lua           # Pedagogical prompt templates
-│       ├── provider.lua          # LLM API (Claude, OpenAI, Ollama)
-│       ├── hints.lua             # Incremental hints (4 levels)
-│       ├── knowledge.lua         # Knowledge tracking (SQLite/JSON fallback)
+│       ├── prompts.lua           # Pedagogical prompt templates (bilingual)
+│       ├── provider.lua          # LLM API with inheritance + streaming
+│       ├── hints.lua             # 5-level progressive hints system
+│       ├── knowledge.lua         # Knowledge tracking (SQLite/JSON)
 │       ├── conversation.lua      # Session-based conversation memory
 │       ├── project_context.lua   # Project docs context
-│       └── health.lua            # :checkhealth editutor
+│       ├── cache.lua             # LRU cache with TTL + autocmd invalidation
+│       ├── health.lua            # :checkhealth editutor
+│       └── indexer/              # NEW: Project indexing system
+│           ├── init.lua          # Indexer entry point
+│           ├── db.lua            # SQLite + FTS5 for BM25 search
+│           ├── chunker.lua       # Tree-sitter AST chunking
+│           └── ranker.lua        # Multi-signal context ranking
 ├── plugin/
 │   └── editutor.lua              # Lazy loading entry
 ├── doc/
@@ -91,9 +100,75 @@ The plugin automatically detects the appropriate comment style based on filetype
 
 Block comments are preferred when available.
 
-### Context Extraction: LSP-Based
+### Context Extraction: Multi-Signal Approach (v0.9.0)
 
-ai-editutor uses **LSP go-to-definition** for context extraction:
+ai-editutor uses a **hybrid approach** combining LSP + BM25 search + multiple ranking signals:
+
+```
+                    User Question
+                         │
+           ┌─────────────┼─────────────┐
+           │             │             │
+           ▼             ▼             ▼
+     LSP Context    BM25 Search   Import Graph
+           │             │             │
+           └─────────────┼─────────────┘
+                         │
+                         ▼
+              Multi-Signal Ranker
+         ┌──────────────────────────┐
+         │ Signals:                 │
+         │ • LSP definition (1.0)   │
+         │ • Name match (0.4)       │
+         │ • BM25 score (0.5)       │
+         │ • Dir proximity (0.3)    │
+         │ • Git recency (0.2)      │
+         │ • Import distance (0.2)  │
+         │ • Recent access (0.1)    │
+         │ • Type priority (0.15)   │
+         └──────────────────────────┘
+                         │
+                         ▼
+              Context Budget Allocation
+         ┌──────────────────────────┐
+         │ Current file:      30%   │
+         │ LSP definitions:   25%   │
+         │ BM25 results:      20%   │
+         │ Import graph:      10%   │
+         │ Project docs:      10%   │
+         │ Diagnostics:        5%   │
+         └──────────────────────────┘
+```
+
+### Project Indexer (v0.9.0)
+
+The indexer provides fast **BM25 search** via SQLite FTS5:
+
+```lua
+-- Automatic indexing on file changes
+vim.api.nvim_create_autocmd("BufWritePost", ...)  -- Re-index on save
+vim.api.nvim_create_autocmd("BufRead", ...)       -- Track file access
+vim.api.nvim_create_autocmd("BufDelete", ...)     -- Remove from index
+
+-- Tree-sitter AST chunking for semantic search
+CHUNK_TYPES = {
+  lua = { "function_declaration", "local_function", ... },
+  python = { "function_definition", "class_definition", ... },
+  javascript = { "function_declaration", "arrow_function", "class_declaration", ... },
+  -- 12+ languages supported
+}
+
+-- FTS5 BM25 search with porter stemmer
+CREATE VIRTUAL TABLE chunks_fts USING fts5(
+  name, signature, content,
+  content='chunks',
+  tokenize='porter unicode61'
+);
+```
+
+### LSP Context (Still Supported)
+
+For quick, no-indexing context:
 
 1. Extract code around cursor (±50 lines)
 2. Use Tree-sitter to find all identifiers
@@ -102,22 +177,67 @@ ai-editutor uses **LSP go-to-definition** for context extraction:
 5. Read ±15 lines around each definition
 6. Format all context for LLM prompt
 
-**Why LSP instead of RAG?**
-- Zero setup - works immediately with existing LSP
-- No indexing/embedding required
-- No Python dependencies
-- Always up-to-date (LSP reads actual files)
+**Why Both LSP + BM25?**
+- LSP: Precise definitions, zero setup, always fresh
+- BM25: Finds related code by keywords, semantic chunks
+- Combined: Best of both worlds - precision + discovery
 
 ---
 
 ## Key Files
 
 ### init.lua - Plugin Entry Point
-- Version: 0.8.0
+- Version: 0.9.0
 - Creates all user commands (`:EduTutor*`)
 - Sets up keymaps
 - Main functions: `ask()`, `ask_with_hints()`
 - Multi-language UI messages (English, Vietnamese)
+
+### indexer/ - Project Indexing System (NEW in v0.9.0)
+
+**indexer/init.lua** - Main indexer module
+- `setup()` - Initialize indexer with database
+- `index_project()` - Index entire project
+- `search()` - Search with multi-signal ranking
+- `get_context()` - Build context for LLM prompt
+- Autocmd-based file watching with debounce
+
+**indexer/db.lua** - SQLite + FTS5 database
+- Schema: files, chunks, imports tables
+- FTS5 virtual table for BM25 search
+- Triggers to keep FTS in sync
+- `search_bm25()` - Full-text search with ranking
+
+**indexer/chunker.lua** - Tree-sitter AST chunking
+- Extract semantic chunks (functions, classes, methods)
+- Support for 12+ languages
+- NWS (non-whitespace) counting for size limits
+- Import extraction for graph building
+
+**indexer/ranker.lua** - Multi-signal context ranking
+- Combine 8 ranking signals with configurable weights
+- Context budget allocation (4000 tokens default)
+- `build_context()` - Format context for LLM
+
+### provider.lua - LLM API Client (Enhanced in v0.9.0)
+- Declarative provider definitions with inheritance
+- Built-in: Claude, OpenAI, DeepSeek, Groq, Together, OpenRouter, Ollama
+- `resolve_provider()` - Resolve inheritance chain
+- `register_provider()` - Add custom providers
+- Streaming with debounced UI updates (50ms default)
+
+### cache.lua - Context Caching (NEW in v0.9.0)
+- LRU cache with TTL expiration
+- Autocmd-based invalidation (file save, LSP restart)
+- `get_or_compute()` - Cache-aside pattern
+- Tag-based bulk invalidation
+
+### hints.lua - 5-Level Progressive Hints (Enhanced in v0.9.0)
+- Level 1: Conceptual - What concepts are relevant?
+- Level 2: Strategic - What approach to consider?
+- Level 3: Directional - Where in the code to look?
+- Level 4: Specific - What techniques to try?
+- Level 5: Solution - Complete answer with explanation
 
 ### comment_writer.lua - Inline Comment Insertion
 - `get_style()` - Detect comment style for filetype
@@ -143,6 +263,7 @@ ai-editutor uses **LSP go-to-definition** for context extraction:
 - Concise prompts optimized for inline comments
 - No emoji headers (plain text for code comments)
 - Mode-specific instructions (Q/S/R/D/E)
+- Bilingual support (English, Vietnamese)
 
 ---
 
@@ -235,15 +356,64 @@ dependencies = {
 ### Recommended
 ```lua
 dependencies = {
-  "nvim-treesitter/nvim-treesitter",  -- AST parsing, better context
+  "nvim-treesitter/nvim-treesitter",  -- AST parsing, better chunking
+  "kkharji/sqlite.lua",               -- BM25 search, knowledge storage
 }
 ```
 
 ### Optional
 ```lua
 dependencies = {
-  "kkharji/sqlite.lua",         -- Enhanced knowledge storage
+  -- sqlite.lua enables:
+  -- • BM25 full-text search (FTS5)
+  -- • Project indexing
+  -- • Knowledge persistence
+  -- Without it, fallback to LSP-only context
 }
+```
+
+---
+
+## Provider System (v0.9.0)
+
+### Built-in Providers
+```lua
+-- Available providers with inheritance
+M.PROVIDERS = {
+  claude     = { ... },           -- Claude API (Anthropic)
+  openai     = { ... },           -- OpenAI API
+  deepseek   = { __inherited_from = "openai", ... },  -- DeepSeek
+  groq       = { __inherited_from = "openai", ... },  -- Groq
+  together   = { __inherited_from = "openai", ... },  -- Together AI
+  openrouter = { __inherited_from = "openai", ... },  -- OpenRouter
+  ollama     = { ... },           -- Local Ollama
+}
+```
+
+### Adding Custom Providers
+```lua
+-- Register a custom OpenAI-compatible provider
+require('editutor.provider').register_provider('my_provider', {
+  __inherited_from = 'openai',  -- Inherit OpenAI format
+  name = 'my_provider',
+  url = 'https://my-api.com/v1/chat/completions',
+  model = 'my-model',
+  api_key = function()
+    return os.getenv('MY_API_KEY')
+  end,
+})
+```
+
+### Streaming with Debounce
+```lua
+-- Streaming automatically debounces UI updates (50ms default)
+provider.query_stream(system, user, on_chunk, on_done, {
+  debounce_ms = 100,  -- Custom debounce
+  on_batch = function(batch, full)  -- Batched updates
+    -- batch = accumulated chunks since last update
+    -- full = complete response so far
+  end,
+})
 ```
 
 ---
@@ -259,7 +429,7 @@ dependencies = {
 
 ### Phase 2: Multi-Mode - COMPLETE
 - [x] 5 interaction modes (Q/S/R/D/E)
-- [x] Incremental hints system (4 levels)
+- [x] Incremental hints system (upgraded to 5 levels in v0.9.0)
 - [x] Knowledge tracking (JSON fallback, SQLite optional)
 - [x] Mode-specific pedagogical prompts
 - [x] Knowledge search and export
@@ -289,9 +459,22 @@ dependencies = {
 - [x] Replace existing response on re-ask
 - [x] Concise prompts optimized for inline display
 
+### Phase 7: Intelligent Context System - COMPLETE (v0.9.0)
+- [x] SQLite database with FTS5 for BM25 search
+- [x] Tree-sitter AST chunking (12+ languages)
+- [x] Multi-signal context ranking (8 signals)
+- [x] Context budget allocation system
+- [x] Provider abstraction with inheritance
+- [x] Additional providers: DeepSeek, Groq, Together, OpenRouter
+- [x] Streaming with debounced UI updates
+- [x] LRU cache with TTL + autocmd invalidation
+- [x] 5-level progressive hints system
+- [x] Background indexer with file change detection
+
 ### Future Enhancements
 - [ ] Obsidian integration
 - [ ] Team sharing
+- [ ] Semantic embeddings (optional enhancement)
 
 ---
 

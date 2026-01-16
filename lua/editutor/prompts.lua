@@ -174,33 +174,39 @@ Cấu trúc:
   },
 }
 
--- Hint prompts for incremental hints system
+-- Hint prompts for 5-level incremental hints system
 M.HINT_PROMPTS = {
   en = {
-    [1] = [[Subtle hint - 2-3 sentences max.
-Mention a concept/keyword to research. Ask a guiding question.]],
+    [1] = [[Conceptual hint (1/5) - 2-3 sentences max.
+Mention relevant concepts. Ask a guiding question. Don't explain how to apply.]],
 
-    [2] = [[Clearer hint - point to the problem area.
-Mention the category (e.g., "scoping issue"). Show a small code pattern.]],
+    [2] = [[Strategic hint (2/5) - 3-4 sentences.
+Suggest approach/pattern to investigate. Don't give specific solution.]],
 
-    [3] = [[Strong hint - almost the answer.
-Show solution structure. Give similar example. Explain the "why".]],
+    [3] = [[Directional hint (3/5) - 4-5 sentences.
+Point to specific code location. Say what to look for, not the fix.]],
 
-    [4] = [[Full solution with explanation.
-Working code, best practice, common mistake to avoid, what to learn next.]],
+    [4] = [[Specific hint (4/5) - Show technique with small example.
+Give pattern/pseudocode. Explain "why". Let them apply it.]],
+
+    [5] = [[Full solution (5/5) with explanation.
+Complete code, why it works, edge cases, what to learn next.]],
   },
   vi = {
-    [1] = [[Gợi ý tinh tế - tối đa 2-3 câu.
-Đề cập khái niệm/từ khóa cần tìm hiểu. Đặt câu hỏi dẫn dắt.]],
+    [1] = [[Gợi ý khái niệm (1/5) - tối đa 2-3 câu.
+Đề cập khái niệm liên quan. Đặt câu hỏi dẫn dắt. Không giải thích cách áp dụng.]],
 
-    [2] = [[Gợi ý rõ hơn - chỉ ra vùng có vấn đề.
-Đề cập loại vấn đề (ví dụ: "vấn đề scope"). Cho xem pattern code nhỏ.]],
+    [2] = [[Gợi ý chiến lược (2/5) - 3-4 câu.
+Gợi ý hướng tiếp cận/pattern. Không cho giải pháp cụ thể.]],
 
-    [3] = [[Gợi ý mạnh - gần như là câu trả lời.
-Hiển thị cấu trúc giải pháp. Cho ví dụ tương tự. Giải thích "tại sao".]],
+    [3] = [[Gợi ý định hướng (3/5) - 4-5 câu.
+Chỉ vị trí code cụ thể. Nói cần tìm gì, không phải cách sửa.]],
 
-    [4] = [[Giải pháp đầy đủ với giải thích.
-Code hoạt động, best practice, lỗi cần tránh, học gì tiếp.]],
+    [4] = [[Gợi ý cụ thể (4/5) - Cho kỹ thuật với ví dụ nhỏ.
+Cho pattern/pseudocode. Giải thích "tại sao". Để họ tự áp dụng.]],
+
+    [5] = [[Giải pháp đầy đủ (5/5) với giải thích.
+Code hoàn chỉnh, tại sao hoạt động, edge cases, học gì tiếp.]],
   },
 }
 

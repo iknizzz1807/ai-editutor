@@ -15,47 +15,82 @@ local sessions = {}
 ---@field question string Original question
 ---@field mode string Mode used
 ---@field context string Formatted context
----@field level number Current hint level (1-4)
+---@field level number Current hint level (1-5)
 ---@field responses string[] Responses at each level
 ---@field created number Timestamp
 
--- Maximum hint levels
-M.MAX_LEVEL = 4
+-- Maximum hint levels (5-level progressive system)
+M.MAX_LEVEL = 5
 
--- Hint level descriptions
-M.LEVEL_DESCRIPTIONS = {
-  [1] = "Subtle hint - points in the right direction",
-  [2] = "Clearer hint - narrows down the problem",
-  [3] = "Strong hint - almost reveals the answer",
-  [4] = "Full solution - complete explanation",
+-- Hint level names and descriptions
+M.LEVEL_NAMES = {
+  [1] = "conceptual",
+  [2] = "strategic",
+  [3] = "directional",
+  [4] = "specific",
+  [5] = "solution",
 }
 
--- Hint level prompts
+M.LEVEL_DESCRIPTIONS = {
+  [1] = "Conceptual - What concepts are relevant?",
+  [2] = "Strategic - What approach to consider?",
+  [3] = "Directional - Where in the code to look?",
+  [4] = "Specific - What techniques to try?",
+  [5] = "Solution - Complete answer with explanation",
+}
+
+-- Hint level prompts (5 levels of progressively more revealing hints)
 M.LEVEL_PROMPTS = {
+  -- Level 1: Conceptual - Point to relevant concepts without explaining how to apply them
   [1] = [[
-Give a SUBTLE hint that points in the right direction without revealing the answer.
-- Use analogies or ask leading questions
-- Point to relevant concepts without explaining them fully
-- Encourage the developer to think about specific aspects]],
+Give a CONCEPTUAL hint (Level 1/5) - What concepts are relevant?
+- Mention 1-2 programming concepts that relate to this problem
+- Use a question to guide thinking: "Have you considered...?"
+- DO NOT explain how to apply these concepts
+- DO NOT point to specific code locations
+- Keep it to 2-3 sentences maximum
+- Example: "This seems related to closure scope. What happens to variables when a function returns?"]],
 
+  -- Level 2: Strategic - Suggest an approach or strategy
   [2] = [[
-Give a CLEARER hint that narrows down the problem area.
-- Identify the specific area where the issue/answer lies
-- Explain related concepts that are necessary to understand
-- Still require the developer to make the final connection]],
+Give a STRATEGIC hint (Level 2/5) - What approach to consider?
+- Build on the conceptual hint (don't repeat it)
+- Suggest a general strategy or pattern to investigate
+- Mention what type of solution might work (but not the specific solution)
+- Keep it to 3-4 sentences
+- Example: "You might want to look into how async/await handles errors differently from callbacks. Consider what happens if a promise rejects..."]],
 
+  -- Level 3: Directional - Point to specific code locations or patterns
   [3] = [[
-Give a STRONG hint that makes the answer almost obvious.
-- Provide a partial solution or pseudocode
-- Explain most of the reasoning
-- Leave only the final step for the developer]],
+Give a DIRECTIONAL hint (Level 3/5) - Where in the code to look?
+- Point to specific areas in the provided code context
+- Identify which function, line, or pattern to focus on
+- Explain what to look for (but not the fix)
+- You can reference line numbers from the context
+- Keep it to 4-5 sentences
+- Example: "Look at line 42 where the callback is registered. Notice how the variable 'count' is accessed. What value does 'count' have when the callback actually runs?"]],
 
+  -- Level 4: Specific - Give specific techniques but not the full answer
   [4] = [[
-Provide the FULL solution with a detailed explanation.
-- Give the complete answer
-- Explain why this is the correct approach
-- Cover edge cases and best practices
-- Suggest follow-up learning topics]],
+Give a SPECIFIC hint (Level 4/5) - What techniques to try?
+- Provide a specific technique or pattern to apply
+- Show a small code example or pseudocode (not the complete solution)
+- Explain the "why" behind this technique
+- Let the developer apply it to their specific case
+- Keep it to 5-7 sentences with a short code snippet
+- Example: "To capture the current value, you can use an IIFE or pass it as a parameter. Like this:
+  for (let i = 0; i < 5; i++) { ((current) => { setTimeout(() => console.log(current), 100); })(i); }
+  Now apply this pattern to your situation..."]],
+
+  -- Level 5: Solution - Complete answer with explanation
+  [5] = [[
+Give the FULL SOLUTION (Level 5/5) - Complete answer with explanation.
+- Provide the complete, working solution
+- Explain each part of the solution and why it works
+- Show before/after code if applicable
+- Mention edge cases and potential pitfalls
+- Suggest one related concept to learn next
+- Be thorough but concise (aim for clear, not long)]],
 }
 
 ---Generate session key from question and context
