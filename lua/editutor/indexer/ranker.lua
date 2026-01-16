@@ -172,15 +172,211 @@ M.DEFAULT_WEIGHTS = {
 }
 
 -- Context budget allocation (percentage of total budget)
+-- These are DEFAULT values - adaptive allocation will adjust them
 M.BUDGET_ALLOCATION = {
   current_file = 0.25, -- 25% for current file context
   lsp_definitions = 0.20, -- 20% for LSP definitions
   bm25_results = 0.20, -- 20% for BM25 search results
-  call_graph = 0.15, -- 15% for callers/callees (NEW)
-  imports = 0.08, -- 8% for import graph
-  project_docs = 0.08, -- 8% for README, package.json, etc.
-  diagnostics = 0.04, -- 4% for LSP diagnostics/errors
+  call_graph = 0.15, -- 15% for callers/callees
+  type_definitions = 0.08, -- 8% for type definitions (NEW)
+  imports = 0.05, -- 5% for import graph
+  project_docs = 0.05, -- 5% for README, package.json, etc.
+  diagnostics = 0.02, -- 2% for LSP diagnostics/errors
 }
+
+-- =============================================================================
+-- Adaptive Budget Allocation
+-- =============================================================================
+
+-- Query type patterns for classification
+local QUERY_TYPE_PATTERNS = {
+  -- Specific function/method questions
+  specific_function = {
+    patterns = { "function%s+%w+", "method%s+%w+", "def%s+%w+", "fn%s+%w+", "what does%s+%w+%s+do" },
+    keywords = { "function", "method", "does", "work", "implement", "return" },
+  },
+  -- Debugging questions
+  debugging = {
+    patterns = { "error", "bug", "fix", "crash", "fail", "broken", "not working", "why" },
+    keywords = { "error", "bug", "fix", "crash", "fail", "broken", "debug", "issue", "problem" },
+  },
+  -- Architecture/overview questions
+  architecture = {
+    patterns = { "how does.*work", "architecture", "structure", "overview", "design" },
+    keywords = { "architecture", "structure", "overview", "design", "flow", "system", "pattern" },
+  },
+  -- Type/interface questions
+  type_related = {
+    patterns = { "type%s+%w+", "interface%s+%w+", "struct%s+%w+", "class%s+%w+" },
+    keywords = { "type", "interface", "struct", "class", "model", "schema", "definition" },
+  },
+}
+
+---Classify query type
+---@param query string
+---@return string query_type One of: specific_function, debugging, architecture, type_related, general
+---@return number confidence 0-1
+local function classify_query(query)
+  local query_lower = query:lower()
+  local scores = {}
+
+  for qtype, config in pairs(QUERY_TYPE_PATTERNS) do
+    local score = 0
+
+    -- Check patterns
+    for _, pattern in ipairs(config.patterns) do
+      if query_lower:match(pattern) then
+        score = score + 2
+      end
+    end
+
+    -- Check keywords
+    for _, keyword in ipairs(config.keywords) do
+      if query_lower:find(keyword, 1, true) then
+        score = score + 1
+      end
+    end
+
+    scores[qtype] = score
+  end
+
+  -- Find highest score
+  local max_score = 0
+  local best_type = "general"
+  for qtype, score in pairs(scores) do
+    if score > max_score then
+      max_score = score
+      best_type = qtype
+    end
+  end
+
+  local confidence = math.min(1, max_score / 5)
+  return best_type, confidence
+end
+
+---Analyze search results quality
+---@param results table[] BM25 search results
+---@param query string Original query
+---@return table quality {has_exact_match, avg_score, top_score, relevance}
+local function analyze_results_quality(results, query)
+  if not results or #results == 0 then
+    return {
+      has_exact_match = false,
+      avg_score = 0,
+      top_score = 0,
+      relevance = "none",
+    }
+  end
+
+  local query_lower = query:lower()
+  local has_exact = false
+  local total_score = 0
+  local top_score = 0
+
+  for _, r in ipairs(results) do
+    local score = r.combined_score or 0
+    total_score = total_score + score
+    if score > top_score then
+      top_score = score
+    end
+
+    -- Check for exact name match
+    if r.name and r.name:lower() == query_lower then
+      has_exact = true
+    elseif r.name and query_lower:find(r.name:lower(), 1, true) then
+      has_exact = true
+    end
+  end
+
+  local avg_score = total_score / #results
+  local relevance = "low"
+  if top_score > 1.5 or has_exact then
+    relevance = "high"
+  elseif top_score > 0.8 then
+    relevance = "medium"
+  end
+
+  return {
+    has_exact_match = has_exact,
+    avg_score = avg_score,
+    top_score = top_score,
+    relevance = relevance,
+  }
+end
+
+---Calculate adaptive budget allocation
+---@param query string
+---@param query_type string
+---@param results_quality table
+---@param opts table {current_file_has_answer}
+---@return table allocation Adjusted budget allocation
+local function calculate_adaptive_budget(query, query_type, results_quality, opts)
+  opts = opts or {}
+
+  -- Start with default allocation
+  local allocation = vim.deepcopy(M.BUDGET_ALLOCATION)
+
+  -- Adjust based on query type
+  if query_type == "specific_function" then
+    -- More budget to BM25 and call graph for specific function queries
+    allocation.bm25_results = allocation.bm25_results + 0.08
+    allocation.call_graph = allocation.call_graph + 0.05
+    allocation.project_docs = allocation.project_docs - 0.08
+    allocation.imports = allocation.imports - 0.05
+
+  elseif query_type == "debugging" then
+    -- More budget to current file and diagnostics for debugging
+    allocation.current_file = allocation.current_file + 0.10
+    allocation.diagnostics = allocation.diagnostics + 0.05
+    allocation.project_docs = allocation.project_docs - 0.05
+    allocation.call_graph = allocation.call_graph - 0.05
+    allocation.type_definitions = allocation.type_definitions - 0.05
+
+  elseif query_type == "architecture" then
+    -- More budget to project docs and imports for architecture questions
+    allocation.project_docs = allocation.project_docs + 0.10
+    allocation.imports = allocation.imports + 0.05
+    allocation.bm25_results = allocation.bm25_results - 0.08
+    allocation.call_graph = allocation.call_graph - 0.07
+
+  elseif query_type == "type_related" then
+    -- More budget to type definitions
+    allocation.type_definitions = allocation.type_definitions + 0.12
+    allocation.lsp_definitions = allocation.lsp_definitions + 0.05
+    allocation.call_graph = allocation.call_graph - 0.10
+    allocation.project_docs = allocation.project_docs - 0.05
+    allocation.imports = allocation.imports - 0.02
+  end
+
+  -- Adjust based on results quality
+  if results_quality.relevance == "high" then
+    -- BM25 found very relevant results, give it more budget
+    allocation.bm25_results = allocation.bm25_results + 0.05
+    allocation.current_file = allocation.current_file - 0.03
+    allocation.project_docs = allocation.project_docs - 0.02
+
+  elseif results_quality.relevance == "none" or results_quality.relevance == "low" then
+    -- BM25 didn't find good results, rely more on current file
+    allocation.current_file = allocation.current_file + 0.08
+    allocation.lsp_definitions = allocation.lsp_definitions + 0.05
+    allocation.bm25_results = allocation.bm25_results - 0.10
+    allocation.call_graph = allocation.call_graph - 0.03
+  end
+
+  -- Ensure no negative values and normalize to sum to 1.0
+  local total = 0
+  for k, v in pairs(allocation) do
+    allocation[k] = math.max(0.02, v) -- Minimum 2% for each category
+    total = total + allocation[k]
+  end
+
+  -- Normalize
+  for k, v in pairs(allocation) do
+    allocation[k] = v / total
+  end
+
+  return allocation
+end
 
 ---Calculate directory proximity score
 ---@param file1 string
@@ -532,28 +728,99 @@ local function get_call_graph_context(chunk, opts)
   return related
 end
 
----Get type definitions used by a chunk
----@param chunk table
----@param opts table
----@return table[] type_chunks
-local function get_type_context(chunk, opts)
+---Get type definitions used by chunks
+---@param chunks table[] Chunks to find type definitions for
+---@param opts table {max_types, project_root}
+---@return table[] type_definitions
+local function get_type_context(chunks, opts)
   opts = opts or {}
-  local max_types = opts.max_types or 3
+  local max_types = opts.max_types or 5
 
-  local types = {}
+  local type_defs = {}
+  local seen_types = {}
 
-  -- If chunk has type_refs, get their definitions
-  if chunk.id then
-    -- Get type refs from database
-    local ok, result = pcall(function()
-      return db.get_call_names(chunk.id) -- Reuse as placeholder, ideally separate query
-    end)
+  for _, chunk in ipairs(chunks) do
+    -- Extract type names from chunk content using patterns
+    local content = chunk.content or ""
 
-    -- For now, search for types by name in the chunk content
-    -- This is a heuristic approach
+    -- Common type reference patterns
+    local type_patterns = {
+      -- TypeScript/JavaScript
+      ":%s*([A-Z][%w_]+)", -- : TypeName
+      "<%s*([A-Z][%w_]+)", -- <TypeName>
+      "as%s+([A-Z][%w_]+)", -- as TypeName
+      "implements%s+([A-Z][%w_]+)", -- implements TypeName
+      "extends%s+([A-Z][%w_]+)", -- extends TypeName
+
+      -- Go
+      "%*?([A-Z][%w_]+)%s*{", -- TypeName{
+      "func%s*%([^)]*%*?([A-Z][%w_]+)", -- func (x *TypeName)
+
+      -- Rust
+      "->%s*([A-Z][%w_]+)", -- -> TypeName
+      "impl%s+([A-Z][%w_]+)", -- impl TypeName
+      "<%s*([A-Z][%w_]+)%s*>", -- <TypeName>
+
+      -- Python type hints
+      ":%s*([A-Z][%w_]+)%s*[=,)]", -- : TypeName
+      "->%s*([A-Z][%w_]+)", -- -> TypeName
+
+      -- Java/C#
+      "new%s+([A-Z][%w_]+)", -- new TypeName
+      "([A-Z][%w_]+)%s+%w+%s*[=;]", -- TypeName varName
+    }
+
+    for _, pattern in ipairs(type_patterns) do
+      for type_name in content:gmatch(pattern) do
+        -- Filter out common non-type words and primitives
+        local skip_words = {
+          "String", "Int", "Float", "Double", "Boolean", "Bool", "Void",
+          "True", "False", "None", "Null", "Nil", "Error", "Exception",
+          "Object", "Array", "List", "Map", "Set", "Dict", "Promise",
+          "Result", "Option", "Some", "Ok", "Err", "Self", "This",
+        }
+
+        local is_skip = false
+        for _, skip in ipairs(skip_words) do
+          if type_name == skip then
+            is_skip = true
+            break
+          end
+        end
+
+        if not is_skip and not seen_types[type_name] and #type_defs < max_types then
+          seen_types[type_name] = true
+
+          -- Try to find type definition in database
+          local definitions = db.get_type_definition(type_name)
+          if #definitions > 0 then
+            for _, def in ipairs(definitions) do
+              def.referenced_by = chunk.name
+              table.insert(type_defs, def)
+            end
+          else
+            -- Also try BM25 search for the type
+            local search_results = db.search_by_name(type_name)
+            for _, result in ipairs(search_results) do
+              if result.type and (
+                result.type:find("interface") or
+                result.type:find("type") or
+                result.type:find("class") or
+                result.type:find("struct") or
+                result.type:find("enum")
+              ) then
+                result.referenced_by = chunk.name
+                table.insert(type_defs, result)
+                break
+              end
+            end
+          end
+        end
+      end
+    end
   end
 
-  return types
+  return type_defs
 end
 
 ---Get LSP definitions for current context
@@ -639,17 +906,44 @@ end
 function M.build_context(query, opts)
   opts = opts or {}
   local budget = opts.budget or 4000 -- tokens
-  local allocation = M.BUDGET_ALLOCATION
 
   local context_parts = {}
   local metadata = {
     chunks_included = 0,
     sources = {},
     deduplicated = 0, -- Track deduplication stats
+    query_type = "general",
+    query_confidence = 0,
   }
 
   -- Track seen content for deduplication
   local seen_content = {}
+
+  -- Step 1: Classify query type for adaptive budget
+  local query_type, query_confidence = classify_query(query or "")
+  metadata.query_type = query_type
+  metadata.query_confidence = query_confidence
+
+  -- Step 2: Run BM25 search early to analyze results quality
+  local search_results = {}
+  if query and query ~= "" then
+    search_results = M.search_and_rank(query, {
+      limit = 10,
+      current_file = opts.current_file,
+      project_root = opts.project_root,
+      weights = opts.weights,
+    })
+  end
+
+  -- Step 3: Analyze search results quality
+  local results_quality = analyze_results_quality(search_results, query or "")
+
+  -- Step 4: Calculate adaptive budget allocation
+  local allocation = calculate_adaptive_budget(query or "", query_type, results_quality, {
+    current_file_has_answer = #search_results > 0 and search_results[1] and
+      search_results[1].file_path == opts.current_file,
+  })
+  metadata.budget_allocation = allocation
 
   -- Estimate tokens (rough: 4 chars per token)
   local function estimate_tokens(text)
@@ -712,17 +1006,8 @@ function M.build_context(query, opts)
     end
   end
 
-  -- 3. BM25 search results (20%) and 4. Call graph context (15%)
-  local search_results = {}
-  if query and query ~= "" then
-    search_results = M.search_and_rank(query, {
-      limit = 10,
-      current_file = opts.current_file,
-      project_root = opts.project_root,
-      weights = opts.weights,
-    })
-
-    if #search_results > 0 then
+  -- 3. BM25 search results (using results from adaptive budget analysis)
+  if #search_results > 0 then
       local search_parts = {}
       local deduped_count = 0
 
@@ -809,10 +1094,50 @@ function M.build_context(query, opts)
         metadata.deduplicated = (metadata.deduplicated or 0) + call_deduped
         table.insert(metadata.sources, { type = "call_graph", count = #call_graph_parts, deduped = call_deduped })
       end
+  end
+
+  -- 5. Type definitions (type_definitions%) - from adaptive budget
+  local type_defs = get_type_context(search_results, {
+    max_types = 5,
+    project_root = opts.project_root,
+  })
+
+  if #type_defs > 0 then
+    local type_parts = {}
+    local type_deduped = 0
+
+    for _, def in ipairs(type_defs) do
+      local content = def.content or ""
+
+      -- Check for duplicate content
+      if is_duplicate_content(content, seen_content) then
+        type_deduped = type_deduped + 1
+      else
+        local hash = content_hash(content)
+        seen_content[hash] = content
+
+        local header = string.format(
+          "-- %s %s (used by %s) [%s:%d]",
+          def.type or "type",
+          def.name or "",
+          def.referenced_by or "?",
+          vim.fn.fnamemodify(def.file_path or "", ":t"),
+          def.start_line or 0
+        )
+        table.insert(type_parts, header .. "\n" .. content)
+      end
+    end
+
+    if #type_parts > 0 then
+      local type_budget = math.floor(budget * allocation.type_definitions)
+      used_tokens = used_tokens + add_context("Type Definitions", table.concat(type_parts, "\n\n"), type_budget)
+
+      metadata.deduplicated = (metadata.deduplicated or 0) + type_deduped
+      table.insert(metadata.sources, { type = "type_definitions", count = #type_parts, deduped = type_deduped })
     end
   end
 
-  -- 5. Import graph (8%)
+  -- 6. Import graph
   if opts.current_file then
     local file_info = db.get_file(opts.current_file)
     if file_info and file_info.id then
