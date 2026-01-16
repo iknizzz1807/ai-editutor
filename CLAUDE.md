@@ -2,16 +2,19 @@
 
 ## Project Overview
 
-**ai-editutor** is a Neovim plugin that acts as a personal coding mentor - teaching developers through explanation rather than generating code automatically.
+**ai-editutor** - A Neovim plugin for developers who learn by building.
 
 ### Core Philosophy
-> "Like having a senior developer sitting next to you."
 
-When you're coding and have a quick question - about a concept, a bug, or need some code - you just ask inline and get a concise, context-aware answer. No context switching to browser or ChatGPT.
+> **Build projects. Ask questions. Level up.**
 
-**Two intentional modes:**
-- **Q: (Question)** - Explains concepts deeply ("ask one, learn ten")
-- **C: (Code)** - Generates code with explanatory notes
+For developers building real projects who want to understand their code, not just ship it. Ask questions inline (`// Q:`), generate code with context (`// C:`), get answers without breaking flow.
+
+**Not** about coding faster. **About** learning while you build.
+
+**Two modes:**
+- **Q: (Question)** - Deep explanations that stick ("ask one, learn ten")
+- **C: (Code)** - Working code with notes on what matters
 
 ### v1.2.0 - Two Modes: Q: and C:
 

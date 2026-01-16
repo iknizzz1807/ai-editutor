@@ -1,4 +1,4 @@
-*editutor.txt*  ai-editutor - Your coding companion for learning
+*editutor.txt*  ai-editutor - Learn while you build
 
 ==============================================================================
 CONTENTS                                                    *editutor-contents*
@@ -21,27 +21,28 @@ CONTENTS                                                    *editutor-contents*
 ==============================================================================
 1. INTRODUCTION                                         *editutor-introduction*
 
-ai-editutor is a Neovim plugin that acts as your coding companion - like
-having a senior developer sitting next to you while you code.
+Build projects. Ask questions. Level up.
 
-When you have a quick question - about a concept, a bug, or need some code -
-you just ask inline and get a concise, context-aware answer. No context
-switching to browser or ChatGPT.
+ai-editutor is a Neovim plugin for developers who learn by building.
 
-Philosophy:
-  "The goal isn't to code faster. It's to become a better developer."
+You're building something real. You have questions. Instead of breaking
+your flow to search Stack Overflow or switch to ChatGPT, you ask right
+here in your code: >
+    // Q: What is closure?
+<
+Press <leader>ma. Get an answer. Keep building. Keep learning.
 
-This plugin is NOT for shipping apps faster or meeting deadlines.
-It IS for learning while building real projects.
+This is not about coding faster. It's about understanding what you write.
+Every question is a chance to level up.
 
 Two Modes:
-  Q: (Question) - Ask questions, get explanations
-  C: (Code)     - Generate code with context
+  Q: (Question) - Deep explanations that stick
+  C: (Code)     - Working code with notes on what matters
 
 Examples: >
-    // Q: What is closure?           -> explains the concept
-    // Q: Why does this return nil?  -> guides debugging
-    // C: validate email function    -> generates actual code
+    // Q: What is closure?           -> explains the concept deeply
+    // Q: Why does this return nil?  -> guides your debugging
+    // C: validate email function    -> generates actual code + notes
 <
 
 ==============================================================================

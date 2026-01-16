@@ -1,52 +1,88 @@
 # ai-editutor
 
-> **Like having a senior developer sitting next to you.**
+**Build projects. Ask questions. Level up.**
 
-When you're coding and have a quick question - about a concept, a bug, or need some code - you just ask inline and get a concise, context-aware answer. No context switching to browser or ChatGPT.
+A Neovim plugin for developers who learn by building.
 
-## The Vision
+## Why
 
-Imagine having a patient senior dev beside you while coding. You can ask small questions anytime:
+You're building something real. Not a tutorial. Not a toy project. Something you actually care about.
 
-- "What's a closure again?"
-- "Why does this return nil?"
-- "Can you write a function to validate this?"
+And you have questions. Small ones, big ones, weird ones. *"What's a closure again?" "Why is this nil?" "How do I handle this edge case?"*
 
-They answer quickly, understand your code, and you keep coding - **while learning**.
+You could switch to ChatGPT. Open a browser. Lose your flow. Copy context back and forth. Or scroll through Stack Overflow answers from 2015.
 
-This is **not** about shipping faster. It's about **growing as a developer** while you work.
+Or you could just ask. Right here. Right now. In your code.
+
+```javascript
+// Q: What is closure?
+```
+
+Press `<leader>ma`. Get an answer. Keep building.
+
+**That's it.** No context switching. No copy-pasting. No breaking flow.
+
+## The Philosophy
+
+This is not a code generator. This is not about shipping faster.
+
+This is about the moments when you're building something and you think *"wait, I should probably understand this better"* - and then you actually do, instead of just moving on.
+
+**Learn while you build. Understand while you ship.**
+
+Every question you ask is a chance to level up. Every answer stays in your codebase as a note to your future self.
 
 ## Two Modes
 
-**Q: (Question)** - Ask, learn, understand:
-```javascript
-// Q: What is closure?
-/*
-A: A closure is a function that "remembers" variables from its outer scope
-even after that scope has finished executing.
+### Q: Question - Learn deeply
 
-Why it matters: Enables data privacy, callbacks, and functional patterns.
-Watch out: Accidental closures in loops can cause bugs.
-*/
+Ask anything. Get explanations that stick.
+
+```python
+# Q: What does this regex actually do?
+pattern = r'^(?=.*[A-Z])(?=.*\d).{8,}$'
+#
+# A: This regex validates password strength:
+# - (?=.*[A-Z]) - requires at least one uppercase letter
+# - (?=.*\d) - requires at least one digit
+# - .{8,} - requires minimum 8 characters
+#
+# The ^ and $ anchors ensure the entire string is checked.
+# Lookaheads (?=...) check conditions without consuming characters.
+#
+# Watch out: This won't catch weak passwords like "Aaaaaaaa1"
+# Consider: Adding special character requirement, or use zxcvbn library
 ```
 
-**C: (Code)** - Generate code with context:
+### C: Code - Generate with understanding
+
+Need code? Get working code + notes on what matters.
+
 ```javascript
-// C: validate email with regex
-function validateEmail(email) {
-  const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return regex.test(email);
+// C: debounce function with cancel
+function debounce(fn, delay) {
+  let timeoutId;
+  
+  const debounced = (...args) => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => fn(...args), delay);
+  };
+  
+  debounced.cancel = () => clearTimeout(timeoutId);
+  return debounced;
 }
 /*
 Notes:
-- Simple regex for common formats
-- For strict validation, consider validator.js
+- Returns a wrapper that delays execution until delay ms of inactivity
+- .cancel() lets you abort pending calls (useful for cleanup)
+- Consider: lodash.debounce for leading/trailing options
 */
 ```
 
 ## Quick Start
 
-1. **Install**
+**1. Install**
+
 ```lua
 -- lazy.nvim
 {
@@ -60,65 +96,56 @@ Notes:
 }
 ```
 
-2. **Set API key**
+**2. Set your API key**
+
 ```bash
 export ANTHROPIC_API_KEY="your-key"
 ```
 
-3. **Ask a question**
-```python
-# Q: What does this regex do?
-pattern = r'^(?=.*[A-Z])(?=.*\d).{8,}$'
+**3. Write a question in your code**
+
+```javascript
+// Q: Why would I use Map instead of a plain object?
 ```
 
-4. **Press `<leader>ma`** - Answer appears as a comment below.
+**4. Press `<leader>ma`**
+
+Answer appears as a comment. You keep coding. You keep learning.
 
 ## Features
 
 ### Context-Aware
-The AI understands your project:
-- Small projects (<20K tokens): Sends entire codebase
-- Large projects: Sends current file + import graph + LSP definitions
+Your questions get answered with full project context:
+- Small projects (<20K tokens): Entire codebase included
+- Large projects: Current file + imports + related definitions
 
 ### Visual Selection
-Select code, write a question, get focused explanation:
+Select confusing code, ask about it:
 ```
-1. Select code block (v or V)
-2. Write // Q: Explain this
-3. Press <leader>ma
+1. Visual select a code block
+2. Add: // Q: What does this do?
+3. <leader>ma
 ```
+The AI focuses on your selection.
 
-### Skip Answered
-Questions with answers below are automatically skipped - no re-asking.
-
-### Knowledge Tracking
-All Q&A pairs are saved. Search and review your learning history:
+### Knowledge That Stays
+Every Q&A is saved to your codebase as comments. Search your learning history:
 ```vim
-:EduTutorHistory     " Recent Q&A
-:EduTutorSearch      " Search past questions
-:EduTutorExport      " Export to markdown
+:EduTutorSearch closure    " Find past explanations
+:EduTutorHistory           " Recent Q&A
+:EduTutorExport            " Export to markdown
 ```
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `:EduTutorAsk` | Ask Q:/C: at cursor |
-| `:EduTutorHistory` | View Q&A history |
-| `:EduTutorSearch` | Search knowledge base |
-| `:EduTutorStats` | View statistics |
-| `:EduTutorLang` | Switch language (English/Vietnamese) |
 
 ## Configuration
 
 ```lua
 require("editutor").setup({
-  provider = "claude",  -- claude, openai, deepseek, groq, ollama
+  provider = "claude",           -- claude, openai, deepseek, groq, ollama
   model = "claude-sonnet-4-20250514",
-  language = "English",  -- or "Vietnamese"
+  language = "English",          -- or "Vietnamese"
   
   context = {
-    token_budget = 20000,  -- Max context tokens
+    token_budget = 20000,
   },
   
   keymaps = {
@@ -127,9 +154,9 @@ require("editutor").setup({
 })
 ```
 
-## Supported Providers
+## Providers
 
-| Provider | API Key Env Variable |
+| Provider | Environment Variable |
 |----------|---------------------|
 | Claude | `ANTHROPIC_API_KEY` |
 | OpenAI | `OPENAI_API_KEY` |
@@ -137,20 +164,20 @@ require("editutor").setup({
 | Groq | `GROQ_API_KEY` |
 | Together | `TOGETHER_API_KEY` |
 | OpenRouter | `OPENROUTER_API_KEY` |
-| Ollama | (no key needed) |
+| Ollama | Local, no key needed |
 
-## Philosophy
+## Commands
 
-This plugin is **not** for:
-- Shipping apps faster
-- Meeting deadlines
-- Replacing thinking
-
-This plugin **is** for:
-- Learning while building real projects
-- Understanding code, not just writing it
-- Growing as a developer every day
+| Command | What it does |
+|---------|-------------|
+| `:EduTutorAsk` | Process Q:/C: at cursor |
+| `:EduTutorHistory` | Browse your Q&A history |
+| `:EduTutorSearch` | Search past questions |
+| `:EduTutorStats` | See your learning stats |
+| `:EduTutorLang` | Switch language |
 
 ---
 
-**The goal isn't to code faster. It's to become a better developer.**
+**Stop context-switching. Start understanding.**
+
+The best way to learn programming is to build things. This plugin makes sure you actually learn while you build.
