@@ -76,7 +76,7 @@ end
 ---@return string formatted_context
 ---@return table metadata
 function M.build_full_project_context(current_file, question_line)
-  local project_root = project_scanner.get_project_root()
+  local project_root = project_scanner.get_project_root(current_file)
 
   -- Scan project (cached)
   local scan_result = cache.get_project(project_root, function()
@@ -102,7 +102,13 @@ function M.build_full_project_context(current_file, question_line)
   -- Build formatted context
   local parts = {}
   local root_name = vim.fn.fnamemodify(project_root, ":t")
-  local relative_current = current_file:gsub(project_root .. "/", "")
+  -- Get relative path properly (handle case where current_file is already relative)
+  local relative_current
+  if current_file:sub(1, #project_root) == project_root then
+    relative_current = current_file:sub(#project_root + 2)  -- +2 to skip the trailing /
+  else
+    relative_current = vim.fn.fnamemodify(current_file, ":t")  -- Just filename if can't make relative
+  end
   local display_current = root_name .. "/" .. relative_current
 
   -- Current file first (with question line marked)
@@ -161,7 +167,7 @@ end
 ---@param question_line number Line number of question
 ---@param callback function Callback(formatted_context, metadata)
 function M.build_lsp_context(current_file, question_line, callback)
-  local project_root = project_scanner.get_project_root()
+  local project_root = project_scanner.get_project_root(current_file)
   local root_name = vim.fn.fnamemodify(project_root, ":t")
   local relative_current = current_file:gsub(project_root .. "/", "")
   local display_current = root_name .. "/" .. relative_current
@@ -224,7 +230,8 @@ function M.extract(callback, opts)
   local current_file = opts.current_file or vim.api.nvim_buf_get_name(0)
   local question_line = opts.question_line or vim.api.nvim_win_get_cursor(0)[1]
 
-  local project_root = project_scanner.get_project_root()
+  -- Get project root from the current file path (not CWD)
+  local project_root = project_scanner.get_project_root(current_file)
   local mode_info = M.detect_mode(project_root)
 
   if mode_info.mode == "full_project" then

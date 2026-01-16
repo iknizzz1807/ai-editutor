@@ -548,9 +548,36 @@ end
 ---@field total_tokens number Estimated total tokens
 ---@field tree_structure string Formatted tree structure
 
----Get project root
+---Get project root from a specific file path (or current buffer)
+---@param filepath? string File path to find project root for
 ---@return string
-function M.get_project_root()
+function M.get_project_root(filepath)
+  -- If filepath provided, find git root from that directory
+  if filepath and filepath ~= "" then
+    local dir = vim.fn.fnamemodify(filepath, ":h")
+    if vim.fn.isdirectory(dir) == 1 then
+      local git_root = vim.fn.systemlist("git -C " .. vim.fn.shellescape(dir) .. " rev-parse --show-toplevel 2>/dev/null")[1]
+      if git_root and git_root ~= "" and vim.fn.isdirectory(git_root) == 1 then
+        return git_root
+      end
+      -- Fallback: return the directory containing the file
+      return dir
+    end
+  end
+  
+  -- Fallback to current buffer's file
+  local current_file = vim.api.nvim_buf_get_name(0)
+  if current_file and current_file ~= "" then
+    local dir = vim.fn.fnamemodify(current_file, ":h")
+    if vim.fn.isdirectory(dir) == 1 then
+      local git_root = vim.fn.systemlist("git -C " .. vim.fn.shellescape(dir) .. " rev-parse --show-toplevel 2>/dev/null")[1]
+      if git_root and git_root ~= "" and vim.fn.isdirectory(git_root) == 1 then
+        return git_root
+      end
+    end
+  end
+  
+  -- Last fallback: CWD
   local git_root = vim.fn.systemlist("git rev-parse --show-toplevel 2>/dev/null")[1]
   if git_root and git_root ~= "" and vim.fn.isdirectory(git_root) == 1 then
     return git_root

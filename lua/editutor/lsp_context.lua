@@ -34,9 +34,10 @@ function M.is_available()
 end
 
 ---Get project root (git root or cwd)
+---@param filepath? string File path to find project root for
 ---@return string
-function M.get_project_root()
-  return project_scanner.get_project_root()
+function M.get_project_root(filepath)
+  return project_scanner.get_project_root(filepath)
 end
 
 ---Check if a file path is within the project (not a library)
