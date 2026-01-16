@@ -157,18 +157,36 @@ end
 ---@param question string The user's question
 ---@param context_formatted string Formatted code context
 ---@param _ any Ignored (for backwards compatibility)
+---@param selected_code? string User-selected code (visual selection)
 ---@return string prompt
-function M.build_user_prompt(question, context_formatted, _)
+function M.build_user_prompt(question, context_formatted, _, selected_code)
   local lang = get_lang_key()
   local labels = {
-    en = { context = "Context", question = "Question" },
-    vi = { context = "Ngữ cảnh", question = "Câu hỏi" },
+    en = {
+      context = "Context",
+      question = "Question",
+      selected = "Selected Code (FOCUS ON THIS)",
+    },
+    vi = {
+      context = "Ngữ cảnh",
+      question = "Câu hỏi",
+      selected = "Code được chọn (TẬP TRUNG VÀO ĐÂY)",
+    },
   }
   local l = labels[lang] or labels.en
 
   local prompt_parts = {}
 
-  -- Add context
+  -- Add selected code first (if user highlighted code, focus on it)
+  if selected_code and selected_code ~= "" then
+    table.insert(prompt_parts, l.selected .. ":")
+    table.insert(prompt_parts, "```")
+    table.insert(prompt_parts, selected_code)
+    table.insert(prompt_parts, "```")
+    table.insert(prompt_parts, "")
+  end
+
+  -- Add surrounding context
   if context_formatted and context_formatted ~= "" then
     table.insert(prompt_parts, l.context .. ":")
     table.insert(prompt_parts, context_formatted)

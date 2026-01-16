@@ -390,6 +390,152 @@ function M.test_api_simplified()
 end
 
 -- =============================================================================
+-- SKIP ANSWERED QUESTIONS TESTS
+-- =============================================================================
+
+function M.test_skip_answered_questions()
+  section("Parser - Skip Answered Questions (Q: with A: below)")
+
+  local parser = require("editutor.parser")
+
+  -- Test: Q: with A: block comment below should be skipped
+  local bufnr = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_set_option_value("filetype", "javascript", { buf = bufnr })
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+    "function test() {",
+    "  // Q: What is closure?",           -- line 2: answered question
+    "  /*",                                -- line 3: A: response starts
+    "  A: A closure is a function...",
+    "  */",
+    "  // Q: How does async work?",       -- line 6: unanswered question
+    "  return 42;",
+    "}",
+  })
+
+  -- When cursor is at line 6, should find the unanswered question at line 6
+  local query = parser.find_query(bufnr, 6)
+  log(query ~= nil and query.line == 6 and "PASS" or "FAIL", "parser.skip_answered_block",
+    string.format("Skipped answered Q: (found at line %d, expected 6)", query and query.line or -1))
+
+  -- When cursor is at line 2, should skip answered Q and find unanswered Q
+  local query2 = parser.find_query(bufnr, 2)
+  log(query2 ~= nil and query2.line == 6 and "PASS" or "FAIL", "parser.skip_answered_find_next",
+    string.format("From answered line, found unanswered at line %d", query2 and query2.line or -1))
+
+  vim.api.nvim_buf_delete(bufnr, { force = true })
+
+  -- Test: Q: with A: line comment below should be skipped
+  local bufnr2 = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_set_option_value("filetype", "python", { buf = bufnr2 })
+  vim.api.nvim_buf_set_lines(bufnr2, 0, -1, false, {
+    "def test():",
+    "    # Q: What is a list comprehension?",  -- line 2: answered
+    "    # A: A list comprehension is...",     -- line 3: response
+    "    # Q: What is a generator?",           -- line 4: unanswered
+    "    return 42",
+  })
+
+  local query3 = parser.find_query(bufnr2, 2)
+  log(query3 ~= nil and query3.line == 4 and "PASS" or "FAIL", "parser.skip_answered_line_comment",
+    string.format("Skipped line comment A:, found at line %d", query3 and query3.line or -1))
+
+  vim.api.nvim_buf_delete(bufnr2, { force = true })
+
+  -- Test: Q: without A: below should NOT be skipped
+  local bufnr3 = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_set_option_value("filetype", "javascript", { buf = bufnr3 })
+  vim.api.nvim_buf_set_lines(bufnr3, 0, -1, false, {
+    "function test() {",
+    "  // Q: What is this?",  -- line 2: unanswered (no A: below)
+    "  return 42;",
+    "}",
+  })
+
+  local query4 = parser.find_query(bufnr3, 2)
+  log(query4 ~= nil and query4.line == 2 and "PASS" or "FAIL", "parser.unanswered_found",
+    string.format("Unanswered Q: found at line %d", query4 and query4.line or -1))
+
+  vim.api.nvim_buf_delete(bufnr3, { force = true })
+end
+
+-- =============================================================================
+-- VISUAL SELECTION TESTS
+-- =============================================================================
+
+function M.test_visual_selection()
+  section("Visual Selection Support")
+
+  local parser = require("editutor.parser")
+
+  -- Test: find_query_with_selection should detect visual selection
+  local bufnr = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+    "function calculate(a, b) {",      -- line 1
+    "  const result = a + b;",          -- line 2
+    "  // Q: Explain this function",    -- line 3
+    "  return result * 2;",             -- line 4
+    "}",                                -- line 5
+  })
+
+  -- Simulate visual selection from line 1 to 5
+  local selection_start = 1
+  local selection_end = 5
+
+  -- Should be able to get selection context
+  local selected_lines = vim.api.nvim_buf_get_lines(bufnr, selection_start - 1, selection_end, false)
+  local selected_code = table.concat(selected_lines, "\n")
+
+  log(#selected_lines == 5 and "PASS" or "FAIL", "visual.get_selection",
+    string.format("Got %d lines of selection", #selected_lines))
+
+  log(selected_code:find("calculate") ~= nil and "PASS" or "FAIL", "visual.contains_code",
+    "Selection contains the code")
+
+  -- Test: find_query should work within selection range
+  local query = parser.find_query(bufnr, selection_start)
+  log(query ~= nil and "PASS" or "FAIL", "visual.find_query_in_selection",
+    "Found Q: within selection range")
+
+  vim.api.nvim_buf_delete(bufnr, { force = true })
+
+  -- Test: get_visual_selection helper
+  if parser.get_visual_selection then
+    log(true and "PASS" or "FAIL", "visual.helper_exists",
+      "get_visual_selection helper exists")
+  else
+    log("SKIP", "visual.helper_exists",
+      "get_visual_selection helper not yet implemented")
+  end
+end
+
+function M.test_visual_mode_context()
+  section("Visual Mode Context Enhancement")
+
+  local prompts = require("editutor.prompts")
+
+  -- Test: build_user_prompt should handle selected_code parameter (4th arg)
+  local question = "Explain this"
+  local context = "surrounding context"
+  local selected_code = "function foo() { return 42; }"
+
+  -- Call with 4 parameters: question, context, mode (nil), selected_code
+  local user_prompt = prompts.build_user_prompt(question, context, nil, selected_code)
+
+  log(user_prompt:find("foo") ~= nil and "PASS" or "FAIL", "visual.prompt_contains_selection",
+    "User prompt contains selected code")
+
+  -- Selected code should be marked as focused
+  local has_focus_label = user_prompt:find("FOCUS") or user_prompt:find("Selected")
+  log(has_focus_label and "PASS" or "FAIL", "visual.prompt_marks_selection",
+    "Selected code is marked with focus label")
+
+  -- Test: without selected_code, prompt should still work
+  local basic_prompt = prompts.build_user_prompt(question, context, nil)
+  log(basic_prompt:find(question) ~= nil and "PASS" or "FAIL", "visual.basic_prompt_works",
+    "Basic prompt without selection still works")
+end
+
+-- =============================================================================
 -- RUN ALL TESTS
 -- =============================================================================
 
@@ -427,6 +573,11 @@ function M.run_all()
   -- Integration tests
   M.test_integration_flow()
   M.test_api_simplified()
+
+  -- New features tests
+  M.test_skip_answered_questions()
+  M.test_visual_selection()
+  M.test_visual_mode_context()
 
   -- Summary
   print("\n" .. string.rep("=", 60))

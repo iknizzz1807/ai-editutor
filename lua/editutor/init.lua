@@ -219,7 +219,17 @@ function M._setup_keymaps()
   local keymaps = config.options.keymaps
 
   if keymaps.ask then
+    -- Normal mode: ask about code at cursor
     vim.keymap.set("n", keymaps.ask, M.ask, { desc = "ai-editutor: Ask" })
+    -- Visual mode: ask about selected code
+    vim.keymap.set("v", keymaps.ask, function()
+      -- Exit visual mode first to set '< and '> marks
+      vim.cmd("normal! ")
+      -- Small delay to let marks be set
+      vim.schedule(function()
+        M.ask_visual()
+      end)
+    end, { desc = "ai-editutor: Ask about selection" })
   end
 end
 
@@ -349,6 +359,104 @@ function M._process_ask(query, filepath, bufnr, full_context)
       answer = response,
       language = vim.bo.filetype,
       filepath = filepath,
+    })
+
+    -- Insert response
+    comment_writer.insert_or_replace(response, query.line, bufnr)
+    vim.notify("[ai-editutor] " .. M._msg("response_inserted"), vim.log.levels.INFO)
+  end)
+end
+
+-- =============================================================================
+-- VISUAL SELECTION ASK
+-- =============================================================================
+
+---Ask about visually selected code
+function M.ask_visual()
+  local selection = parser.get_visual_selection()
+
+  if not selection then
+    vim.notify("[ai-editutor] No visual selection found", vim.log.levels.WARN)
+    return
+  end
+
+  -- Find Q: comment within selection range
+  local query = parser.find_query_in_range(nil, selection.start_line, selection.end_line)
+
+  if not query then
+    -- No Q: found in selection - prompt user to write one
+    vim.notify("[ai-editutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
+    return
+  end
+
+  local filepath = vim.api.nvim_buf_get_name(0)
+  local bufnr = vim.api.nvim_get_current_buf()
+
+  -- Check conversation continuation
+  local is_continuation = conversation.continue_or_start(filepath, query.line, "question")
+  if is_continuation then
+    local info = conversation.get_session_info()
+    vim.notify(string.format("[ai-editutor] " .. M._msg("conversation_continued"), info.message_count), vim.log.levels.INFO)
+  end
+
+  -- Start loading
+  loading.start(loading.states.gathering_context)
+
+  -- The selected code becomes the primary context
+  local selected_code = selection.text
+
+  -- Also get surrounding context
+  M._extract_context_async(query.question, filepath, query.line, function(full_context)
+    loading.update(loading.states.connecting)
+    M._process_ask_visual(query, filepath, bufnr, full_context, selected_code)
+  end)
+end
+
+---Process visual ask with selected code
+---@param query table
+---@param filepath string
+---@param bufnr number
+---@param full_context string
+---@param selected_code string
+function M._process_ask_visual(query, filepath, bufnr, full_context, selected_code)
+  -- Add conversation history
+  local conv_history = conversation.get_history_as_context()
+  if conv_history ~= "" then
+    full_context = conv_history .. "\n" .. full_context
+  end
+
+  -- Build prompts with selected code
+  local system_prompt = prompts.get_system_prompt()
+  local user_prompt = prompts.build_user_prompt(query.question, full_context, nil, selected_code)
+
+  loading.update(loading.states.thinking)
+
+  -- Query LLM
+  provider.query_async(system_prompt, user_prompt, function(response, err)
+    loading.stop()
+
+    if err then
+      vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
+      return
+    end
+
+    if not response then
+      vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
+      return
+    end
+
+    -- Add to conversation
+    conversation.add_message("user", query.question .. "\n[Selected code]\n" .. selected_code:sub(1, 200))
+    conversation.add_message("assistant", response)
+
+    -- Save to knowledge
+    knowledge.save({
+      mode = "question",
+      question = query.question,
+      answer = response,
+      language = vim.bo.filetype,
+      filepath = filepath,
+      tags = { "visual-selection" },
     })
 
     -- Insert response
