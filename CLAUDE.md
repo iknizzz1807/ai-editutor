@@ -52,8 +52,7 @@ ai-editutor/
 │       ├── comment_writer.lua    # Insert responses (Q: as comments, C: as code)
 │       ├── prompts.lua           # Mode-specific prompts (Q: teach, C: generate)
 │       ├── provider.lua          # LLM API with inheritance + streaming
-│       ├── knowledge.lua         # Knowledge tracking (JSON)
-│       ├── conversation.lua      # Session-based conversation memory
+│       ├── knowledge.lua         # Knowledge tracking (date-based JSON files)
 │       ├── project_scanner.lua   # Project file scanning
 │       ├── cache.lua             # LRU cache with TTL + autocmd invalidation
 │       ├── loading.lua           # Loading indicator
@@ -259,23 +258,18 @@ nvim --headless -u tests/minimal_init.lua -c "lua require('tests.comprehensive_t
 " Core command (normal mode + visual mode)
 <leader>ma           " Ask - response inserted as inline comment
 
-" Main commands
+" Main command
 :EduTutorAsk         " Ask (same as <leader>ma)
 
 " Knowledge commands
 :EduTutorHistory     " Show Q&A history
-:EduTutorSearch      " Search knowledge base
+:EduTutorBrowse      " Browse by date
 :EduTutorExport      " Export to markdown
-:EduTutorStats       " Show statistics
 
 " Language commands
 :EduTutorLang             " Show current language
 :EduTutorLang Vietnamese  " Switch to Vietnamese
 :EduTutorLang English     " Switch to English
-
-" Conversation commands
-:EduTutorConversation       " Show conversation info
-:EduTutorClearConversation  " Clear conversation
 
 " Other commands
 :EduTutorClearCache   " Clear context cache

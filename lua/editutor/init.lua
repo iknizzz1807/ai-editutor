@@ -11,7 +11,6 @@ local prompts = require("editutor.prompts")
 local provider = require("editutor.provider")
 local comment_writer = require("editutor.comment_writer")
 local knowledge = require("editutor.knowledge")
-local conversation = require("editutor.conversation")
 local cache = require("editutor.cache")
 local loading = require("editutor.loading")
 local debug_log = require("editutor.debug_log")
@@ -31,17 +30,8 @@ M._messages = {
     response_inserted = "Response inserted",
     history_title = "ai-editutor - Recent History",
     history_empty = "No history found",
-    search_prompt = "Search knowledge: ",
-    search_results = "Search Results: '%s'",
-    search_found = "Found %d entries",
-    search_empty = "No results found for: ",
     export_success = "Exported to: ",
     export_failed = "Export failed: ",
-    stats_title = "ai-editutor - Statistics",
-    stats_total = "Total Q&A entries",
-    conversation_continued = "Continuing conversation (%d messages)",
-    conversation_new = "Starting new conversation",
-    conversation_cleared = "Conversation cleared",
     gathering_context = "Gathering context...",
     context_mode_full = "Using full project context (%d tokens)",
     context_mode_adaptive = "Using adaptive context (%d tokens)",
@@ -55,17 +45,8 @@ M._messages = {
     response_inserted = "Da chen response",
     history_title = "ai-editutor - Lich Su",
     history_empty = "Khong co lich su",
-    search_prompt = "Tim kiem: ",
-    search_results = "Ket qua: '%s'",
-    search_found = "Tim thay %d muc",
-    search_empty = "Khong tim thay: ",
     export_success = "Da xuat ra: ",
     export_failed = "Xuat that bai: ",
-    stats_title = "ai-editutor - Thong Ke",
-    stats_total = "Tong so Q&A",
-    conversation_continued = "Tiep tuc hoi thoai (%d tin nhan)",
-    conversation_new = "Bat dau hoi thoai moi",
-    conversation_cleared = "Da xoa hoi thoai",
     gathering_context = "Dang thu thap context...",
     context_mode_full = "Su dung full project context (%d tokens)",
     context_mode_adaptive = "Su dung adaptive context (%d tokens)",
@@ -124,17 +105,9 @@ function M._create_commands()
     M.show_history()
   end, { desc = "Show Q&A history" })
 
-  vim.api.nvim_create_user_command("EduTutorSearch", function(opts)
-    M.search_knowledge(opts.args)
-  end, { nargs = "?", desc = "Search knowledge base" })
-
   vim.api.nvim_create_user_command("EduTutorExport", function(opts)
     M.export_knowledge(opts.args)
   end, { nargs = "?", desc = "Export knowledge to markdown" })
-
-  vim.api.nvim_create_user_command("EduTutorStats", function()
-    M.show_stats()
-  end, { desc = "Show statistics" })
 
   -- Language command
   vim.api.nvim_create_user_command("EduTutorLang", function(opts)
@@ -146,15 +119,6 @@ function M._create_commands()
     end,
     desc = "Set response language",
   })
-
-  -- Conversation commands
-  vim.api.nvim_create_user_command("EduTutorConversation", function()
-    M.show_conversation()
-  end, { desc = "Show conversation info" })
-
-  vim.api.nvim_create_user_command("EduTutorClearConversation", function()
-    M.clear_conversation()
-  end, { desc = "Clear conversation" })
 
   -- Cache command
   vim.api.nvim_create_user_command("EduTutorClearCache", function()
@@ -180,6 +144,17 @@ function M._create_commands()
     debug_log.clear_error_log()
     vim.notify("[ai-editutor] Error log cleared", vim.log.levels.INFO)
   end, { desc = "Clear error log file" })
+
+  -- Browse by date command
+  vim.api.nvim_create_user_command("EduTutorBrowse", function(opts)
+    M.browse_knowledge(opts.args)
+  end, {
+    nargs = "?",
+    complete = function()
+      return knowledge.get_dates()
+    end,
+    desc = "Browse knowledge by date (YYYY-MM-DD)",
+  })
 end
 
 ---Setup keymaps
@@ -218,13 +193,6 @@ function M.ask()
   local bufnr = vim.api.nvim_get_current_buf()
   local cursor_line = query.line
 
-  -- Check conversation continuation (use query mode)
-  local is_continuation = conversation.continue_or_start(filepath, cursor_line, query.mode or "question")
-  if is_continuation then
-    local info = conversation.get_session_info()
-    vim.notify(string.format("[ai-editutor] " .. M._msg("conversation_continued"), info.message_count), vim.log.levels.INFO)
-  end
-
   -- Start loading
   loading.start(M._msg("gathering_context"))
 
@@ -260,12 +228,6 @@ end
 ---@param full_context string
 ---@param metadata table
 function M._process_ask(query, filepath, bufnr, full_context, metadata)
-  -- Add conversation history
-  local conv_history = conversation.get_history_as_context()
-  if conv_history ~= "" then
-    full_context = conv_history .. "\n" .. full_context
-  end
-
   -- Determine mode: "question" or "code"
   local mode = query.mode or "question"
   local is_code_mode = (mode == "code")
@@ -338,10 +300,6 @@ function M._process_ask(query, filepath, bufnr, full_context, metadata)
         return
       end
 
-      -- Add to conversation
-      conversation.add_message("user", query.question)
-      conversation.add_message("assistant", response)
-
       -- Save to knowledge
       knowledge.save({
         mode = mode,
@@ -393,13 +351,6 @@ function M.ask_visual()
   local filepath = vim.api.nvim_buf_get_name(0)
   local bufnr = vim.api.nvim_get_current_buf()
 
-  -- Check conversation continuation (use query mode)
-  local is_continuation = conversation.continue_or_start(filepath, query.line, query.mode or "question")
-  if is_continuation then
-    local info = conversation.get_session_info()
-    vim.notify(string.format("[ai-editutor] " .. M._msg("conversation_continued"), info.message_count), vim.log.levels.INFO)
-  end
-
   -- Start loading
   loading.start(M._msg("gathering_context"))
 
@@ -432,12 +383,6 @@ end
 ---@param selected_code string
 ---@param metadata table
 function M._process_ask_visual(query, filepath, bufnr, full_context, selected_code, metadata)
-  -- Add conversation history
-  local conv_history = conversation.get_history_as_context()
-  if conv_history ~= "" then
-    full_context = conv_history .. "\n" .. full_context
-  end
-
   -- Determine mode: "question" or "code"
   local mode = query.mode or "question"
   local is_code_mode = (mode == "code")
@@ -510,10 +455,6 @@ function M._process_ask_visual(query, filepath, bufnr, full_context, selected_co
         return
       end
 
-      -- Add to conversation
-      conversation.add_message("user", query.question .. "\n[Selected code]\n" .. selected_code:sub(1, 200))
-      conversation.add_message("assistant", response)
-
       -- Save to knowledge
       knowledge.save({
         mode = mode,
@@ -521,7 +462,6 @@ function M._process_ask_visual(query, filepath, bufnr, full_context, selected_co
         answer = response,
         language = vim.bo.filetype,
         filepath = filepath,
-        tags = { "visual-selection" },
       })
 
       vim.notify("[ai-editutor] " .. M._msg("response_inserted"), vim.log.levels.INFO)
@@ -569,39 +509,6 @@ function M.show_history()
   print(table.concat(lines, "\n"))
 end
 
----Search knowledge
-function M.search_knowledge(query)
-  if not query or query == "" then
-    vim.ui.input({ prompt = M._msg("search_prompt") }, function(input)
-      if input and input ~= "" then
-        M.search_knowledge(input)
-      end
-    end)
-    return
-  end
-
-  local results = knowledge.search(query)
-
-  if #results == 0 then
-    vim.notify("[ai-editutor] " .. M._msg("search_empty") .. query, vim.log.levels.INFO)
-    return
-  end
-
-  local lines = {
-    string.format(M._msg("search_results"), query),
-    string.format(M._msg("search_found"), #results),
-    string.rep("=", 40), "",
-  }
-
-  for i, entry in ipairs(results) do
-    table.insert(lines, string.format("## %d. %s", i, entry.question))
-    table.insert(lines, entry.answer:sub(1, 200):gsub("\n", " ") .. "...")
-    table.insert(lines, "")
-  end
-
-  print(table.concat(lines, "\n"))
-end
-
 ---Export knowledge
 function M.export_knowledge(filepath)
   local success, err = knowledge.export_markdown(filepath)
@@ -614,40 +521,55 @@ function M.export_knowledge(filepath)
   end
 end
 
----Show stats
-function M.show_stats()
-  local stats = knowledge.get_stats()
-  local cache_stats = cache.get_stats()
+---Browse knowledge by date
+function M.browse_knowledge(date)
+  if not date or date == "" then
+    -- Show available dates
+    local dates = knowledge.get_dates()
+    if #dates == 0 then
+      vim.notify("[ai-editutor] No knowledge entries yet", vim.log.levels.INFO)
+      return
+    end
 
-  local lines = {
-    M._msg("stats_title"),
-    string.rep("=", 40), "",
-    string.format("%s: %d", M._msg("stats_total"), stats.total), "",
-  }
-
-  if next(stats.by_language) then
-    table.insert(lines, "By Language:")
-    for lang, count in pairs(stats.by_language) do
-      table.insert(lines, string.format("  %s: %d", lang, count))
+    local lines = { "Available dates:", string.rep("=", 40), "" }
+    for i, d in ipairs(dates) do
+      local entries = knowledge.get_by_date(d)
+      table.insert(lines, string.format("%d. %s (%d entries)", i, d, #entries))
     end
     table.insert(lines, "")
+    table.insert(lines, "Usage: :EduTutorBrowse YYYY-MM-DD")
+
+    print(table.concat(lines, "\n"))
+    return
   end
 
-  table.insert(lines, "Cache:")
-  table.insert(lines, string.format("  Active entries: %d", cache_stats.active))
+  -- Show entries for specific date
+  local entries = knowledge.get_by_date(date)
+  if #entries == 0 then
+    vim.notify("[ai-editutor] No entries for " .. date, vim.log.levels.INFO)
+    return
+  end
 
-  -- Show debug log size
-  local log_size = debug_log.get_size()
-  if log_size > 0 then
+  local lines = {
+    string.format("Knowledge for %s", date),
+    string.format("%d entries", #entries),
+    string.rep("=", 40), "",
+  }
+
+  for i, entry in ipairs(entries) do
+    local mode_label = (entry.mode == "code") and "C" or "Q"
+    table.insert(lines, string.format("%d. [%s] %s", i, mode_label, entry.question:sub(1, 60)))
+    if entry.language then
+      table.insert(lines, string.format("   Language: %s", entry.language))
+    end
     table.insert(lines, "")
-    table.insert(lines, string.format("Debug log size: %.1f KB", log_size / 1024))
   end
 
   print(table.concat(lines, "\n"))
 end
 
 -- =============================================================================
--- LANGUAGE & CONVERSATION
+-- LANGUAGE
 -- =============================================================================
 
 ---Set language
@@ -672,31 +594,6 @@ function M.set_language(lang)
   config.options.language = normalized
   local msg = normalized == "English" and "Language set to English" or "Da chuyen sang tieng Viet"
   vim.notify("[ai-editutor] " .. msg, vim.log.levels.INFO)
-end
-
----Show conversation
-function M.show_conversation()
-  local info = conversation.get_session_info()
-
-  if not info then
-    vim.notify("[ai-editutor] " .. M._msg("conversation_new"), vim.log.levels.INFO)
-    return
-  end
-
-  local lines = {
-    "ai-editutor - Conversation",
-    string.rep("=", 40), "",
-    string.format("Messages: %d", info.message_count),
-    string.format("File: %s", info.file or "unknown"), "",
-  }
-
-  print(table.concat(lines, "\n"))
-end
-
----Clear conversation
-function M.clear_conversation()
-  conversation.clear_session()
-  vim.notify("[ai-editutor] " .. M._msg("conversation_cleared"), vim.log.levels.INFO)
 end
 
 ---Clear cache

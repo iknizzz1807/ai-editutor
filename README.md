@@ -129,10 +129,10 @@ Select confusing code, ask about it:
 The AI focuses on your selection.
 
 ### Knowledge That Stays
-Every Q&A is saved to your codebase as comments. Search your learning history:
+Every Q&A is saved by date. Review your learning history:
 ```vim
-:EduTutorSearch closure    " Find past explanations
 :EduTutorHistory           " Recent Q&A
+:EduTutorBrowse            " Browse by date
 :EduTutorExport            " Export to markdown
 ```
 
@@ -171,9 +171,9 @@ require("editutor").setup({
 | Command | What it does |
 |---------|-------------|
 | `:EduTutorAsk` | Process Q:/C: at cursor |
-| `:EduTutorHistory` | Browse your Q&A history |
-| `:EduTutorSearch` | Search past questions |
-| `:EduTutorStats` | See your learning stats |
+| `:EduTutorHistory` | Recent Q&A history |
+| `:EduTutorBrowse` | Browse by date |
+| `:EduTutorExport` | Export to markdown |
 | `:EduTutorLang` | Switch language |
 
 ---

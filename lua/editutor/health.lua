@@ -188,12 +188,16 @@ function M.check()
   local knowledge_ok, knowledge = pcall(require, "editutor.knowledge")
   if knowledge_ok then
     local stats = knowledge.get_stats()
-    ok(string.format("Knowledge database: %d entries (JSON storage)", stats.total or 0))
+    ok(string.format("Knowledge: %d entries across %d days", stats.total or 0, stats.days or 0))
+
+    local data_dir = vim.fn.stdpath("data")
+    info("Storage: " .. data_dir .. "/editutor/knowledge/")
 
     if stats.total and stats.total > 0 then
       local modes = {}
       for mode, count in pairs(stats.by_mode or {}) do
-        table.insert(modes, string.format("%s:%d", mode, count))
+        local label = mode == "code" and "C" or "Q"
+        table.insert(modes, string.format("%s:%d", label, count))
       end
       if #modes > 0 then
         info("By mode: " .. table.concat(modes, ", "))
@@ -271,9 +275,8 @@ function M.check()
   info("")
   info("Commands:")
   info("  :EduTutorAsk      - Ask Q:/C: at cursor")
-  info("  :EduTutorLog      - Open debug log")
   info("  :EduTutorHistory  - View Q&A history")
-  info("  :EduTutorStats    - View statistics")
+  info("  :EduTutorBrowse   - Browse by date")
   info("")
   info("Help: :h editutor")
 end

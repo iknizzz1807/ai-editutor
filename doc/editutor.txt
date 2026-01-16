@@ -211,13 +211,20 @@ Large projects (>20K tokens):
 
 All Q&A pairs are automatically saved for future reference.
 
-Commands:
-  :EduTutorHistory     Show recent Q&A history
-  :EduTutorSearch      Search knowledge base
-  :EduTutorExport      Export to markdown file
-  :EduTutorStats       Show statistics
+Storage Structure: >
+    ~/.local/share/nvim/editutor/knowledge/
+    ├── 2026-01-15.json
+    ├── 2026-01-16.json
+    ├── 2026-01-17.json
+    └── ...
+<
+Each day gets its own file. Easy to manage, review, or delete.
 
-Storage location: ~/.local/share/nvim/editutor_knowledge.json
+Commands:
+  :EduTutorHistory        Show recent Q&A (last 7 days)
+  :EduTutorBrowse         List available dates
+  :EduTutorBrowse [date]  Show entries for specific date
+  :EduTutorExport [path]  Export to markdown
 
 ==============================================================================
 12. COMMANDS                                                *editutor-commands*
@@ -226,10 +233,9 @@ Core Commands:
   :EduTutorAsk            Ask about current Q:/C: comment
 
 Knowledge Commands:
-  :EduTutorHistory        Show Q&A history
-  :EduTutorSearch [query] Search knowledge base
+  :EduTutorHistory        Show recent Q&A history
+  :EduTutorBrowse [date]  Browse by date (tab-complete dates)
   :EduTutorExport [path]  Export to markdown
-  :EduTutorStats          Show statistics
 
 Language Commands:
   :EduTutorLang           Show/set language
