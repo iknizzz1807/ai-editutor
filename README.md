@@ -4,41 +4,33 @@
 
 A Neovim plugin that acts as your personal coding mentor - explaining concepts, guiding your thinking, and helping you truly understand code rather than just generating it.
 
-## What's New in v0.9.0
+## What's New in v1.0.0
 
-**Intelligent Context System** - Major upgrade to how ai-editutor understands your code:
+**Simplified Q: Only Mode** - One prefix to rule them all:
 
-- **BM25 Search** via SQLite FTS5 - Find related code across your project
-- **Multi-Signal Ranking** - 8 signals combine for precise context selection
-- **5-Level Hints** - More granular progressive hints system
-- **More Providers** - DeepSeek, Groq, Together, OpenRouter built-in
-- **Streaming Improvements** - Debounced UI updates for smoother experience
-- **Context Caching** - Smart caching with automatic invalidation
+- `// Q: What is closure?` - AI explains the concept
+- `// Q: Review this code` - AI gives code review
+- `// Q: Debug: why does this return nil?` - AI guides debugging
+- `// Q: Explain this using Socratic method` - AI asks guiding questions
 
-## What's New in v0.8.0
+**New Features:**
+- **Skip Answered Questions** - Q: with A: below are automatically skipped
+- **Visual Selection** - Select code, write Q:, get focused explanation
+- Removed S/R/D/E modes - just use Q: and express your intent naturally
 
-**Inline Comments UI** - Responses are now inserted directly as comments in your code file, right below your question. No floating windows - everything stays in your code.
-
-```go
-// Q: What's the difference between goroutine and thread?
+```javascript
+// Q: What's the difference between let and const?
 /*
-A: A goroutine is a lightweight thread managed by the Go runtime,
-not the OS. Key differences:
+A: Both are block-scoped, but:
+- const: Cannot be reassigned (immutable binding)
+- let: Can be reassigned
 
-1. Memory: goroutines start with ~2KB stack vs ~1MB for OS threads
-2. Scheduling: Go runtime schedules goroutines (M:N model)
-3. Communication: Use channels instead of shared memory
-
-Example:
-go func() {
-    // This runs concurrently
-}()
-
-Learn more: Look into Go's scheduler and the GOMAXPROCS setting.
+Note: const objects can still have properties modified.
+Use const by default, let when you need to reassign.
 */
-func main() {
-    // your code here
-}
+const x = 5;
+let y = 10;
+y = 20;  // OK
 ```
 
 ## Why ai-editutor?
@@ -47,16 +39,18 @@ func main() {
 |---------|----------|
 | Copilot generates code - you just accept - you don't learn | AI explains - you write every line - you actually learn |
 | Context switching to browser for docs | Ask questions directly in your editor |
-| ChatGPT gives answers without teaching | Socratic questioning guides your thinking |
+| ChatGPT gives answers without teaching | Express your intent: "Socratic method", "Review", "Debug" |
 | Knowledge learned gets forgotten | Personal knowledge base you can search and review |
 
 ## Features
 
-### Comment-Based Interaction (Inline Responses)
+### Simple Q: Syntax
 
-```javascript
-// Q: What does this regex do?
-/*
+Just write `// Q:` and ask anything:
+
+```python
+# Q: What does this regex do?
+"""
 A: This regex validates a strong password:
 - (?=.*[A-Z]) - at least one uppercase
 - (?=.*[a-z]) - at least one lowercase
@@ -64,21 +58,44 @@ A: This regex validates a strong password:
 - .{8,} - minimum 8 characters
 
 Common mistake: Forgetting anchors (^$) allows partial matches.
-*/
-const pattern = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,}$/;
+"""
+pattern = r'^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,}$'
 ```
 
-### 5 Learning Modes
+### Express Your Intent Naturally
 
-| Mode | Prefix | Purpose |
-|------|--------|---------|
-| **Question** | `// Q:` | Direct answers with explanations |
-| **Socratic** | `// S:` | Guided discovery through questions |
-| **Review** | `// R:` | Code review and best practices |
-| **Debug** | `// D:` | Learn debugging methodology |
-| **Explain** | `// E:` | Deep concept explanations |
+```javascript
+// Q: Review this function for security issues
+// Q: Debug: why does this return undefined sometimes?
+// Q: Explain closures step by step
+// Q: What could be improved here?
+// Q: Help me understand this using Socratic method
+```
 
-### 5-Level Progressive Hints (v0.9.0)
+### Skip Answered Questions
+
+Questions with A: responses below are automatically skipped:
+
+```javascript
+function test() {
+  // Q: What is closure?       // SKIPPED (already answered)
+  /*
+  A: A closure is a function...
+  */
+
+  // Q: How does async work?   // FOUND (unanswered)
+  return 42;
+}
+```
+
+### Visual Selection Support
+
+1. Select code block with `v` or `V`
+2. Write `// Q: Explain this function` within selection
+3. Press `<leader>ma`
+4. Selected code is sent with focus priority
+
+### 5-Level Progressive Hints
 
 Run `:EduTutorHint` multiple times on the same question:
 - Level 1: **Conceptual** - What concepts are relevant?
@@ -92,7 +109,6 @@ Run `:EduTutorHint` multiple times on the same question:
 ```typescript
 // Q: How does this service interact with the authentication module?
 // ai-editutor automatically gathers context from related project files via LSP
-// No indexing required - just works with your existing LSP setup
 ```
 
 ### Conversation Memory
@@ -122,9 +138,6 @@ Ask follow-up questions without repeating context:
 | `nvim-lua/plenary.nvim` | **Required** | HTTP requests, async utilities |
 | `nvim-treesitter/nvim-treesitter` | Recommended | Better code chunking |
 | `kkharji/sqlite.lua` | Recommended | BM25 search, project indexing |
-
-**Without sqlite.lua**: Plugin works with LSP-only context (still very capable)
-**With sqlite.lua**: Enables BM25 full-text search across entire project
 
 ### lazy.nvim (Recommended)
 ```lua
@@ -160,14 +173,6 @@ use {
 }
 ```
 
-### vim-plug
-```vim
-Plug 'nvim-lua/plenary.nvim'
-Plug 'nvim-treesitter/nvim-treesitter'
-Plug 'kkharji/sqlite.lua'
-Plug 'your-username/ai-editutor'
-```
-
 ## Quick Start
 
 1. **Install the plugin** (see above)
@@ -187,21 +192,21 @@ Plug 'your-username/ai-editutor'
 
 ## Keybindings
 
-| Key | Action |
-|-----|--------|
-| `<leader>ma` | Ask - response inserted as inline comment |
+| Key | Mode | Action |
+|-----|------|--------|
+| `<leader>ma` | Normal | Ask about Q: at cursor |
+| `<leader>ma` | Visual | Ask about selected code |
 
 ## Configuration
 
 ```lua
 require("editutor").setup({
-  -- LLM Provider (v0.9.0: more options)
+  -- LLM Provider
   provider = "claude",  -- claude, openai, deepseek, groq, together, openrouter, ollama
   api_key = os.getenv("ANTHROPIC_API_KEY"),
   model = "claude-sonnet-4-20250514",
 
   -- Behavior
-  default_mode = "question",
   language = "English",       -- or "Vietnamese"
 
   -- LSP Context Extraction
@@ -211,21 +216,15 @@ require("editutor").setup({
     max_external_symbols = 20,
   },
 
-  -- Indexer Settings (v0.9.0)
+  -- Indexer Settings
   indexer = {
     context_budget = 4000,      -- Total tokens for context
     debounce_ms = 1000,         -- File change debounce
-    weights = {                 -- Ranking signal weights
-      lsp_definition = 1.0,
-      bm25_score = 0.5,
-      directory_proximity = 0.3,
-      git_recency = 0.2,
-    },
   },
 
   -- Keymaps
   keymaps = {
-    ask = "<leader>ma",
+    ask = "<leader>ma",  -- Works in normal and visual mode
   },
 })
 ```
@@ -239,11 +238,11 @@ require("editutor").setup({
                               |
                               v
 +-----------------------------------------------------------+
-|  1. Parse comment (detect Q/S/R/D/E mode)                 |
-|  2. Extract code context around cursor                    |
-|  3. Use LSP to find related definitions in project        |
-|  4. Build pedagogical prompt with full context            |
-|  5. Send to LLM (Claude/OpenAI/Ollama)                    |
+|  1. Parse Q: comment                                      |
+|  2. Check if already answered (A: below) → skip if yes    |
+|  3. Extract context (LSP + BM25 + visual selection)       |
+|  4. Build unified pedagogical prompt                      |
+|  5. Send to LLM (Claude/OpenAI/Ollama/etc.)              |
 |  6. Insert response as comment below question             |
 |  7. Save to knowledge base                                |
 +-----------------------------------------------------------+
@@ -266,18 +265,8 @@ The plugin automatically uses the appropriate comment style:
 ### Core Commands
 | Command | Description |
 |---------|-------------|
-| `:EduTutorAsk` | Ask about current mentor comment |
-| `:EduTutorHint` | Ask with incremental hints |
-| `:EduTutorModes` | Show available modes |
-
-### Mode Commands
-| Command | Description |
-|---------|-------------|
-| `:EduTutorQuestion` | Force Question mode |
-| `:EduTutorSocratic` | Force Socratic mode |
-| `:EduTutorReview` | Force Review mode |
-| `:EduTutorDebug` | Force Debug mode |
-| `:EduTutorExplain` | Force Explain mode |
+| `:EduTutorAsk` | Ask about current Q: comment |
+| `:EduTutorHint` | Ask with progressive hints (run multiple times) |
 
 ### Knowledge Commands
 | Command | Description |
@@ -287,10 +276,11 @@ The plugin automatically uses the appropriate comment style:
 | `:EduTutorExport [path]` | Export to markdown |
 | `:EduTutorStats` | Show statistics |
 
-### Indexer Commands (v0.9.0)
+### Indexer Commands
 | Command | Description |
 |---------|-------------|
 | `:EduTutorIndex` | Index current project for BM25 search |
+| `:EduTutorIndex!` | Force re-index |
 | `:EduTutorIndexStats` | Show indexer statistics |
 | `:EduTutorClearCache` | Clear context cache |
 
@@ -314,17 +304,15 @@ so you must specify which one the return value follows.
 
 The 'a annotation says: "the return value lives as long as
 the shorter of x and y's lifetimes."
-
-Without this, Rust can't guarantee memory safety at compile time.
 */
 fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
     if x.len() > y.len() { x } else { y }
 }
 ```
 
-### Code Review Before PR
+### Code Review
 ```typescript
-// R: Review this function before I submit the PR
+// Q: Review this function for security issues
 /*
 A: Issues found:
 
@@ -332,22 +320,30 @@ CRITICAL: No input validation - userId could be used for injection
 WARNING: No error handling for failed fetch
 WARNING: response.json() can throw if response isn't JSON
 
-Improved version:
-async function fetchUserData(userId: string) {
-  if (!userId || typeof userId !== 'string') {
-    throw new Error('Invalid userId');
-  }
-  const response = await fetch(`/api/users/${encodeURIComponent(userId)}`);
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return response.json();
-}
+Consider: Input validation, error handling, and encodeURIComponent.
 */
 async function fetchUserData(userId: string) {
   const response = await fetch(`/api/users/${userId}`);
   return response.json();
 }
+```
+
+### Debugging
+```python
+# Q: Debug: why does this return None sometimes?
+"""
+A: Possible causes:
+
+1. The 'if' condition might not be met
+2. No explicit return means implicit 'return None'
+3. Check edge cases: empty input? zero values?
+
+To debug: Add print statements before each return,
+check what conditions are being met.
+"""
+def process(data):
+    if data and data.get('value'):
+        return data['value'] * 2
 ```
 
 ## Comparison with Other Tools
@@ -358,36 +354,10 @@ async function fetchUserData(userId: string) {
 | In-editor | Yes | No | Yes |
 | Teaches concepts | No | Partially | Yes (primary goal) |
 | Inline responses | No | No | Yes |
-| Socratic mode | No | No | Yes |
+| Skip answered questions | No | No | Yes |
+| Visual selection | No | No | Yes |
 | Knowledge tracking | No | No | Yes |
 | Project-aware context | Limited | No | Yes (LSP-based) |
-
-## Project Structure
-
-```
-ai-editutor/
-├── lua/editutor/
-│   ├── init.lua              # Plugin entry (v0.9.0)
-│   ├── comment_writer.lua    # Inline comment insertion
-│   ├── parser.lua            # Comment parsing
-│   ├── context.lua           # Context extraction
-│   ├── lsp_context.lua       # LSP-based context
-│   ├── prompts.lua           # Pedagogical prompts (bilingual)
-│   ├── provider.lua          # LLM providers with inheritance
-│   ├── hints.lua             # 5-level progressive hints
-│   ├── knowledge.lua         # Q&A persistence
-│   ├── conversation.lua      # Conversation memory
-│   ├── cache.lua             # LRU cache with TTL (v0.9.0)
-│   ├── health.lua            # Health check
-│   └── indexer/              # Project indexing (v0.9.0)
-│       ├── init.lua          # Indexer entry point
-│       ├── db.lua            # SQLite + FTS5 (BM25)
-│       ├── chunker.lua       # Tree-sitter AST chunking
-│       └── ranker.lua        # Multi-signal ranking
-├── doc/editutor.txt          # Vim help
-├── README.md
-└── CLAUDE.md                 # Development guide
-```
 
 ## Roadmap
 
@@ -395,7 +365,8 @@ ai-editutor/
 - [x] **v0.7.0**: Conversation memory
 - [x] **v0.8.0**: Inline comments UI
 - [x] **v0.9.0**: Intelligent context system (BM25, multi-signal ranking)
-- [ ] **Future**: Obsidian integration, Team sharing, Semantic embeddings
+- [x] **v1.0.0**: Simplified Q: only mode, skip answered, visual selection
+- [ ] **Future**: Obsidian integration, Team sharing
 
 ## Contributing
 

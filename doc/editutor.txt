@@ -8,18 +8,16 @@ CONTENTS                                                    *editutor-contents*
     3. Installation .......................... |editutor-installation|
     4. Configuration ......................... |editutor-configuration|
     5. Usage ................................. |editutor-usage|
-    6. Modes ................................. |editutor-modes|
-    7. Incremental Hints ..................... |editutor-hints|
-    8. Knowledge Tracking .................... |editutor-knowledge|
-    9. LSP Context ........................... |editutor-lsp-context|
-   10. Conversation Memory ................... |editutor-conversation|
-   11. Commands .............................. |editutor-commands|
-   12. Keymaps ............................... |editutor-keymaps|
-   13. API ................................... |editutor-api|
-       - Indexer API ......................... |editutor-indexer|
-       - Cache API ........................... |editutor-cache|
-       - Provider API ........................ |editutor-provider|
-   14. Health Check .......................... |editutor-health|
+    6. Skip Answered Questions ............... |editutor-skip-answered|
+    7. Visual Selection ...................... |editutor-visual|
+    8. Incremental Hints ..................... |editutor-hints|
+    9. Knowledge Tracking .................... |editutor-knowledge|
+   10. LSP Context ........................... |editutor-lsp-context|
+   11. Conversation Memory ................... |editutor-conversation|
+   12. Commands .............................. |editutor-commands|
+   13. Keymaps ............................... |editutor-keymaps|
+   14. API ................................... |editutor-api|
+   15. Health Check .......................... |editutor-health|
 
 ==============================================================================
 1. INTRODUCTION                                         *editutor-introduction*
@@ -30,28 +28,29 @@ guides your learning instead of writing code for you.
 
 Philosophy: "Teach a person to fish, don't fish for them."
 
-v0.9.0 - Intelligent Context System:
-  - BM25 search via SQLite FTS5 for finding related code
-  - Multi-signal context ranking (8 ranking signals)
-  - 5-level progressive hints system (upgraded from 4)
-  - More LLM providers (DeepSeek, Groq, Together, OpenRouter)
-  - Streaming with debounced UI updates
-  - Context caching with automatic invalidation
+v1.0.0 - Simplified Q: Only Mode:
+  - ONE prefix to rule them all: just use Q: and express your intent naturally
+  - Skip answered questions: Q: with A: below are automatically skipped
+  - Visual selection support: select code, write Q:, get focused explanation
+  - Removed S/R/D/E modes - just use Q: with natural language
 
-v0.8.0 - Inline Comments UI:
-  Responses are now inserted directly as comments in your code file, right
-  below your question. No floating windows - everything stays in your code.
+Examples: >
+    // Q: What is closure?                    -> explains concept
+    // Q: Review this function                -> gives code review
+    // Q: Debug: why does this return nil?    -> guides debugging
+    // Q: Explain using Socratic method       -> asks guiding questions
+<
 
 Features:
-  - Inline comment responses (v0.8.0)
-  - 5 learning modes (Question, Socratic, Review, Debug, Explain)
-  - 5-level progressive hints (v0.9.0: upgraded from 4)
-  - BM25 search via SQLite FTS5 (v0.9.0)
-  - Multi-signal context ranking (v0.9.0)
+  - Simplified Q: syntax (express intent naturally)
+  - Skip answered questions (Q: with A: below)
+  - Visual selection support
+  - 5-level progressive hints
+  - BM25 search via SQLite FTS5
+  - Multi-signal context ranking
   - Knowledge tracking (save and search Q&A history)
-  - LSP-based context (auto-fetches related definitions from project)
+  - LSP-based context (auto-fetches related definitions)
   - Conversation memory (follow-up questions keep context)
-  - Project documentation context (README, package.json, etc.)
   - Multiple LLM providers (Claude, OpenAI, DeepSeek, Groq, Ollama, etc.)
   - Multi-language support (English, Vietnamese)
 
@@ -68,13 +67,6 @@ Recommended:
   - nvim-treesitter (for AST-based code chunking)
   - sqlite.lua (for BM25 search and knowledge persistence)
 
-Optional but Useful:
-  - sqlite.lua enables:
-    * BM25 full-text search via FTS5
-    * Project indexing with semantic chunks
-    * Persistent knowledge base
-  - Without it, falls back to LSP-only context
-
 ==============================================================================
 3. INSTALLATION                                         *editutor-installation*
 
@@ -83,14 +75,12 @@ Using lazy.nvim: >lua
       "your-username/editutor",
       dependencies = {
         "nvim-lua/plenary.nvim",
-        "nvim-treesitter/nvim-treesitter",  -- Recommended: AST chunking
-        "kkharji/sqlite.lua",               -- Recommended: BM25 search
+        "nvim-treesitter/nvim-treesitter",  -- Recommended
+        "kkharji/sqlite.lua",               -- Recommended
       },
       config = function()
         require("editutor").setup({
-          -- claude, openai, deepseek, groq, together, openrouter, ollama
           provider = "claude",
-          api_key = os.getenv("ANTHROPIC_API_KEY"),
         })
       end,
     }
@@ -101,76 +91,65 @@ Using lazy.nvim: >lua
 
 Default configuration: >lua
     require("editutor").setup({
-      -- LLM Provider (v0.9.0: more options available)
+      -- LLM Provider
       -- Options: claude, openai, deepseek, groq, together, openrouter, ollama
       provider = "claude",
       model = "claude-sonnet-4-20250514",
 
       -- Behavior
-      default_mode = "question",
-      context_lines = 50,
-      include_imports = true,
       language = "English",  -- or "Vietnamese"
 
       -- LSP Context extraction
       context = {
-        lines_around_cursor = 100,    -- Lines around cursor
-        external_context_lines = 30,  -- Lines around each external def
-        max_external_symbols = 20,    -- Max symbols to resolve
+        lines_around_cursor = 100,
+        external_context_lines = 30,
+        max_external_symbols = 20,
       },
 
-      -- Indexer Settings (v0.9.0)
+      -- Indexer Settings
       indexer = {
-        context_budget = 4000,        -- Total tokens for context
-        debounce_ms = 1000,           -- File change debounce
-        max_chunks_per_file = 100,    -- Max chunks per file
-        max_chunk_size = 2000,        -- Max chunk size (NWS chars)
-        weights = {                   -- Ranking signal weights
-          lsp_definition = 1.0,       -- Direct LSP definition
-          bm25_score = 0.5,           -- BM25 relevance
-          directory_proximity = 0.3,  -- Same/nearby directory
-          git_recency = 0.2,          -- Recently modified
-          import_distance = 0.2,      -- Import graph distance
-          recent_access = 0.1,        -- Recently opened
-        },
+        context_budget = 4000,
+        debounce_ms = 1000,
       },
 
-      -- Keymaps
+      -- Keymaps (works in normal and visual mode)
       keymaps = {
         ask = "<leader>ma",
       },
     })
 <
 
-Provider-specific models:
-  Claude: "claude-sonnet-4-20250514", "claude-opus-4-20250514"
-  OpenAI: "gpt-4o", "gpt-4o-mini"
-  DeepSeek: "deepseek-chat", "deepseek-coder"
-  Groq: "llama-3.3-70b-versatile", "mixtral-8x7b"
-  Together: "meta-llama/Llama-3.3-70B-Instruct-Turbo"
-  OpenRouter: "anthropic/claude-3.5-sonnet", etc.
-  Ollama: "llama3.2", "codellama", etc.
-
 ==============================================================================
 5. USAGE                                                       *editutor-usage*
 
-1. Write a comment with a mentor prefix: >
+Basic Usage:
+
+1. Write a comment with Q: prefix: >
     // Q: What is the time complexity of this algorithm?
 <
 
 2. Press <leader>ma (or your configured keymap)
 
-3. The explanation is inserted as a comment below your question: >
+3. The explanation is inserted as a comment below: >
     // Q: What is the time complexity of this algorithm?
     /*
     A: This algorithm has O(n) time complexity because...
     */
 <
 
-4. The response stays in your code file as documentation
+Express Your Intent Naturally:                               *editutor-intents*
 
-Comment Style:
-  ai-editutor automatically detects the appropriate comment style:
+The unified prompt adapts to your question: >
+    // Q: What is closure?                  -> explains concept
+    // Q: Review this function              -> gives code review
+    // Q: Debug: why does this return nil?  -> guides debugging
+    // Q: How can I improve this?           -> suggests improvements
+    // Q: Explain using Socratic method     -> asks guiding questions
+<
+
+Comment Style Detection:                                *editutor-comment-style*
+
+ai-editutor automatically uses the appropriate comment style:
   - JS/TS/Go/Rust/C: /* block comment */
   - Python: """ docstring """
   - Lua/SQL: --[[ block ]]
@@ -178,57 +157,80 @@ Comment Style:
   - Shell/YAML: # line comment
 
 ==============================================================================
-6. MODES                                                       *editutor-modes*
+6. SKIP ANSWERED QUESTIONS                             *editutor-skip-answered*
 
-ai-editutor supports 5 interaction modes:
+Questions that already have A: responses below are automatically skipped.
+This prevents re-asking questions that have already been answered.
 
-*Q:* Question Mode                                          *editutor-question*
-    Direct answers with explanations
-    Example: // Q: What does this regex do?
+Example: >
+    function test() {
+      // Q: What is closure?       <- SKIPPED (has A: below)
+      /*
+      A: A closure is a function...
+      */
 
-*S:* Socratic Mode                                          *editutor-socratic*
-    Guided discovery through questions
-    Example: // S: Why might a mutex be better here?
+      // Q: How does async work?   <- FOUND (unanswered)
+      return 42;
+    }
+<
 
-*R:* Review Mode                                              *editutor-review*
-    Code review with security, performance, best practices
-    Example: // R: Review this function
+How It Works:
+  - Parser checks next 5 lines after Q: for A: patterns
+  - Supported A: formats:
+    - Block comments: /* A: ... */ or --[[ A: ... ]]
+    - Line comments: // A: ... or # A: ...
+  - If A: found, skips to find next unanswered Q:
 
-*D:* Debug Mode                                                *editutor-debug*
-    Guided debugging process
-    Example: // D: This returns nil sometimes, why?
-
-*E:* Explain Mode                                            *editutor-explain*
-    Deep concept explanations
-    Example: // E: Explain closures in JavaScript
+Use |include_answered| parameter to override: >lua
+    parser.find_query(bufnr, line, true)  -- includes answered questions
+<
 
 ==============================================================================
-7. INCREMENTAL HINTS                                          *editutor-hints*
+7. VISUAL SELECTION                                          *editutor-visual*
 
-The hints system provides progressive assistance in 5 levels (v0.9.0):
-
-  Level 1: Conceptual - What concepts are relevant?
-           Points to programming concepts without explaining how to apply
-  Level 2: Strategic - What approach to consider?
-           Suggests general strategy/pattern to investigate
-  Level 3: Directional - Where in the code to look?
-           Points to specific code locations, what to look for
-  Level 4: Specific - What techniques to try?
-           Shows small code example/pattern, explains the "why"
-  Level 5: Solution - Complete answer with explanation
-           Full working code, edge cases, what to learn next
+Select code and ask focused questions about it.
 
 Usage:
-  1. Write your question comment
-  2. Run :EduTutorHint
-  3. Run :EduTutorHint again to get next level hint
+  1. Enter visual mode (v or V)
+  2. Select the code block you want to focus on
+  3. Include a // Q: comment within the selection
+  4. Press <leader>ma
 
-Each hint level replaces the previous response in your code. This approach
-encourages learning by giving progressively more help rather than immediate
-complete answers.
+The selected code is sent with "FOCUS ON THIS" priority in the prompt,
+with surrounding code as secondary context.
+
+Example: >
+    function calculate(a, b) {    <- Select from here
+      const result = a + b;
+      // Q: Explain this function <- Include Q: in selection
+      return result * 2;
+    }                             <- To here
+<
+
+Press <leader>ma in visual mode, and the AI will focus on explaining
+the selected code block.
 
 ==============================================================================
-8. KNOWLEDGE TRACKING                                      *editutor-knowledge*
+8. INCREMENTAL HINTS                                          *editutor-hints*
+
+The hints system provides progressive assistance in 5 levels:
+
+  Level 1: Conceptual - What concepts are relevant?
+  Level 2: Strategic - What approach to consider?
+  Level 3: Directional - Where in the code to look?
+  Level 4: Specific - What techniques to try?
+  Level 5: Solution - Complete answer with explanation
+
+Usage:
+  1. Write your question: // Q: How do I fix this bug?
+  2. Run :EduTutorHint (gets Level 1)
+  3. Run :EduTutorHint again (gets Level 2)
+  4. Keep running for more detailed hints
+
+Each hint level replaces the previous response in your code.
+
+==============================================================================
+9. KNOWLEDGE TRACKING                                      *editutor-knowledge*
 
 ai-editutor automatically saves all Q&A pairs for future reference.
 
@@ -238,100 +240,42 @@ Commands:
   :EduTutorExport      Export to markdown file
   :EduTutorStats       Show statistics
 
-Knowledge is stored in:
+Storage:
   - SQLite (if sqlite.lua is installed)
-  - JSON file fallback (~/.local/share/nvim/editutor_knowledge.json)
-
-Export example: >
-    :EduTutorExport ~/my_learnings.md
-<
+  - JSON fallback (~/.local/share/nvim/editutor_knowledge.json)
 
 ==============================================================================
-9. LSP CONTEXT                                           *editutor-lsp-context*
+10. LSP CONTEXT                                          *editutor-lsp-context*
 
-ai-editutor automatically gathers context from your project using LSP
-(Language Server Protocol). When you ask a question, it:
+ai-editutor automatically gathers context from your project using LSP.
 
-  1. Extracts code around your cursor (configurable lines)
-  2. Finds all identifiers/symbols in that code using Tree-sitter
+When you ask a question, it:
+  1. Extracts code around your cursor
+  2. Finds identifiers using Tree-sitter
   3. Uses LSP go-to-definition to find where they're defined
-  4. Includes relevant definitions from OTHER project files
-  5. Filters out library code (node_modules, site-packages, etc.)
-
-This gives the LLM a complete picture of how your code connects together,
-without requiring any external indexing or setup.
-
-How it works:                                            *editutor-lsp-how*
-  - Only fetches definitions from PROJECT files (not libraries)
-  - Limits to 100 lines around cursor for performance
-  - Includes up to 20 external symbol definitions
-  - Falls back to Tree-sitter context when LSP unavailable
-
-Excluded paths (library detection):
-  - node_modules, .venv, venv, site-packages
-  - vendor, .cargo/registry, target/debug, target/release
-  - /usr/, /opt/, .local/lib/, .luarocks/
-
-Configuration: >lua
-    require("editutor").setup({
-      context = {
-        lines_around_cursor = 100,    -- Lines around cursor
-        external_context_lines = 30,  -- Lines around external definitions
-        max_external_symbols = 20,    -- Max symbols to resolve
-      },
-    })
-<
+  4. Includes relevant definitions from other project files
+  5. Filters out library code
 
 ==============================================================================
-10. CONVERSATION MEMORY                                  *editutor-conversation*
+11. CONVERSATION MEMORY                                 *editutor-conversation*
 
-ai-editutor remembers your conversation context for follow-up questions.
+ai-editutor remembers your conversation for follow-up questions.
 
-How It Works:                                        *editutor-conversation-how*
-  - Each question continues from the previous Q&A in the same session
-  - Sessions are tied to file + line proximity
-  - Auto-clears after 30 minutes of inactivity
-
-Session Continuation Rules:
-  - Same file + within 50 lines of last question = continues
+Session Rules:
+  - Same file + within 50 lines = continues session
   - Different file = starts new session
-  - More than 50 lines away = starts new session
-  - More than 30 min since last question = starts new session
-
-Example: >
-    // Q: What does this function do?
-    // [Response inserted below]
-
-    // Q: Can you explain the error handling?
-    // [AI remembers previous discussion]
-<
+  - More than 30 min = starts new session
 
 Commands:
-  :EduTutorConversation       Show current session info
-  :EduTutorClearConversation  Clear session to start fresh
-
-Project Documentation:                               *editutor-project-context*
-  ai-editutor automatically reads project documentation for better context:
-
-  - README.md, README - Project overview
-  - package.json, pyproject.toml, Cargo.toml - Dependencies
-  - go.mod, pom.xml, build.gradle - Build config
-  - ARCHITECTURE.md, CONTRIBUTING.md - Design docs
+  :EduTutorConversation       Show session info
+  :EduTutorClearConversation  Clear session
 
 ==============================================================================
-11. COMMANDS                                                *editutor-commands*
+12. COMMANDS                                                *editutor-commands*
 
 Core Commands:
-  :EduTutorAsk            Ask about current mentor comment
-  :EduTutorHint           Ask with incremental hints
-  :EduTutorModes          Show available modes
-
-Mode Commands:
-  :EduTutorQuestion       Force Question mode
-  :EduTutorSocratic       Force Socratic mode
-  :EduTutorReview         Force Review mode
-  :EduTutorDebug          Force Debug mode
-  :EduTutorExplain        Force Explain mode
+  :EduTutorAsk            Ask about current Q: comment
+  :EduTutorHint           Ask with progressive hints
 
 Knowledge Commands:
   :EduTutorHistory        Show Q&A history
@@ -339,219 +283,108 @@ Knowledge Commands:
   :EduTutorExport [path]  Export to markdown
   :EduTutorStats          Show statistics
 
+Indexer Commands:
+  :EduTutorIndex          Index project for BM25 search
+  :EduTutorIndex!         Force re-index
+  :EduTutorIndexStats     Show indexer statistics
+  :EduTutorClearCache     Clear context cache
+
 Language Commands:
-  :EduTutorLang           Show current language and options
-  :EduTutorLang English   Switch to English responses
-  :EduTutorLang Vietnamese Switch to Vietnamese responses
-  :EduTutorLang vi        Short form for Vietnamese
-  :EduTutorLang en        Short form for English
+  :EduTutorLang           Show/set language
+  :EduTutorLang English   English responses
+  :EduTutorLang Vietnamese Vietnamese responses
 
 Conversation Commands:
-  :EduTutorConversation       Show current conversation session info
-  :EduTutorClearConversation  Clear current conversation
+  :EduTutorConversation       Show session info
+  :EduTutorClearConversation  Clear session
+
+Health:
+  :checkhealth editutor   Check plugin health
 
 ==============================================================================
-12. KEYMAPS                                                  *editutor-keymaps*
+13. KEYMAPS                                                  *editutor-keymaps*
 
 Default keymaps (configurable):
 
-Normal mode:
-    <leader>ma    Ask mentor about current comment
+  Normal mode:
+    <leader>ma    Ask about Q: at cursor
 
-The response is inserted as an inline comment below your question.
+  Visual mode:
+    <leader>ma    Ask about selected code (with Q: in selection)
 
 ==============================================================================
-13. API                                                          *editutor-api*
+14. API                                                          *editutor-api*
 
-Lua API: >lua
+Main API: >lua
     local editutor = require("editutor")
 
-    -- Setup
     editutor.setup(opts)
+    editutor.ask()              -- Normal mode ask
+    editutor.ask_visual()       -- Visual mode ask
+    editutor.ask_with_hints()   -- Progressive hints
+    editutor.version()          -- Returns "1.0.0"
+<
 
-    -- Ask about current comment (inserts response as inline comment)
-    editutor.ask()
+Parser API: >lua
+    local parser = require("editutor.parser")
 
-    -- Ask with incremental hints
-    editutor.ask_with_hints()
+    parser.parse_line(line)           -- Returns question or nil
+    parser.has_answer_below(lines, line_num)  -- Check for A: below
+    parser.find_query(bufnr, line, include_answered)
+    parser.find_query_in_range(bufnr, start_line, end_line)
+    parser.get_visual_selection()     -- Get selection info
+    parser.find_all_queries(bufnr, include_answered)
+<
 
-    -- Ask with specific mode
-    editutor.ask_mode("question")
-    editutor.ask_mode("socratic")
-    editutor.ask_mode("review")
-    editutor.ask_mode("debug")
-    editutor.ask_mode("explain")
+Prompts API: >lua
+    local prompts = require("editutor.prompts")
 
-    -- Knowledge functions
-    editutor.show_history()
-    editutor.search_knowledge(query)
-    editutor.export_knowledge(path)
-    editutor.show_stats()
-
-    -- Conversation functions
-    editutor.show_conversation()
-    editutor.clear_conversation()
-
-    -- Utilities
-    editutor.show_modes()
-    editutor.version()
+    prompts.get_system_prompt()
+    prompts.build_user_prompt(question, context, _, selected_code)
+    prompts.get_hint_prompt(level)
+    prompts.get_language()
 <
 
 Comment Writer API: >lua
     local comment_writer = require("editutor.comment_writer")
 
-    -- Get comment style for current filetype
     comment_writer.get_style(bufnr)
-
-    -- Format response as comments
-    comment_writer.format_response(response, bufnr, reference_line)
-
-    -- Insert response as comment after a line
-    comment_writer.insert_response(response, after_line, bufnr)
-
-    -- Insert or replace existing response
+    comment_writer.format_response(response, bufnr, line)
     comment_writer.insert_or_replace(response, question_line, bufnr)
-
-    -- Remove existing response after question
-    comment_writer.remove_existing_response(question_line, bufnr)
 <
 
 Knowledge API: >lua
     local knowledge = require("editutor.knowledge")
 
-    knowledge.save({ mode, question, answer, language, filepath, tags })
-    knowledge.get_recent(limit)
+    knowledge.save({ mode, question, answer, language, filepath })
     knowledge.search(query, limit)
+    knowledge.get_recent(limit)
     knowledge.get_stats()
     knowledge.export_markdown(filepath)
 <
 
-Conversation API: >lua
-    local conversation = require("editutor.conversation")
-
-    conversation.start_session(opts)
-    conversation.continue_or_start(filepath, line, mode)
-    conversation.add_message(role, content)
-    conversation.get_history()
-    conversation.get_history_as_context()
-    conversation.has_active_session()
-    conversation.get_session_info()
-    conversation.clear_session()
-<
-
-Project Context API: >lua
-    local project_context = require("editutor.project_context")
-
-    project_context.get_project_root()
-    project_context.get_project_docs()
-    project_context.get_project_summary()
-    project_context.get_references(bufnr, line, col, callback)
-    project_context.get_workspace_symbols(query, callback)
-    project_context.get_document_symbols(bufnr, callback)
-    project_context.clear_cache()
-<
-
-Indexer API (v0.9.0):                                        *editutor-indexer*
->lua
-    local indexer = require("editutor.indexer")
-
-    -- Initialize indexer
-    indexer.setup(opts)
-
-    -- Index entire project
-    indexer.index_project({ force = true, progress = callback })
-
-    -- Search for relevant context
-    indexer.search(query, { limit = 20, current_file = path })
-
-    -- Get context for LLM prompt
-    local context, metadata = indexer.get_context({
-      question = "What does this do?",
-      current_file = path,
-      cursor_line = 42,
-      budget = 4000,
-    })
-
-    -- Get statistics
-    indexer.get_stats()
-
-    -- Rebuild index
-    indexer.rebuild()
-
-    -- Check if ready
-    indexer.is_ready()
-<
-
-Cache API (v0.9.0):                                            *editutor-cache*
->lua
-    local cache = require("editutor.cache")
-
-    -- Initialize cache
-    cache.setup()
-
-    -- Get/set values
-    cache.get(key)
-    cache.set(key, value, { ttl = 60, tags = {"file:path"} })
-
-    -- Get or compute
-    cache.get_or_compute(key, compute_fn, opts)
-    cache.get_or_compute_async(key, compute_fn, callback, opts)
-
-    -- Invalidation
-    cache.invalidate(key)
-    cache.invalidate_by_tag("file:path")
-    cache.invalidate_by_pattern("search:.*")
-    cache.clear()
-
-    -- Statistics
-    cache.get_stats()
-<
-
-Provider API (v0.9.0):                                        *editutor-provider*
->lua
+Provider API: >lua
     local provider = require("editutor.provider")
 
-    -- Query LLM
     provider.query_async(system, user, callback)
-    provider.query(system, user)  -- Sync/coroutine
-
-    -- Streaming with debounce
-    provider.query_stream(system, user, on_chunk, on_done, {
-      debounce_ms = 50,
-      on_batch = function(batch, full) end,
-    })
-    provider.cancel_stream(job_id)
-
-    -- Provider management
-    provider.resolve_provider("claude")
-    provider.register_provider("custom", {
-      __inherited_from = "openai",
-      name = "custom",
-      url = "https://api.custom.com/v1/chat",
-    })
+    provider.query_stream(system, user, on_chunk, on_done, opts)
+    provider.register_provider(name, config)
     provider.list_providers()
-    provider.get_info()
-    provider.check_provider()
 <
 
 ==============================================================================
-14. HEALTH CHECK                                              *editutor-health*
+15. HEALTH CHECK                                              *editutor-health*
 
-Run health check to verify setup:
->
+Run health check to verify setup: >
     :checkhealth editutor
 <
 
 This checks:
   - Neovim version
-  - Required dependencies (plenary.nvim)
-  - Recommended dependencies (sqlite.lua, nvim-treesitter)
-  - Tree-sitter availability and installed parsers
-  - LSP availability for current buffer
-  - Provider configuration and API keys
-  - Knowledge database status
-  - Index database status (v0.9.0)
-  - Cache status (v0.9.0)
+  - Required dependencies
+  - Provider configuration
+  - Database status
+  - Cache status
 
 ==============================================================================
 vim:tw=78:ts=8:ft=help:norl:
