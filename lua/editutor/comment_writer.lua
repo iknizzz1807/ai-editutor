@@ -408,4 +408,206 @@ function M.finish_streaming(state)
   -- Could add final formatting here if desired
 end
 
+-- =============================================================================
+-- Code Generation Mode (C:) Support
+-- Response is inserted AS-IS (code + comments already formatted by LLM)
+-- =============================================================================
+
+---Insert code generation response (for C: mode)
+---Response is inserted as-is, not wrapped in comments
+---@param response string Response text (code + notes from LLM)
+---@param after_line number Line number to insert after (1-indexed)
+---@param bufnr? number Buffer number
+---@return boolean success
+function M.insert_code_response(response, after_line, bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+
+  -- Get indentation from the C: line
+  local line_content = vim.api.nvim_buf_get_lines(bufnr, after_line - 1, after_line, false)[1]
+  local indent = line_content and line_content:match("^(%s*)") or ""
+
+  -- Split response into lines and add indentation
+  local lines = { "" } -- blank line first
+  for line in response:gmatch("[^\n]*") do
+    if line == "" then
+      table.insert(lines, "")
+    else
+      table.insert(lines, indent .. line)
+    end
+  end
+
+  -- Insert into buffer
+  vim.api.nvim_buf_set_lines(bufnr, after_line, after_line, false, lines)
+
+  return true
+end
+
+---Insert or replace code response for C: mode
+---@param response string Response text
+---@param question_line number Line number of the C: comment (1-indexed)
+---@param bufnr? number Buffer number
+---@return boolean success
+function M.insert_or_replace_code(response, question_line, bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+
+  -- Remove existing response first (reuse Q: logic - works for code too)
+  M.remove_existing_code_response(question_line, bufnr)
+
+  -- Insert new code response
+  return M.insert_code_response(response, question_line, bufnr)
+end
+
+---Remove existing code response after a C: line
+---@param question_line number Line number of the C: comment (1-indexed)
+---@param bufnr? number Buffer number
+---@return number lines_removed
+function M.remove_existing_code_response(question_line, bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local total_lines = #lines
+
+  -- Start checking from the line after the C: comment
+  local start_remove = question_line + 1
+  if start_remove > total_lines then
+    return 0
+  end
+
+  -- Skip blank line if present
+  if lines[start_remove] and lines[start_remove]:match("^%s*$") then
+    start_remove = start_remove + 1
+  end
+
+  if start_remove > total_lines then
+    return 0
+  end
+
+  -- Find the end of the code response
+  -- Code response ends when we hit another Q: or C: comment, or end of file
+  local end_remove = start_remove - 1
+  local style = M.get_style(bufnr)
+
+  for i = start_remove, total_lines do
+    local line = lines[i]
+
+    -- Check if we hit a new Q: or C: comment (end of this response)
+    local is_new_query = false
+    if style.line then
+      local prefix = style.line:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
+      if line:match("^%s*" .. prefix .. "%s*[QqCc]:") then
+        is_new_query = true
+      end
+    end
+    if line:match("^%s*/%*%s*[QqCc]:") or line:match("^%s*<!%-%-%s*[QqCc]:") then
+      is_new_query = true
+    end
+
+    if is_new_query then
+      break
+    end
+
+    end_remove = i
+  end
+
+  -- Remove the lines (including the blank line before if present)
+  local actual_start = question_line
+  if lines[question_line + 1] and lines[question_line + 1]:match("^%s*$") then
+    actual_start = question_line
+  end
+
+  if end_remove >= start_remove then
+    vim.api.nvim_buf_set_lines(bufnr, question_line, end_remove, false, {})
+    return end_remove - question_line
+  end
+
+  return 0
+end
+
+---@class StreamingStateCode
+---@field bufnr number Buffer number
+---@field question_line number Question line number
+---@field start_line number Start line of inserted code
+---@field end_line number Current end line
+---@field indent string Indentation
+
+---Start streaming code response - inserts placeholder
+---@param question_line number Line number of the C: comment (1-indexed)
+---@param bufnr? number Buffer number
+---@return StreamingStateCode state State object for updates
+function M.start_streaming_code(question_line, bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+
+  -- Remove existing response first
+  M.remove_existing_code_response(question_line, bufnr)
+
+  -- Get indentation from C: line
+  local line_content = vim.api.nvim_buf_get_lines(bufnr, question_line - 1, question_line, false)[1]
+  local indent = line_content and line_content:match("^(%s*)") or ""
+
+  -- Insert placeholder
+  local placeholder_lines = { "", indent .. "// Generating code..." }
+  vim.api.nvim_buf_set_lines(bufnr, question_line, question_line, false, placeholder_lines)
+
+  return {
+    bufnr = bufnr,
+    question_line = question_line,
+    start_line = question_line + 1, -- after blank line
+    end_line = question_line + #placeholder_lines,
+    indent = indent,
+    mode = "code",
+  }
+end
+
+---Strip markdown code blocks from LLM response
+---@param content string Raw content from LLM
+---@return string Cleaned content
+local function strip_markdown_code_blocks(content)
+  -- Strip opening ```language at the start
+  content = content:gsub("^```%w*\n", "")
+  -- Strip closing ``` at the end
+  content = content:gsub("\n```%s*$", "")
+  -- Also handle case where ``` is on its own line in the middle (shouldn't happen but safe)
+  content = content:gsub("\n```\n", "\n")
+  return content
+end
+
+---Update streaming code response with new content
+---@param state StreamingStateCode State from start_streaming_code
+---@param content string Full content so far
+function M.update_streaming_code(state, content)
+  if not state or not vim.api.nvim_buf_is_valid(state.bufnr) then
+    return
+  end
+
+  -- Strip markdown code blocks that LLM might add
+  content = strip_markdown_code_blocks(content)
+
+  local lines = {}
+
+  for line in content:gmatch("[^\n]*") do
+    if line == "" then
+      table.insert(lines, "")
+    else
+      table.insert(lines, state.indent .. line)
+    end
+  end
+
+  -- Replace the code block
+  vim.api.nvim_buf_set_lines(
+    state.bufnr,
+    state.start_line,
+    state.end_line,
+    false,
+    lines
+  )
+
+  -- Update end_line for next update
+  state.end_line = state.start_line + #lines
+end
+
+---Finish streaming code (cleanup if needed)
+---@param state StreamingStateCode State from start_streaming_code
+function M.finish_streaming_code(state)
+  -- Currently no cleanup needed
+end
+
 return M

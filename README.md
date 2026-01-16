@@ -4,19 +4,26 @@
 
 A Neovim plugin that acts as your personal coding mentor - explaining concepts, guiding your thinking, and helping you truly understand code rather than just generating it.
 
-## What's New in v1.0.0
+## What's New in v1.2.0
 
-**Simplified Q: Only Mode** - One prefix to rule them all:
+**Two Modes: Q: (Question) and C: (Code)**
 
-- `// Q: What is closure?` - AI explains the concept
-- `// Q: Review this code` - AI gives code review
-- `// Q: Debug: why does this return nil?` - AI guides debugging
-- `// Q: Explain this using Socratic method` - AI asks guiding questions
+**Q: Mode** - Ask questions, learn deeply ("ask one, learn ten"):
+- `// Q: What is closure?` - Deep explanation with best practices
+- `// Q: Review this code` - Constructive code review
+- `// Q: Debug: why does this return nil?` - Guided debugging
+- Response inserted as **comment block** with A: prefix
 
-**New Features:**
-- **Skip Answered Questions** - Q: with A: below are automatically skipped
-- **Visual Selection** - Select code, write Q:, get focused explanation
-- Removed S/R/D/E modes - just use Q: and express your intent naturally
+**C: Mode** - Generate code with explanatory notes:
+- `// C: function to validate email` - Generates actual working code
+- `// C: async fetch with retry logic` - Production-ready code
+- Response inserted as **actual code** + notes block
+
+**Key Features:**
+- **Streaming** - See response as it's generated
+- **Skip Answered** - Q:/C: with response below are automatically skipped
+- **Visual Selection** - Select code, write Q:/C:, get focused response
+- **Adaptive Context** - Full project (<20K tokens) or import graph + LSP
 
 ```javascript
 // Q: What's the difference between let and const?
@@ -25,12 +32,23 @@ A: Both are block-scoped, but:
 - const: Cannot be reassigned (immutable binding)
 - let: Can be reassigned
 
-Note: const objects can still have properties modified.
-Use const by default, let when you need to reassign.
+Best practice: Use const by default, let when you need to reassign.
+Watch out: const objects can still have properties modified!
 */
 const x = 5;
 let y = 10;
-y = 20;  // OK
+
+// C: validate email with regex
+function validateEmail(email) {
+  const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return regex.test(email);
+}
+/*
+Notes:
+- This regex handles most common formats
+- For strict validation, consider validator.js
+- Edge cases: + aliases, unicode domains
+*/
 ```
 
 ## Why ai-editutor?
@@ -136,8 +154,7 @@ Ask follow-up questions without repeating context:
 | Dependency | Required? | Purpose |
 |------------|-----------|---------|
 | `nvim-lua/plenary.nvim` | **Required** | HTTP requests, async utilities |
-| `nvim-treesitter/nvim-treesitter` | Recommended | Better code chunking |
-| `kkharji/sqlite.lua` | Recommended | BM25 search, project indexing |
+| `nvim-treesitter/nvim-treesitter` | Recommended | Better code parsing |
 
 ### lazy.nvim (Recommended)
 ```lua
@@ -146,7 +163,6 @@ Ask follow-up questions without repeating context:
   dependencies = {
     "nvim-lua/plenary.nvim",           -- Required
     "nvim-treesitter/nvim-treesitter", -- Recommended
-    "kkharji/sqlite.lua",              -- Recommended: enables BM25 search
   },
   config = function()
     require("editutor").setup({
@@ -163,7 +179,6 @@ use {
   requires = {
     "nvim-lua/plenary.nvim",
     "nvim-treesitter/nvim-treesitter",
-    "kkharji/sqlite.lua",
   },
   config = function()
     require("editutor").setup({
@@ -209,17 +224,9 @@ require("editutor").setup({
   -- Behavior
   language = "English",       -- or "Vietnamese"
 
-  -- LSP Context Extraction
+  -- Context Budget
   context = {
-    lines_around_cursor = 100,
-    external_context_lines = 30,
-    max_external_symbols = 20,
-  },
-
-  -- Indexer Settings
-  indexer = {
-    context_budget = 4000,      -- Total tokens for context
-    debounce_ms = 1000,         -- File change debounce
+    token_budget = 20000,     -- Max tokens for context (default: 20000)
   },
 
   -- Keymaps
@@ -233,17 +240,19 @@ require("editutor").setup({
 
 ```
 +-----------------------------------------------------------+
-|  You write: // Q: How does this sorting algorithm work?   |
+|  You write: // Q: question   OR   // C: code description  |
 +-----------------------------+-----------------------------+
                               |
                               v
 +-----------------------------------------------------------+
-|  1. Parse Q: comment                                      |
-|  2. Check if already answered (A: below) → skip if yes    |
-|  3. Extract context (LSP + BM25 + visual selection)       |
-|  4. Build unified pedagogical prompt                      |
-|  5. Send to LLM (Claude/OpenAI/Ollama/etc.)              |
-|  6. Insert response as comment below question             |
+|  1. Parse Q:/C: comment and detect mode                   |
+|  2. Check if already answered → skip if yes               |
+|  3. Extract context (full project or import graph + LSP)  |
+|  4. Build mode-specific prompt                            |
+|  5. Stream to LLM (Claude/OpenAI/DeepSeek/etc.)          |
+|  6. Insert response based on mode:                        |
+|     - Q: → comment block with A: prefix                   |
+|     - C: → actual code + notes block                      |
 |  7. Save to knowledge base                                |
 +-----------------------------------------------------------+
 ```
@@ -276,20 +285,14 @@ The plugin automatically uses the appropriate comment style:
 | `:EduTutorExport [path]` | Export to markdown |
 | `:EduTutorStats` | Show statistics |
 
-### Indexer Commands
-| Command | Description |
-|---------|-------------|
-| `:EduTutorIndex` | Index current project for BM25 search |
-| `:EduTutorIndex!` | Force re-index |
-| `:EduTutorIndexStats` | Show indexer statistics |
-| `:EduTutorClearCache` | Clear context cache |
-
 ### Other Commands
 | Command | Description |
 |---------|-------------|
 | `:EduTutorLang` | Show/set response language |
 | `:EduTutorConversation` | Show conversation info |
 | `:EduTutorClearConversation` | Clear conversation |
+| `:EduTutorClearCache` | Clear context cache |
+| `:EduTutorLog` | Open debug log |
 | `:checkhealth editutor` | Check plugin health |
 
 ## Use Cases
@@ -350,14 +353,15 @@ def process(data):
 
 | Feature | Copilot | ChatGPT | ai-editutor |
 |---------|---------|---------|-------------|
-| Code generation | Yes | Yes | No (by design) |
+| Code generation | Auto | Yes | Yes (C: mode, intentional) |
 | In-editor | Yes | No | Yes |
-| Teaches concepts | No | Partially | Yes (primary goal) |
+| Teaches concepts | No | Partially | Yes (Q: mode, primary goal) |
 | Inline responses | No | No | Yes |
 | Skip answered questions | No | No | Yes |
 | Visual selection | No | No | Yes |
 | Knowledge tracking | No | No | Yes |
-| Project-aware context | Limited | No | Yes (LSP-based) |
+| Project-aware context | Limited | No | Yes (import graph + LSP) |
+| Streaming | Yes | Yes | Yes |
 
 ## Roadmap
 
@@ -366,6 +370,7 @@ def process(data):
 - [x] **v0.8.0**: Inline comments UI
 - [x] **v0.9.0**: Intelligent context system (BM25, multi-signal ranking)
 - [x] **v1.0.0**: Simplified Q: only mode, skip answered, visual selection
+- [x] **v1.2.0**: C: code generation mode, streaming, adaptive context
 - [ ] **Future**: Obsidian integration, Team sharing
 
 ## Contributing

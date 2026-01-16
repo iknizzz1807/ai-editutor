@@ -1,6 +1,6 @@
 -- editutor/init.lua
 -- ai-editutor - A Neovim plugin that teaches you to code better
--- v1.1.0: Enhanced context extraction (full project < 20k tokens or LSP selective)
+-- v1.2.0: Two modes - Q: (question/explain) and C: (code generation)
 
 local M = {}
 
@@ -19,13 +19,13 @@ local debug_log = require("editutor.debug_log")
 local project_scanner = require("editutor.project_scanner")
 
 M._name = "EduTutor"
-M._version = "1.1.0"
+M._version = "1.2.0"
 M._setup_called = false
 
 -- UI Messages for internationalization
 M._messages = {
   en = {
-    no_comment = "No question found. Write: // Q: your question",
+    no_comment = "No query found. Write: // Q: question or // C: code description",
     thinking = "Thinking...",
     error = "Error: ",
     no_response = "No response received",
@@ -52,7 +52,7 @@ M._messages = {
     context_budget_exceeded = "Context exceeds budget (%d > %d tokens). Reduce scope or increase budget.",
   },
   vi = {
-    no_comment = "Khong tim thay cau hoi. Viet: // Q: cau hoi cua ban",
+    no_comment = "Khong tim thay query. Viet: // Q: cau hoi hoac // C: mo ta code",
     thinking = "Dang xu ly...",
     error = "Loi: ",
     no_response = "Khong nhan duoc phan hoi",
@@ -230,8 +230,8 @@ function M.ask()
   local bufnr = vim.api.nvim_get_current_buf()
   local cursor_line = query.line
 
-  -- Check conversation continuation
-  local is_continuation = conversation.continue_or_start(filepath, cursor_line, "question")
+  -- Check conversation continuation (use query mode)
+  local is_continuation = conversation.continue_or_start(filepath, cursor_line, query.mode or "question")
   if is_continuation then
     local info = conversation.get_session_info()
     vim.notify(string.format("[ai-editutor] " .. M._msg("conversation_continued"), info.message_count), vim.log.levels.INFO)
@@ -278,8 +278,12 @@ function M._process_ask(query, filepath, bufnr, full_context, metadata)
     full_context = conv_history .. "\n" .. full_context
   end
 
-  -- Build prompts
-  local system_prompt = prompts.get_system_prompt()
+  -- Determine mode: "question" or "code"
+  local mode = query.mode or "question"
+  local is_code_mode = (mode == "code")
+
+  -- Build prompts based on mode
+  local system_prompt = prompts.get_system_prompt(mode)
   local user_prompt = prompts.build_user_prompt(query.question, full_context)
 
   -- Get provider info
@@ -292,7 +296,7 @@ function M._process_ask(query, filepath, bufnr, full_context, metadata)
     question = query.question,
     current_file = metadata.current_file or filepath,
     question_line = query.line,
-    mode = metadata.mode,
+    mode = mode,
     metadata = metadata,
     system_prompt = system_prompt,
     user_prompt = user_prompt,
@@ -300,8 +304,13 @@ function M._process_ask(query, filepath, bufnr, full_context, metadata)
     model = model_name,
   })
 
-  -- Start streaming - insert placeholder comment
-  local stream_state = comment_writer.start_streaming(query.line, bufnr)
+  -- Start streaming - use appropriate function based on mode
+  local stream_state
+  if is_code_mode then
+    stream_state = comment_writer.start_streaming_code(query.line, bufnr)
+  else
+    stream_state = comment_writer.start_streaming(query.line, bufnr)
+  end
   loading.update(loading.states.streaming)
   local start_time = vim.loop.hrtime()
 
@@ -314,7 +323,13 @@ function M._process_ask(query, filepath, bufnr, full_context, metadata)
     -- on_done
     function(response, err)
       loading.stop()
-      comment_writer.finish_streaming(stream_state)
+
+      -- Finish streaming based on mode
+      if is_code_mode then
+        comment_writer.finish_streaming_code(stream_state)
+      else
+        comment_writer.finish_streaming(stream_state)
+      end
 
       local duration_ms = math.floor((vim.loop.hrtime() - start_time) / 1000000)
 
@@ -341,7 +356,7 @@ function M._process_ask(query, filepath, bufnr, full_context, metadata)
 
       -- Save to knowledge
       knowledge.save({
-        mode = "question",
+        mode = mode,
         question = query.question,
         answer = response,
         language = vim.bo.filetype,
@@ -354,8 +369,12 @@ function M._process_ask(query, filepath, bufnr, full_context, metadata)
     {
       debounce_ms = 50,
       on_batch = function(_, full_response_so_far)
-        -- Update comment with full response so far
-        comment_writer.update_streaming(stream_state, full_response_so_far)
+        -- Update streaming based on mode
+        if is_code_mode then
+          comment_writer.update_streaming_code(stream_state, full_response_so_far)
+        else
+          comment_writer.update_streaming(stream_state, full_response_so_far)
+        end
       end,
     }
   )
@@ -374,11 +393,11 @@ function M.ask_visual()
     return
   end
 
-  -- Find Q: comment within selection range
+  -- Find Q:/C: comment within selection range
   local query = parser.find_query_in_range(nil, selection.start_line, selection.end_line)
 
   if not query then
-    -- No Q: found in selection - prompt user to write one
+    -- No Q:/C: found in selection - prompt user to write one
     vim.notify("[ai-editutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
     return
   end
@@ -386,8 +405,8 @@ function M.ask_visual()
   local filepath = vim.api.nvim_buf_get_name(0)
   local bufnr = vim.api.nvim_get_current_buf()
 
-  -- Check conversation continuation
-  local is_continuation = conversation.continue_or_start(filepath, query.line, "question")
+  -- Check conversation continuation (use query mode)
+  local is_continuation = conversation.continue_or_start(filepath, query.line, query.mode or "question")
   if is_continuation then
     local info = conversation.get_session_info()
     vim.notify(string.format("[ai-editutor] " .. M._msg("conversation_continued"), info.message_count), vim.log.levels.INFO)
@@ -431,8 +450,12 @@ function M._process_ask_visual(query, filepath, bufnr, full_context, selected_co
     full_context = conv_history .. "\n" .. full_context
   end
 
-  -- Build prompts with selected code
-  local system_prompt = prompts.get_system_prompt()
+  -- Determine mode: "question" or "code"
+  local mode = query.mode or "question"
+  local is_code_mode = (mode == "code")
+
+  -- Build prompts with selected code based on mode
+  local system_prompt = prompts.get_system_prompt(mode)
   local user_prompt = prompts.build_user_prompt(query.question, full_context, nil, selected_code)
 
   -- Get provider info
@@ -445,7 +468,7 @@ function M._process_ask_visual(query, filepath, bufnr, full_context, selected_co
     question = query.question .. " [with visual selection]",
     current_file = metadata.current_file or filepath,
     question_line = query.line,
-    mode = metadata.mode,
+    mode = mode,
     metadata = metadata,
     system_prompt = system_prompt,
     user_prompt = user_prompt,
@@ -453,8 +476,13 @@ function M._process_ask_visual(query, filepath, bufnr, full_context, selected_co
     model = model_name,
   })
 
-  -- Start streaming - insert placeholder comment
-  local stream_state = comment_writer.start_streaming(query.line, bufnr)
+  -- Start streaming - use appropriate function based on mode
+  local stream_state
+  if is_code_mode then
+    stream_state = comment_writer.start_streaming_code(query.line, bufnr)
+  else
+    stream_state = comment_writer.start_streaming(query.line, bufnr)
+  end
   loading.update(loading.states.streaming)
   local start_time = vim.loop.hrtime()
 
@@ -467,7 +495,13 @@ function M._process_ask_visual(query, filepath, bufnr, full_context, selected_co
     -- on_done
     function(response, err)
       loading.stop()
-      comment_writer.finish_streaming(stream_state)
+
+      -- Finish streaming based on mode
+      if is_code_mode then
+        comment_writer.finish_streaming_code(stream_state)
+      else
+        comment_writer.finish_streaming(stream_state)
+      end
 
       local duration_ms = math.floor((vim.loop.hrtime() - start_time) / 1000000)
 
@@ -494,7 +528,7 @@ function M._process_ask_visual(query, filepath, bufnr, full_context, selected_co
 
       -- Save to knowledge
       knowledge.save({
-        mode = "question",
+        mode = mode,
         question = query.question,
         answer = response,
         language = vim.bo.filetype,
@@ -508,8 +542,12 @@ function M._process_ask_visual(query, filepath, bufnr, full_context, selected_co
     {
       debounce_ms = 50,
       on_batch = function(_, full_response_so_far)
-        -- Update comment with full response so far
-        comment_writer.update_streaming(stream_state, full_response_so_far)
+        -- Update streaming based on mode
+        if is_code_mode then
+          comment_writer.update_streaming_code(stream_state, full_response_so_far)
+        else
+          comment_writer.update_streaming(stream_state, full_response_so_far)
+        end
       end,
     }
   )

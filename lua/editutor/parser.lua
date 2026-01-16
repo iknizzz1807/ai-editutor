@@ -1,6 +1,6 @@
 -- editutor/parser.lua
 -- Comment parsing for mentor triggers
--- Simplified: Only Q: prefix (ask any question naturally)
+-- Supports Q: (question/explain) and C: (code generation) prefixes
 
 local M = {}
 
@@ -8,20 +8,32 @@ local M = {}
 ---@field question string The question/request text
 ---@field line number Line number of the comment
 ---@field col number Column position
+---@field mode string "question" or "code"
 
--- Pattern to match mentor comments: // Q: question text
+-- Modes
+M.MODE_QUESTION = "question"  -- Q: - explain, teach, answer
+M.MODE_CODE = "code"          -- C: - generate code with notes
+
+-- Pattern to match mentor comments: // Q: or // C:
 -- Supports various comment styles: //, #, --, /* */
--- Only Q: (or q:) is supported - users can naturally express intent in the question
 local PATTERNS = {
-  -- Single line comments (Q or q, case insensitive)
-  "^%s*//[%s]*[Qq]:[%s]*(.+)$",       -- // Q: question  or // q: question
-  "^%s*#[%s]*[Qq]:[%s]*(.+)$",         -- # Q: question
-  "^%s*%-%-[%s]*[Qq]:[%s]*(.+)$",      -- -- Q: question
-  "^%s*;[%s]*[Qq]:[%s]*(.+)$",         -- ; Q: question (lisp, asm)
-  -- Block comment start
-  "^%s*/%*[%s]*[Qq]:[%s]*(.+)",        -- /* Q: question
-  "^%s*%-%-%[%[[%s]*[Qq]:[%s]*(.+)",   -- --[[ Q: question (lua)
-  "^%s*<!%-%-%s*[Qq]:[%s]*(.+)",       -- <!-- Q: question (html)
+  -- Q: patterns (question/explain mode)
+  { pattern = "^%s*//[%s]*[Qq]:[%s]*(.+)$", mode = "question" },
+  { pattern = "^%s*#[%s]*[Qq]:[%s]*(.+)$", mode = "question" },
+  { pattern = "^%s*%-%-[%s]*[Qq]:[%s]*(.+)$", mode = "question" },
+  { pattern = "^%s*;[%s]*[Qq]:[%s]*(.+)$", mode = "question" },
+  { pattern = "^%s*/%*[%s]*[Qq]:[%s]*(.+)", mode = "question" },
+  { pattern = "^%s*%-%-%[%[[%s]*[Qq]:[%s]*(.+)", mode = "question" },
+  { pattern = "^%s*<!%-%-%s*[Qq]:[%s]*(.+)", mode = "question" },
+
+  -- C: patterns (code generation mode)
+  { pattern = "^%s*//[%s]*[Cc]:[%s]*(.+)$", mode = "code" },
+  { pattern = "^%s*#[%s]*[Cc]:[%s]*(.+)$", mode = "code" },
+  { pattern = "^%s*%-%-[%s]*[Cc]:[%s]*(.+)$", mode = "code" },
+  { pattern = "^%s*;[%s]*[Cc]:[%s]*(.+)$", mode = "code" },
+  { pattern = "^%s*/%*[%s]*[Cc]:[%s]*(.+)", mode = "code" },
+  { pattern = "^%s*%-%-%[%[[%s]*[Cc]:[%s]*(.+)", mode = "code" },
+  { pattern = "^%s*<!%-%-%s*[Cc]:[%s]*(.+)", mode = "code" },
 }
 
 -- Patterns to detect A: response below a question
@@ -39,9 +51,10 @@ local ANSWER_PATTERNS = {
 ---Parse a single line for mentor trigger
 ---@param line string The line content
 ---@return string|nil question The question text (nil if no match)
+---@return string|nil mode The mode ("question" or "code")
 function M.parse_line(line)
-  for _, pattern in ipairs(PATTERNS) do
-    local question = line:match(pattern)
+  for _, p in ipairs(PATTERNS) do
+    local question = line:match(p.pattern)
     if question then
       -- Clean up question (remove trailing comment closers)
       question = question:gsub("%s*%*/[%s]*$", "")
@@ -51,11 +64,11 @@ function M.parse_line(line)
 
       -- Don't match empty questions
       if question ~= "" then
-        return question
+        return question, p.mode
       end
     end
   end
-  return nil
+  return nil, nil
 end
 
 ---Check if a Q: line has an A: response below it
@@ -123,7 +136,7 @@ function M.find_query(bufnr, start_line, include_answered)
   for _, line_num in ipairs(search_order) do
     local line = lines[line_num]
     if line then
-      local question = M.parse_line(line)
+      local question, mode = M.parse_line(line)
       if question then
         -- Skip if already answered (unless include_answered is true)
         local should_skip = not include_answered and M.has_answer_below(lines, line_num)
@@ -133,6 +146,7 @@ function M.find_query(bufnr, start_line, include_answered)
             question = question,
             line = line_num,
             col = 1,
+            mode = mode or M.MODE_QUESTION,
           }
         end
         -- If should_skip, loop continues to next line_num
@@ -158,7 +172,7 @@ function M.find_all_queries(bufnr, include_answered)
   end
 
   for line_num, line in ipairs(lines) do
-    local question = M.parse_line(line)
+    local question, mode = M.parse_line(line)
     if question then
       local has_answer = M.has_answer_below(lines, line_num)
 
@@ -167,6 +181,7 @@ function M.find_all_queries(bufnr, include_answered)
           question = question,
           line = line_num,
           col = 1,
+          mode = mode or M.MODE_QUESTION,
           answered = has_answer,
         })
       end
@@ -215,7 +230,7 @@ function M.find_query_in_range(bufnr, start_line, end_line)
   for line_num = start_line, end_line do
     local line = lines[line_num]
     if line then
-      local question = M.parse_line(line)
+      local question, mode = M.parse_line(line)
       if question then
         -- Skip if already answered
         if not M.has_answer_below(lines, line_num) then
@@ -223,6 +238,7 @@ function M.find_query_in_range(bufnr, start_line, end_line)
             question = question,
             line = line_num,
             col = 1,
+            mode = mode or M.MODE_QUESTION,
           }
         end
       end

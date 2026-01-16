@@ -7,19 +7,28 @@
 ### Core Philosophy
 > "Teach a person to fish, don't fish for them."
 
-Unlike GitHub Copilot which writes code for you, ai-editutor **explains concepts** so you can write better code yourself.
+Unlike GitHub Copilot which writes code for you, ai-editutor has **two intentional modes**:
+- **Q: (Question)** - Explains concepts deeply ("ask one, learn ten")
+- **C: (Code)** - Generates code with explanatory notes
 
-### v1.0.0 - Simplified Q: Only Mode
-Major simplification: **One prefix to rule them all**. Just use `Q:` and express your intent naturally.
-- `// Q: What is closure?` → explains the concept
-- `// Q: Review this code` → gives code review
-- `// Q: Debug: why does this return nil?` → guides debugging
-- `// Q: Explain recursion using Socratic method` → asks guiding questions
+### v1.2.0 - Two Modes: Q: and C:
 
-**New in v1.0:**
-- Simplified to Q: only (removed S/R/D/E modes)
-- **Skip answered questions** - Q: with A: below are automatically skipped
+**Q: Mode** - Question/Explain (teach, don't just answer):
+- `// Q: What is closure?` → deep explanation with best practices, pitfalls, resources
+- `// Q: Review this code` → constructive code review
+- `// Q: Debug: why does this return nil?` → guided debugging
+- Response inserted as **comment block** (A: prefix)
+
+**C: Mode** - Code Generation (working code + notes):
+- `// C: function to validate email with regex` → generates actual code
+- `// C: async function to fetch user data with retry` → production-ready code
+- Response inserted as **actual code** + notes block
+
+**Key Features:**
+- **Skip answered questions** - Q:/C: with response below are automatically skipped
 - **Visual selection support** - Select code block and ask about it
+- **Streaming** - See response as it's generated
+- **Adaptive context** - Full project (<20K tokens) or import graph + LSP
 
 ---
 
@@ -29,14 +38,14 @@ Major simplification: **One prefix to rule them all**. Just use `Q:` and express
 ai-editutor/
 ├── lua/
 │   └── editutor/
-│       ├── init.lua              # Plugin entry point (v1.1.0)
+│       ├── init.lua              # Plugin entry point (v1.2.0)
 │       ├── config.lua            # Configuration management
-│       ├── parser.lua            # Comment parsing (Q: only)
+│       ├── parser.lua            # Comment parsing (Q: and C: modes)
 │       ├── context.lua           # Context extraction (full/adaptive)
 │       ├── lsp_context.lua       # LSP-based context (go-to-definition)
-│       ├── import_graph.lua      # Import graph analysis (NEW)
-│       ├── comment_writer.lua    # Insert responses as inline comments
-│       ├── prompts.lua           # Unified pedagogical prompt (bilingual)
+│       ├── import_graph.lua      # Import graph analysis
+│       ├── comment_writer.lua    # Insert responses (Q: as comments, C: as code)
+│       ├── prompts.lua           # Mode-specific prompts (Q: teach, C: generate)
 │       ├── provider.lua          # LLM API with inheritance + streaming
 │       ├── hints.lua             # 5-level progressive hints system
 │       ├── knowledge.lua         # Knowledge tracking (SQLite/JSON)
@@ -63,31 +72,37 @@ ai-editutor/
 
 ## Architecture Overview
 
-### Simplified Flow (v1.0)
+### Two-Mode Flow (v1.2)
 
 ```
-User writes: // Q: What is closure?
-                    │
-                    ▼
-┌─────────────────────────────────────────────────────────┐
-│ 1. Parse Q: comment                                     │
-│ 2. Check if already answered (A: below) → skip if yes  │
-│ 3. Extract context (LSP + BM25 + visual selection)     │
-│ 4. Build unified pedagogical prompt                    │
-│ 5. Send to LLM (Claude/OpenAI/Ollama/etc.)            │
-│ 6. Insert response as comment below question           │
-└─────────────────────────────────────────────────────────┘
-                    │
-                    ▼
-Result in code:
-    // Q: What is closure?
-    /*
-    A: A closure is a function that captures variables
-    from its enclosing scope...
-    */
+User writes: // Q: What is closure?     OR     // C: validate email function
+                    │                                      │
+                    ▼                                      ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 1. Parse Q:/C: comment and detect mode                                  │
+│ 2. Check if already answered → skip if yes                              │
+│ 3. Extract context (full project < 20K OR import graph + LSP)          │
+│ 4. Build mode-specific prompt (Q: pedagogical / C: code generation)    │
+│ 5. Stream to LLM (Claude/OpenAI/DeepSeek/etc.)                         │
+│ 6. Insert response based on mode                                        │
+└─────────────────────────────────────────────────────────────────────────┘
+                    │                                      │
+                    ▼                                      ▼
+Q: Result:                              C: Result:
+    // Q: What is closure?                  // C: validate email function
+    /*                                      
+    A: A closure is a function...           function validateEmail(email) {
+    - Best practice: ...                      const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    - Watch out: ...                          return regex.test(email);
+    - Learn more: ...                       }
+    */                                      /*
+                                            Notes:
+                                            - This uses a simplified regex...
+                                            - For production, consider...
+                                            */
 ```
 
-### Skip Answered Questions (NEW in v1.0)
+### Skip Answered Questions
 
 ```javascript
 function test() {
@@ -96,18 +111,21 @@ function test() {
   A: A closure is a function...
   */
 
+  // C: helper to format date  ← SKIPPED (code already generated below)
+  function formatDate(d) { ... }
+
   // Q: How does async work?   ← FOUND (unanswered)
   return 42;
 }
 ```
 
-The parser automatically detects A: responses (block comments, line comments) and skips questions that have already been answered.
+The parser automatically detects responses below Q:/C: comments and skips them.
 
-### Visual Selection Support (NEW in v1.0)
+### Visual Selection Support
 
 ```
 1. Select code block with visual mode (v or V)
-2. Write // Q: Explain this function within selection
+2. Write // Q: Explain this function (or // C: refactor this)
 3. Press <leader>ma
 4. Selected code is sent with "FOCUS ON THIS" label
 ```
@@ -163,34 +181,39 @@ Block comments are preferred when available.
 ## Key Files
 
 ### init.lua - Plugin Entry Point
-- Version: 1.0.0
+- Version: 1.2.0
 - Creates user commands (`:EduTutorAsk`, `:EduTutorHint`, etc.)
 - Sets up keymaps (normal mode + visual mode)
 - Main functions: `ask()`, `ask_visual()`, `ask_with_hints()`
 - Multi-language UI messages (English, Vietnamese)
+- Mode-aware processing (Q: vs C:)
 
-### parser.lua - Comment Parsing (Simplified in v1.0)
-- Only parses `Q:` or `q:` prefix (case insensitive)
-- `parse_line()` - Returns question string (not mode+question tuple)
-- `has_answer_below()` - Detects A: response below question
-- `find_query()` - Finds unanswered question, skips answered ones
+### parser.lua - Comment Parsing (Q: and C: modes)
+- Parses `Q:` (question) and `C:` (code) prefixes (case insensitive)
+- `parse_line()` - Returns `(question, mode)` tuple
+- `has_answer_below()` - Detects response below Q:/C: comment
+- `find_query()` - Finds unanswered query, skips answered ones
 - `get_visual_selection()` - Get visual selection range and content
-- `find_query_in_range()` - Find Q: within visual selection
+- `find_query_in_range()` - Find Q:/C: within visual selection
 
-### prompts.lua - Unified Pedagogical Prompt
-- Single system prompt that adapts to user's intent:
-  - "What is X?" → explain the concept
-  - "Review this" → give constructive feedback
-  - "Why doesn't this work?" → guide debugging
-  - "How do I..." → explain the approach
-  - "Socratic method" → ask guiding questions
-- `build_user_prompt()` - Accepts optional `selected_code` parameter
+### prompts.lua - Mode-Specific Prompts
+- **Q: mode (SYSTEM_PROMPT_QUESTION):**
+  - "Ask one, learn ten" philosophy
+  - Best practices, pitfalls, real-world examples
+  - Direct answer + why + watch out + learn more
+- **C: mode (SYSTEM_PROMPT_CODE):**
+  - Generate working code (not pseudocode)
+  - Match project's coding style
+  - Include notes block with caveats/alternatives
+- `get_system_prompt(mode)` - Returns prompt based on mode
 - Bilingual support (English, Vietnamese)
 
-### comment_writer.lua - Inline Comment Insertion
-- `get_style()` - Detect comment style for filetype
-- `format_response()` - Format response as block/line comments with A: prefix
-- `insert_or_replace()` - Replace existing response if present
+### comment_writer.lua - Response Insertion
+- **Q: mode:** Response as block/line comments with A: prefix
+- **C: mode:** Code inserted as-is + notes block
+- Streaming support:
+  - `start_streaming()`, `update_streaming()`, `finish_streaming()` - Q: mode
+  - `start_streaming_code()`, `update_streaming_code()`, `finish_streaming_code()` - C: mode
 - Supports 40+ languages
 
 ### hints.lua - 5-Level Progressive Hints
@@ -297,6 +320,39 @@ Supported comment styles:
 
 ---
 
+## C: Code Generation Mode
+
+Use `C:` prefix to generate code:
+
+```javascript
+// C: function to validate email with regex
+// C: async function to fetch user with retry logic
+// C: React hook for debouncing input
+// C: helper to deep clone an object
+
+// Lowercase also works
+// c: sort array by property
+```
+
+**Response format:**
+```javascript
+// C: function to validate email
+function validateEmail(email) {
+  const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return regex.test(email);
+}
+/*
+Notes:
+- This regex handles most common email formats
+- For strict validation, consider: validator.js library
+- Edge cases: + aliases, unicode domains
+*/
+```
+
+The code is inserted as actual executable code, followed by a notes comment block.
+
+---
+
 ## Code Style Guidelines
 
 ### Lua
@@ -369,6 +425,13 @@ See git history for details.
 - [x] Skip answered questions (Q: with A: below)
 - [x] Visual selection support
 - [x] Visual mode keymap
+
+### Phase 9: C: Mode + Streaming - COMPLETE (v1.2.0)
+- [x] Added C: code generation mode
+- [x] Mode-specific prompts (Q: teach, C: generate)
+- [x] Streaming support for both modes
+- [x] Import graph for adaptive context
+- [x] DeepSeek provider support
 
 ### Future Enhancements
 - [ ] Obsidian integration
