@@ -10,7 +10,6 @@ local context = require("editutor.context")
 local prompts = require("editutor.prompts")
 local provider = require("editutor.provider")
 local comment_writer = require("editutor.comment_writer")
-local hints = require("editutor.hints")
 local knowledge = require("editutor.knowledge")
 local conversation = require("editutor.conversation")
 local cache = require("editutor.cache")
@@ -40,9 +39,6 @@ M._messages = {
     export_failed = "Export failed: ",
     stats_title = "ai-editutor - Statistics",
     stats_total = "Total Q&A entries",
-    hint_level = "Hint level %d/%d",
-    hint_more = "Run :EduTutorHint again for more hints",
-    hint_final = "Final hint reached",
     conversation_continued = "Continuing conversation (%d messages)",
     conversation_new = "Starting new conversation",
     conversation_cleared = "Conversation cleared",
@@ -67,9 +63,6 @@ M._messages = {
     export_failed = "Xuat that bai: ",
     stats_title = "ai-editutor - Thong Ke",
     stats_total = "Tong so Q&A",
-    hint_level = "Goi y level %d/%d",
-    hint_more = "Chay :EduTutorHint lan nua de co them goi y",
-    hint_final = "Da den goi y cuoi cung",
     conversation_continued = "Tiep tuc hoi thoai (%d tin nhan)",
     conversation_new = "Bat dau hoi thoai moi",
     conversation_cleared = "Da xoa hoi thoai",
@@ -125,11 +118,6 @@ function M._create_commands()
   vim.api.nvim_create_user_command("EduTutorAsk", function()
     M.ask()
   end, { desc = "Ask ai-editutor (write // Q: your question first)" })
-
-  -- Hint command (progressive hints)
-  vim.api.nvim_create_user_command("EduTutorHint", function()
-    M.ask_with_hints()
-  end, { desc = "Get progressive hints (run multiple times for more detail)" })
 
   -- Knowledge commands
   vim.api.nvim_create_user_command("EduTutorHistory", function()
@@ -555,79 +543,6 @@ end
 
 -- =============================================================================
 -- HINTS FUNCTION
--- =============================================================================
-
----Ask with incremental hints (5 levels)
-function M.ask_with_hints()
-  local query = parser.find_query()
-
-  if not query then
-    vim.notify("[ai-editutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
-    return
-  end
-
-  local bufnr = vim.api.nvim_get_current_buf()
-  local filepath = vim.api.nvim_buf_get_name(0)
-  local cursor_line = query.line
-
-  loading.start(M._msg("gathering_context"))
-
-  context.extract(function(context_formatted, metadata)
-    -- Check if budget exceeded
-    if not context_formatted then
-      loading.stop()
-      vim.notify(string.format("[ai-editutor] " .. M._msg("context_budget_exceeded"),
-        metadata.total_tokens, metadata.budget), vim.log.levels.ERROR)
-      return
-    end
-
-    local session = hints.get_session(query.question, context_formatted)
-    local level = session.level + 1
-
-    loading.update(string.format("Getting hint level %d...", level))
-
-    hints.request_next_hint(session, function(response, hint_level, has_more, err)
-      loading.stop()
-
-      if err then
-        vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
-        return
-      end
-
-      if not response then
-        vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
-        return
-      end
-
-      -- Save to knowledge if final hint
-      if hint_level == hints.MAX_LEVEL then
-        knowledge.save({
-          mode = "question",
-          question = query.question,
-          answer = response,
-          language = vim.bo.filetype,
-          filepath = filepath,
-          tags = { "hint", "level-" .. hint_level },
-        })
-      end
-
-      -- Add hint level indicator
-      local hint_prefix = string.format("[Hint %d/%d - %s]\n",
-        hint_level, hints.MAX_LEVEL, hints.LEVEL_NAMES[hint_level] or "")
-      local full_response = hint_prefix .. response
-
-      comment_writer.insert_or_replace(full_response, query.line, bufnr)
-
-      local msg = has_more and M._msg("hint_more") or M._msg("hint_final")
-      vim.notify(string.format("[ai-editutor] " .. M._msg("hint_level") .. " - %s",
-        hint_level, hints.MAX_LEVEL, msg), vim.log.levels.INFO)
-    end)
-  end, {
-    current_file = filepath,
-    question_line = cursor_line,
-  })
-end
-
 -- =============================================================================
 -- KNOWLEDGE FUNCTIONS
 -- =============================================================================

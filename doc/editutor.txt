@@ -1,4 +1,4 @@
-*editutor.txt*  ai-editutor - Learn to code better with AI guidance
+*editutor.txt*  ai-editutor - Your coding companion for learning
 
 ==============================================================================
 CONTENTS                                                    *editutor-contents*
@@ -8,53 +8,41 @@ CONTENTS                                                    *editutor-contents*
     3. Installation .......................... |editutor-installation|
     4. Configuration ......................... |editutor-configuration|
     5. Usage ................................. |editutor-usage|
-    6. Skip Answered Questions ............... |editutor-skip-answered|
-    7. Visual Selection ...................... |editutor-visual|
-    8. Incremental Hints ..................... |editutor-hints|
-    9. Knowledge Tracking .................... |editutor-knowledge|
-   10. LSP Context ........................... |editutor-lsp-context|
-   11. Conversation Memory ................... |editutor-conversation|
+    6. Q: Mode ............................... |editutor-q-mode|
+    7. C: Mode ............................... |editutor-c-mode|
+    8. Visual Selection ...................... |editutor-visual|
+    9. Skip Answered ......................... |editutor-skip-answered|
+   10. Context Extraction .................... |editutor-context|
+   11. Knowledge Tracking .................... |editutor-knowledge|
    12. Commands .............................. |editutor-commands|
    13. Keymaps ............................... |editutor-keymaps|
    14. API ................................... |editutor-api|
-   15. Health Check .......................... |editutor-health|
 
 ==============================================================================
 1. INTRODUCTION                                         *editutor-introduction*
 
-ai-editutor is a Neovim plugin that acts as your personal coding mentor. Unlike
-code generation tools like GitHub Copilot, ai-editutor explains concepts and
-guides your learning instead of writing code for you.
+ai-editutor is a Neovim plugin that acts as your coding companion - like
+having a senior developer sitting next to you while you code.
 
-Philosophy: "Teach a person to fish, don't fish for them."
+When you have a quick question - about a concept, a bug, or need some code -
+you just ask inline and get a concise, context-aware answer. No context
+switching to browser or ChatGPT.
 
-v1.2.0 - Two Modes: Q: (Question) and C: (Code):
-  - Q: mode: Ask questions, get explanations (response as comment)
-  - C: mode: Generate code with notes (response as actual code)
-  - Skip answered: Q:/C: with response below are automatically skipped
-  - Visual selection: select code, write Q:/C:, get focused response
-  - Streaming: See response as it's generated
-  - Adaptive context: Full project (<20K) or import graph + LSP
+Philosophy:
+  "The goal isn't to code faster. It's to become a better developer."
+
+This plugin is NOT for shipping apps faster or meeting deadlines.
+It IS for learning while building real projects.
+
+Two Modes:
+  Q: (Question) - Ask questions, get explanations
+  C: (Code)     - Generate code with context
 
 Examples: >
-    // Q: What is closure?                    -> explains concept (comment)
-    // Q: Review this function                -> gives code review (comment)
-    // C: function to validate email          -> generates actual code
-    // C: async fetch with retry              -> production-ready code
+    // Q: What is closure?           -> explains the concept
+    // Q: Why does this return nil?  -> guides debugging
+    // C: validate email function    -> generates actual code
 <
-
-Features:
-  - Two modes: Q: (explain) and C: (generate code)
-  - Streaming responses
-  - Skip answered questions/requests
-  - Visual selection support
-  - 5-level progressive hints
-  - Adaptive context extraction (full project or import graph + LSP)
-  - Knowledge tracking (save and search Q&A history)
-  - LSP-based context (auto-fetches related definitions)
-  - Conversation memory (follow-up questions keep context)
-  - Multiple LLM providers (Claude, OpenAI, DeepSeek, Groq, Ollama, etc.)
-  - Multi-language support (English, Vietnamese)
 
 ==============================================================================
 2. REQUIREMENTS                                         *editutor-requirements*
@@ -65,15 +53,15 @@ Required:
   - An API key for Claude/OpenAI (or local Ollama)
 
 Recommended:
-  - LSP server for your language (for enhanced context extraction)
   - nvim-treesitter (for better code parsing)
+  - LSP server for your language (for enhanced context)
 
 ==============================================================================
 3. INSTALLATION                                         *editutor-installation*
 
 Using lazy.nvim: >lua
     {
-      "your-username/editutor",
+      "your-username/ai-editutor",
       dependencies = {
         "nvim-lua/plenary.nvim",
         "nvim-treesitter/nvim-treesitter",  -- Recommended
@@ -92,8 +80,7 @@ Using lazy.nvim: >lua
 Default configuration: >lua
     require("editutor").setup({
       -- LLM Provider
-      -- Options: claude, openai, deepseek, groq, together, openrouter, ollama
-      provider = "claude",
+      provider = "claude",  -- claude, openai, deepseek, groq, ollama
       model = "claude-sonnet-4-20250514",
 
       -- Behavior
@@ -104,7 +91,7 @@ Default configuration: >lua
         token_budget = 20000,  -- Max tokens for context
       },
 
-      -- Keymaps (works in normal and visual mode)
+      -- Keymaps
       keymaps = {
         ask = "<leader>ma",
       },
@@ -116,49 +103,87 @@ Default configuration: >lua
 
 Basic Usage:
 
-1. Write a comment with Q: prefix: >
-    // Q: What is the time complexity of this algorithm?
+1. Write a comment with Q: or C: prefix: >
+    // Q: What does this function do?
+    // C: helper to format date
 <
 
 2. Press <leader>ma (or your configured keymap)
 
-3. The explanation is inserted as a comment below: >
-    // Q: What is the time complexity of this algorithm?
+3. The response is inserted below:
+   - Q: mode -> response as comment block
+   - C: mode -> actual code + notes
+
+==============================================================================
+6. Q: MODE                                                   *editutor-q-mode*
+
+Use Q: prefix to ask questions. The response is inserted as a comment.
+
+Examples: >
+    // Q: What is closure?
+    // Q: Why does this return undefined?
+    // Q: Review this function for security issues
+    // Q: Explain async/await
+<
+
+Response format: >
+    // Q: What is closure?
     /*
-    A: This algorithm has O(n) time complexity because...
+    A: A closure is a function that "remembers" variables from its
+    outer scope even after that scope has finished executing.
+
+    Why it matters: Enables data privacy and callbacks.
+    Watch out: Accidental closures in loops.
     */
 <
 
-Express Your Intent Naturally:                               *editutor-intents*
+==============================================================================
+7. C: MODE                                                   *editutor-c-mode*
 
-The unified prompt adapts to your question: >
-    // Q: What is closure?                  -> explains concept
-    // Q: Review this function              -> gives code review
-    // Q: Debug: why does this return nil?  -> guides debugging
-    // Q: How can I improve this?           -> suggests improvements
-    // Q: Explain using Socratic method     -> asks guiding questions
+Use C: prefix to generate code. The response is inserted as actual code.
+
+Examples: >
+    // C: function to validate email
+    // C: async fetch with retry logic
+    // C: helper to deep clone object
 <
 
-Comment Style Detection:                                *editutor-comment-style*
-
-ai-editutor automatically uses the appropriate comment style:
-  - JS/TS/Go/Rust/C: /* block comment */
-  - Python: """ docstring """
-  - Lua/SQL: --[[ block ]]
-  - HTML/XML: <!-- comment -->
-  - Shell/YAML: # line comment
+Response format: >
+    // C: validate email
+    function validateEmail(email) {
+      const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      return regex.test(email);
+    }
+    /*
+    Notes:
+    - Simple regex for common formats
+    - For strict validation, consider validator.js
+    */
+<
 
 ==============================================================================
-6. SKIP ANSWERED QUESTIONS                             *editutor-skip-answered*
+8. VISUAL SELECTION                                          *editutor-visual*
 
-Questions that already have A: responses below are automatically skipped.
-This prevents re-asking questions that have already been answered.
+Select code and ask focused questions about it.
+
+Usage:
+  1. Enter visual mode (v or V)
+  2. Select the code block you want to focus on
+  3. Include a // Q: or // C: comment within the selection
+  4. Press <leader>ma
+
+The selected code is sent with priority focus in the prompt.
+
+==============================================================================
+9. SKIP ANSWERED                                       *editutor-skip-answered*
+
+Questions that already have responses below are automatically skipped.
 
 Example: >
     function test() {
-      // Q: What is closure?       <- SKIPPED (has A: below)
+      // Q: What is closure?       <- SKIPPED (has answer below)
       /*
-      A: A closure is a function...
+      A: A closure is...
       */
 
       // Q: How does async work?   <- FOUND (unanswered)
@@ -166,65 +191,24 @@ Example: >
     }
 <
 
-How It Works:
-  - Parser checks next 5 lines after Q: for A: patterns
-  - Supported A: formats:
-    - Block comments: /* A: ... */ or --[[ A: ... ]]
-    - Line comments: // A: ... or # A: ...
-  - If A: found, skips to find next unanswered Q:
+==============================================================================
+10. CONTEXT EXTRACTION                                      *editutor-context*
 
-Use |include_answered| parameter to override: >lua
-    parser.find_query(bufnr, line, true)  -- includes answered questions
-<
+ai-editutor automatically gathers context from your project:
+
+Small projects (<20K tokens):
+  - Sends entire codebase
+
+Large projects (>20K tokens):
+  - Current file (full)
+  - Import graph (files you import + files that import you)
+  - LSP definitions (deduplicated)
+  - Project structure tree
 
 ==============================================================================
-7. VISUAL SELECTION                                          *editutor-visual*
+11. KNOWLEDGE TRACKING                                     *editutor-knowledge*
 
-Select code and ask focused questions about it.
-
-Usage:
-  1. Enter visual mode (v or V)
-  2. Select the code block you want to focus on
-  3. Include a // Q: comment within the selection
-  4. Press <leader>ma
-
-The selected code is sent with "FOCUS ON THIS" priority in the prompt,
-with surrounding code as secondary context.
-
-Example: >
-    function calculate(a, b) {    <- Select from here
-      const result = a + b;
-      // Q: Explain this function <- Include Q: in selection
-      return result * 2;
-    }                             <- To here
-<
-
-Press <leader>ma in visual mode, and the AI will focus on explaining
-the selected code block.
-
-==============================================================================
-8. INCREMENTAL HINTS                                          *editutor-hints*
-
-The hints system provides progressive assistance in 5 levels:
-
-  Level 1: Conceptual - What concepts are relevant?
-  Level 2: Strategic - What approach to consider?
-  Level 3: Directional - Where in the code to look?
-  Level 4: Specific - What techniques to try?
-  Level 5: Solution - Complete answer with explanation
-
-Usage:
-  1. Write your question: // Q: How do I fix this bug?
-  2. Run :EduTutorHint (gets Level 1)
-  3. Run :EduTutorHint again (gets Level 2)
-  4. Keep running for more detailed hints
-
-Each hint level replaces the previous response in your code.
-
-==============================================================================
-9. KNOWLEDGE TRACKING                                      *editutor-knowledge*
-
-ai-editutor automatically saves all Q&A pairs for future reference.
+All Q&A pairs are automatically saved for future reference.
 
 Commands:
   :EduTutorHistory     Show recent Q&A history
@@ -232,41 +216,13 @@ Commands:
   :EduTutorExport      Export to markdown file
   :EduTutorStats       Show statistics
 
-Storage:
-  - JSON file: ~/.local/share/nvim/editutor_knowledge.json
-
-==============================================================================
-10. LSP CONTEXT                                          *editutor-lsp-context*
-
-ai-editutor automatically gathers context from your project using LSP.
-
-When you ask a question, it:
-  1. Extracts code around your cursor
-  2. Finds identifiers using Tree-sitter
-  3. Uses LSP go-to-definition to find where they're defined
-  4. Includes relevant definitions from other project files
-  5. Filters out library code
-
-==============================================================================
-11. CONVERSATION MEMORY                                 *editutor-conversation*
-
-ai-editutor remembers your conversation for follow-up questions.
-
-Session Rules:
-  - Same file + within 50 lines = continues session
-  - Different file = starts new session
-  - More than 30 min = starts new session
-
-Commands:
-  :EduTutorConversation       Show session info
-  :EduTutorClearConversation  Clear session
+Storage location: ~/.local/share/nvim/editutor_knowledge.json
 
 ==============================================================================
 12. COMMANDS                                                *editutor-commands*
 
 Core Commands:
   :EduTutorAsk            Ask about current Q:/C: comment
-  :EduTutorHint           Ask with progressive hints
 
 Knowledge Commands:
   :EduTutorHistory        Show Q&A history
@@ -279,15 +235,9 @@ Language Commands:
   :EduTutorLang English   English responses
   :EduTutorLang Vietnamese Vietnamese responses
 
-Conversation Commands:
-  :EduTutorConversation       Show session info
-  :EduTutorClearConversation  Clear session
-
 Other Commands:
   :EduTutorClearCache     Clear context cache
   :EduTutorLog            Open debug log
-
-Health:
   :checkhealth editutor   Check plugin health
 
 ==============================================================================
@@ -296,10 +246,10 @@ Health:
 Default keymaps (configurable):
 
   Normal mode:
-    <leader>ma    Ask about Q: at cursor
+    <leader>ma    Ask about Q:/C: at cursor
 
   Visual mode:
-    <leader>ma    Ask about selected code (with Q: in selection)
+    <leader>ma    Ask about selected code (with Q:/C: in selection)
 
 ==============================================================================
 14. API                                                          *editutor-api*
@@ -308,10 +258,9 @@ Main API: >lua
     local editutor = require("editutor")
 
     editutor.setup(opts)
-    editutor.ask()              -- Normal mode ask (Q: or C:)
+    editutor.ask()              -- Normal mode ask
     editutor.ask_visual()       -- Visual mode ask
-    editutor.ask_with_hints()   -- Progressive hints
-    editutor.version()          -- Returns "1.2.0"
+    editutor.version()          -- Returns version string
 <
 
 Parser API: >lua
@@ -319,39 +268,15 @@ Parser API: >lua
 
     -- Returns (question, mode) where mode is "question" or "code"
     parser.parse_line(line)
-    parser.has_answer_below(lines, line_num)  -- Check for response below
     parser.find_query(bufnr, line, include_answered)
-    parser.find_query_in_range(bufnr, start_line, end_line)
-    parser.get_visual_selection()     -- Get selection info
-    parser.find_all_queries(bufnr, include_answered)
+    parser.get_visual_selection()
 <
 
 Prompts API: >lua
     local prompts = require("editutor.prompts")
 
-    -- mode: "question" or "code"
-    prompts.get_system_prompt(mode)
+    prompts.get_system_prompt(mode)  -- mode: "question" or "code"
     prompts.build_user_prompt(question, context, _, selected_code)
-    prompts.get_hint_prompt(level)
-    prompts.get_language()
-<
-
-Comment Writer API: >lua
-    local comment_writer = require("editutor.comment_writer")
-
-    comment_writer.get_style(bufnr)
-    comment_writer.format_response(response, bufnr, line)
-    comment_writer.insert_or_replace(response, question_line, bufnr)
-<
-
-Knowledge API: >lua
-    local knowledge = require("editutor.knowledge")
-
-    knowledge.save({ mode, question, answer, language, filepath })
-    knowledge.search(query, limit)
-    knowledge.get_recent(limit)
-    knowledge.get_stats()
-    knowledge.export_markdown(filepath)
 <
 
 Provider API: >lua
@@ -359,23 +284,8 @@ Provider API: >lua
 
     provider.query_async(system, user, callback)
     provider.query_stream(system, user, on_chunk, on_done, opts)
-    provider.register_provider(name, config)
     provider.list_providers()
 <
-
-==============================================================================
-15. HEALTH CHECK                                              *editutor-health*
-
-Run health check to verify setup: >
-    :checkhealth editutor
-<
-
-This checks:
-  - Neovim version
-  - Required dependencies
-  - Provider configuration
-  - Database status
-  - Cache status
 
 ==============================================================================
 vim:tw=78:ts=8:ft=help:norl:

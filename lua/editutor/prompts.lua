@@ -187,46 +187,6 @@ Bạn là senior developer viết code họ thực sự sẽ ship.]],
 M.SYSTEM_PROMPT = M.SYSTEM_PROMPT_QUESTION
 
 -- =============================================================================
--- HINT PROMPTS (5 levels of progressive hints)
--- =============================================================================
-
-M.HINT_PROMPTS = {
-  en = {
-    [1] = [[Give a CONCEPTUAL hint (Level 1/5) - 2-3 sentences max.
-Mention 1-2 relevant concepts. Ask a guiding question. Don't explain how to apply.]],
-
-    [2] = [[Give a STRATEGIC hint (Level 2/5) - 3-4 sentences.
-Suggest an approach or pattern to investigate. Don't give specific solution.]],
-
-    [3] = [[Give a DIRECTIONAL hint (Level 3/5) - 4-5 sentences.
-Point to specific code location. Say what to look for, not the fix.]],
-
-    [4] = [[Give a SPECIFIC hint (Level 4/5) - Show technique with small example.
-Give pattern/pseudocode. Explain "why". Let them apply it.]],
-
-    [5] = [[Give FULL SOLUTION (Level 5/5) with explanation.
-Complete code, why it works, edge cases, what to learn next.]],
-  },
-
-  vi = {
-    [1] = [[Gợi ý KHÁI NIỆM (Level 1/5) - tối đa 2-3 câu.
-Đề cập 1-2 khái niệm liên quan. Đặt câu hỏi dẫn dắt. Không giải thích cách áp dụng.]],
-
-    [2] = [[Gợi ý CHIẾN LƯỢC (Level 2/5) - 3-4 câu.
-Gợi ý hướng tiếp cận hoặc pattern. Không cho giải pháp cụ thể.]],
-
-    [3] = [[Gợi ý ĐỊNH HƯỚNG (Level 3/5) - 4-5 câu.
-Chỉ vị trí code cụ thể. Nói cần tìm gì, không phải cách sửa.]],
-
-    [4] = [[Gợi ý CỤ THỂ (Level 4/5) - Cho kỹ thuật với ví dụ nhỏ.
-Cho pattern/pseudocode. Giải thích "tại sao". Để họ tự áp dụng.]],
-
-    [5] = [[GIẢI PHÁP ĐẦY ĐỦ (Level 5/5) với giải thích.
-Code hoàn chỉnh, tại sao hoạt động, edge cases, học gì tiếp.]],
-  },
-}
-
--- =============================================================================
 -- HELPER FUNCTIONS
 -- =============================================================================
 
@@ -310,15 +270,6 @@ function M.build_user_prompt(question, context_formatted, _, selected_code)
   table.insert(prompt_parts, question)
 
   return table.concat(prompt_parts, "\n")
-end
-
----Get a hint prompt for incremental hints system
----@param level number Hint level (1-5)
----@return string prompt
-function M.get_hint_prompt(level)
-  local lang = get_lang_key()
-  local hints = M.HINT_PROMPTS[lang] or M.HINT_PROMPTS.en
-  return hints[level] or hints[5]
 end
 
 ---Get current language setting

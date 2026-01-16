@@ -23,17 +23,15 @@ vim.api.nvim_create_user_command("EduTutor", function(opts)
 
   if subcommand == "" or subcommand == "ask" then
     editutor.ask()
-  elseif subcommand == "hint" then
-    editutor.ask_with_hints()
   elseif subcommand == "version" then
     vim.notify("ai-editutor v" .. editutor.version(), vim.log.levels.INFO)
   else
-    vim.notify("Unknown command: " .. subcommand .. ". Use :EduTutor ask or :EduTutor hint", vim.log.levels.ERROR)
+    vim.notify("Unknown command: " .. subcommand .. ". Use :EduTutor ask", vim.log.levels.ERROR)
   end
 end, {
   nargs = "?",
   complete = function()
-    return { "ask", "hint", "version" }
+    return { "ask", "version" }
   end,
   desc = "ai-editutor commands",
 })

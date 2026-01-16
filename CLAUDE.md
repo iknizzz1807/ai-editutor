@@ -5,9 +5,11 @@
 **ai-editutor** is a Neovim plugin that acts as a personal coding mentor - teaching developers through explanation rather than generating code automatically.
 
 ### Core Philosophy
-> "Teach a person to fish, don't fish for them."
+> "Like having a senior developer sitting next to you."
 
-Unlike GitHub Copilot which writes code for you, ai-editutor has **two intentional modes**:
+When you're coding and have a quick question - about a concept, a bug, or need some code - you just ask inline and get a concise, context-aware answer. No context switching to browser or ChatGPT.
+
+**Two intentional modes:**
 - **Q: (Question)** - Explains concepts deeply ("ask one, learn ten")
 - **C: (Code)** - Generates code with explanatory notes
 
@@ -47,8 +49,7 @@ ai-editutor/
 │       ├── comment_writer.lua    # Insert responses (Q: as comments, C: as code)
 │       ├── prompts.lua           # Mode-specific prompts (Q: teach, C: generate)
 │       ├── provider.lua          # LLM API with inheritance + streaming
-│       ├── hints.lua             # 5-level progressive hints system
-│       ├── knowledge.lua         # Knowledge tracking (SQLite/JSON)
+│       ├── knowledge.lua         # Knowledge tracking (JSON)
 │       ├── conversation.lua      # Session-based conversation memory
 │       ├── project_scanner.lua   # Project file scanning
 │       ├── cache.lua             # LRU cache with TTL + autocmd invalidation
@@ -181,9 +182,9 @@ Block comments are preferred when available.
 
 ### init.lua - Plugin Entry Point
 - Version: 1.2.0
-- Creates user commands (`:EduTutorAsk`, `:EduTutorHint`, etc.)
+- Creates user commands (`:EduTutorAsk`, etc.)
 - Sets up keymaps (normal mode + visual mode)
-- Main functions: `ask()`, `ask_visual()`, `ask_with_hints()`
+- Main functions: `ask()`, `ask_visual()`
 - Multi-language UI messages (English, Vietnamese)
 - Mode-aware processing (Q: vs C:)
 
@@ -214,14 +215,6 @@ Block comments are preferred when available.
   - `start_streaming()`, `update_streaming()`, `finish_streaming()` - Q: mode
   - `start_streaming_code()`, `update_streaming_code()`, `finish_streaming_code()` - C: mode
 - Supports 40+ languages
-
-### hints.lua - 5-Level Progressive Hints
-- Level 1: Conceptual - What concepts are relevant?
-- Level 2: Strategic - What approach to consider?
-- Level 3: Directional - Where in the code to look?
-- Level 4: Specific - What techniques to try?
-- Level 5: Solution - Complete answer with explanation
-- Mode parameter is ignored (backwards compatible)
 
 ### provider.lua - LLM API Client
 - Declarative provider definitions with inheritance
@@ -265,7 +258,6 @@ nvim --headless -u tests/minimal_init.lua -c "lua require('tests.comprehensive_t
 
 " Main commands
 :EduTutorAsk         " Ask (same as <leader>ma)
-:EduTutorHint        " Progressive hints (run multiple times for more detail)
 
 " Knowledge commands
 :EduTutorHistory     " Show Q&A history
