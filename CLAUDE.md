@@ -50,7 +50,6 @@ ai-editutor/
 │       ├── hints.lua             # 5-level progressive hints system
 │       ├── knowledge.lua         # Knowledge tracking (SQLite/JSON)
 │       ├── conversation.lua      # Session-based conversation memory
-│       ├── project_context.lua   # Project docs context
 │       ├── project_scanner.lua   # Project file scanning
 │       ├── cache.lua             # LRU cache with TTL + autocmd invalidation
 │       ├── loading.lua           # Loading indicator
@@ -283,11 +282,9 @@ nvim --headless -u tests/minimal_init.lua -c "lua require('tests.comprehensive_t
 :EduTutorConversation       " Show conversation info
 :EduTutorClearConversation  " Clear conversation
 
-" Indexer commands
-:EduTutorIndex        " Index project
-:EduTutorIndex!       " Force re-index
-:EduTutorIndexStats   " Show index statistics
+" Other commands
 :EduTutorClearCache   " Clear context cache
+:EduTutorLog          " Open debug log
 
 " Health check
 :checkhealth editutor
@@ -297,7 +294,7 @@ nvim --headless -u tests/minimal_init.lua -c "lua require('tests.comprehensive_t
 
 ## Comment Syntax (Simplified)
 
-Only `Q:` prefix is supported. Express your intent naturally in the question:
+Use `Q:` prefix for questions and `C:` prefix for code generation:
 
 ```javascript
 // Q: What is the time complexity of this algorithm?
@@ -376,8 +373,7 @@ dependencies = {
 ### Recommended
 ```lua
 dependencies = {
-  "nvim-treesitter/nvim-treesitter",  -- AST parsing, better chunking
-  "kkharji/sqlite.lua",               -- BM25 search, knowledge storage
+  "nvim-treesitter/nvim-treesitter",  -- AST parsing, better code context
 }
 ```
 

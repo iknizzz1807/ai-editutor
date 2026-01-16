@@ -373,6 +373,31 @@ local function make_request_sync(url, headers, body)
   return coroutine.yield()
 end
 
+---Get API key for current provider
+---Checks config.options.api_key first, then provider's default
+---@param provider table Provider configuration
+---@return string|nil api_key
+local function get_api_key(provider)
+  -- Check if user provided api_key in setup()
+  local config_key = config.options.api_key
+  if config_key then
+    if type(config_key) == "function" then
+      return config_key()
+    end
+    return config_key
+  end
+
+  -- Fall back to provider's default api_key function
+  if provider.api_key then
+    local ok, key = pcall(provider.api_key)
+    if ok then
+      return key
+    end
+  end
+
+  return nil
+end
+
 ---Send a query to the LLM (async version)
 ---@param system_prompt string System prompt
 ---@param user_message string User message
@@ -385,13 +410,7 @@ function M.query_async(system_prompt, user_message, callback)
   end
 
   -- Get API key
-  local api_key = nil
-  if provider.api_key then
-    local ok, key = pcall(provider.api_key)
-    if ok then
-      api_key = key
-    end
-  end
+  local api_key = get_api_key(provider)
 
   -- Check for required API key
   if provider.name ~= "ollama" and not api_key then
@@ -435,13 +454,7 @@ function M.query(system_prompt, user_message)
   end
 
   -- Get API key
-  local api_key = nil
-  if provider.api_key then
-    local ok, key = pcall(provider.api_key)
-    if ok then
-      api_key = key
-    end
-  end
+  local api_key = get_api_key(provider)
 
   -- Check for required API key
   if provider.name ~= "ollama" and not api_key then
@@ -474,14 +487,7 @@ function M.check_provider()
   end
 
   if provider.name ~= "ollama" then
-    local api_key = nil
-    if provider.api_key then
-      local ok, key = pcall(provider.api_key)
-      if ok then
-        api_key = key
-      end
-    end
-
+    local api_key = get_api_key(provider)
     if not api_key then
       return false, string.format("%s_API_KEY environment variable not set", provider.name:upper())
     end
@@ -605,13 +611,7 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
   end
 
   -- Get API key
-  local api_key = nil
-  if prov.api_key then
-    local ok, key = pcall(prov.api_key)
-    if ok then
-      api_key = key
-    end
-  end
+  local api_key = get_api_key(prov)
 
   -- Check for required API key
   if prov.name ~= "ollama" and not api_key then

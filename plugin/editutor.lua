@@ -1,5 +1,5 @@
 -- plugin/editutor.lua
--- ai-editutor - Plugin entry point for lazy loading
+-- ai-editutor v1.2.0 - Plugin entry point for lazy loading
 
 if vim.g.loaded_editutor then
   return
@@ -23,29 +23,17 @@ vim.api.nvim_create_user_command("EduTutor", function(opts)
 
   if subcommand == "" or subcommand == "ask" then
     editutor.ask()
-  elseif subcommand == "question" then
-    editutor.ask_mode("question")
-  elseif subcommand == "socratic" then
-    editutor.ask_mode("socratic")
-  elseif subcommand == "review" then
-    editutor.ask_mode("review")
-  elseif subcommand == "debug" then
-    editutor.ask_mode("debug")
-  elseif subcommand == "explain" then
-    editutor.ask_mode("explain")
-  elseif subcommand == "modes" then
-    editutor.show_modes()
-  elseif subcommand == "close" then
-    require("editutor.ui").close()
+  elseif subcommand == "hint" then
+    editutor.ask_with_hints()
   elseif subcommand == "version" then
     vim.notify("ai-editutor v" .. editutor.version(), vim.log.levels.INFO)
   else
-    vim.notify("Unknown command: " .. subcommand, vim.log.levels.ERROR)
+    vim.notify("Unknown command: " .. subcommand .. ". Use :EduTutor ask or :EduTutor hint", vim.log.levels.ERROR)
   end
 end, {
   nargs = "?",
   complete = function()
-    return { "ask", "question", "socratic", "review", "debug", "explain", "modes", "close", "version" }
+    return { "ask", "hint", "version" }
   end,
   desc = "ai-editutor commands",
 })

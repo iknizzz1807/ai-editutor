@@ -581,7 +581,7 @@ function M.ask_with_hints()
       return
     end
 
-    local session = hints.get_session(query.question, nil, context_formatted)
+    local session = hints.get_session(query.question, context_formatted)
     local level = session.level + 1
 
     loading.update(string.format("Getting hint level %d...", level))

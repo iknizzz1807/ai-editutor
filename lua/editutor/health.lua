@@ -57,7 +57,11 @@ function M.check()
   start("ai-editutor LLM Provider")
 
   local config = require("editutor.config")
-  local provider = config.get_provider()
+  local provider_mod = require("editutor.provider")
+
+  -- Use provider module to resolve provider (supports built-in + custom providers)
+  local provider_name = config.options.provider or "claude"
+  local provider = provider_mod.resolve_provider(provider_name)
 
   if provider then
     ok(string.format("Active provider: %s", provider.name))
@@ -65,11 +69,18 @@ function M.check()
 
     -- Check API key
     if provider.name ~= "ollama" then
-      local api_key = nil
-      if provider.api_key then
-        local key_ok, key = pcall(provider.api_key)
-        if key_ok then
-          api_key = key
+      -- Check config.options.api_key first, then provider default
+      local api_key = config.options.api_key
+      if api_key then
+        if type(api_key) == "function" then
+          api_key = api_key()
+        end
+      else
+        if provider.api_key then
+          local key_ok, key = pcall(provider.api_key)
+          if key_ok then
+            api_key = key
+          end
         end
       end
 
@@ -248,7 +259,10 @@ function M.check()
 
   -- Summary
   start("ai-editutor Quick Start")
-  info("Write: // Q: your question")
+  info("Two modes:")
+  info("  // Q: your question  - Explain, teach (response as comment)")
+  info("  // C: code desc      - Generate code (response as actual code)")
+  info("")
   info("Keymap: <leader>ma (or run :EduTutorAsk)")
   info("")
   info("Context modes:")
@@ -256,7 +270,7 @@ function M.check()
   info("  - ADAPTIVE: Import graph + LSP definitions for large projects")
   info("")
   info("Commands:")
-  info("  :EduTutorAsk      - Ask question")
+  info("  :EduTutorAsk      - Ask Q:/C: at cursor")
   info("  :EduTutorHint     - Get progressive hints")
   info("  :EduTutorLog      - Open debug log")
   info("  :EduTutorHistory  - View Q&A history")

@@ -46,10 +46,9 @@ end
 
 ---Get or create hint session
 ---@param question string
----@param _ any Ignored (backwards compat for mode)
 ---@param context string Formatted context
 ---@return HintSession
-function M.get_session(question, _, context)
+function M.get_session(question, context)
   local key = get_session_key(question)
 
   if not sessions[key] then
@@ -160,8 +159,7 @@ end
 
 ---Clear a specific session
 ---@param question string
----@param _ any Ignored
-function M.clear_session(question, _)
+function M.clear_session(question)
   local key = get_session_key(question)
   sessions[key] = nil
 end

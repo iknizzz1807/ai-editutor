@@ -28,26 +28,28 @@ guides your learning instead of writing code for you.
 
 Philosophy: "Teach a person to fish, don't fish for them."
 
-v1.0.0 - Simplified Q: Only Mode:
-  - ONE prefix to rule them all: just use Q: and express your intent naturally
-  - Skip answered questions: Q: with A: below are automatically skipped
-  - Visual selection support: select code, write Q:, get focused explanation
-  - Removed S/R/D/E modes - just use Q: with natural language
+v1.2.0 - Two Modes: Q: (Question) and C: (Code):
+  - Q: mode: Ask questions, get explanations (response as comment)
+  - C: mode: Generate code with notes (response as actual code)
+  - Skip answered: Q:/C: with response below are automatically skipped
+  - Visual selection: select code, write Q:/C:, get focused response
+  - Streaming: See response as it's generated
+  - Adaptive context: Full project (<20K) or import graph + LSP
 
 Examples: >
-    // Q: What is closure?                    -> explains concept
-    // Q: Review this function                -> gives code review
-    // Q: Debug: why does this return nil?    -> guides debugging
-    // Q: Explain using Socratic method       -> asks guiding questions
+    // Q: What is closure?                    -> explains concept (comment)
+    // Q: Review this function                -> gives code review (comment)
+    // C: function to validate email          -> generates actual code
+    // C: async fetch with retry              -> production-ready code
 <
 
 Features:
-  - Simplified Q: syntax (express intent naturally)
-  - Skip answered questions (Q: with A: below)
+  - Two modes: Q: (explain) and C: (generate code)
+  - Streaming responses
+  - Skip answered questions/requests
   - Visual selection support
   - 5-level progressive hints
-  - BM25 search via SQLite FTS5
-  - Multi-signal context ranking
+  - Adaptive context extraction (full project or import graph + LSP)
   - Knowledge tracking (save and search Q&A history)
   - LSP-based context (auto-fetches related definitions)
   - Conversation memory (follow-up questions keep context)
@@ -64,8 +66,7 @@ Required:
 
 Recommended:
   - LSP server for your language (for enhanced context extraction)
-  - nvim-treesitter (for AST-based code chunking)
-  - sqlite.lua (for BM25 search and knowledge persistence)
+  - nvim-treesitter (for better code parsing)
 
 ==============================================================================
 3. INSTALLATION                                         *editutor-installation*
@@ -76,7 +77,6 @@ Using lazy.nvim: >lua
       dependencies = {
         "nvim-lua/plenary.nvim",
         "nvim-treesitter/nvim-treesitter",  -- Recommended
-        "kkharji/sqlite.lua",               -- Recommended
       },
       config = function()
         require("editutor").setup({
@@ -99,17 +99,9 @@ Default configuration: >lua
       -- Behavior
       language = "English",  -- or "Vietnamese"
 
-      -- LSP Context extraction
+      -- Context extraction
       context = {
-        lines_around_cursor = 100,
-        external_context_lines = 30,
-        max_external_symbols = 20,
-      },
-
-      -- Indexer Settings
-      indexer = {
-        context_budget = 4000,
-        debounce_ms = 1000,
+        token_budget = 20000,  -- Max tokens for context
       },
 
       -- Keymaps (works in normal and visual mode)
@@ -241,8 +233,7 @@ Commands:
   :EduTutorStats       Show statistics
 
 Storage:
-  - SQLite (if sqlite.lua is installed)
-  - JSON fallback (~/.local/share/nvim/editutor_knowledge.json)
+  - JSON file: ~/.local/share/nvim/editutor_knowledge.json
 
 ==============================================================================
 10. LSP CONTEXT                                          *editutor-lsp-context*
@@ -274,7 +265,7 @@ Commands:
 12. COMMANDS                                                *editutor-commands*
 
 Core Commands:
-  :EduTutorAsk            Ask about current Q: comment
+  :EduTutorAsk            Ask about current Q:/C: comment
   :EduTutorHint           Ask with progressive hints
 
 Knowledge Commands:
@@ -282,12 +273,6 @@ Knowledge Commands:
   :EduTutorSearch [query] Search knowledge base
   :EduTutorExport [path]  Export to markdown
   :EduTutorStats          Show statistics
-
-Indexer Commands:
-  :EduTutorIndex          Index project for BM25 search
-  :EduTutorIndex!         Force re-index
-  :EduTutorIndexStats     Show indexer statistics
-  :EduTutorClearCache     Clear context cache
 
 Language Commands:
   :EduTutorLang           Show/set language
@@ -297,6 +282,10 @@ Language Commands:
 Conversation Commands:
   :EduTutorConversation       Show session info
   :EduTutorClearConversation  Clear session
+
+Other Commands:
+  :EduTutorClearCache     Clear context cache
+  :EduTutorLog            Open debug log
 
 Health:
   :checkhealth editutor   Check plugin health
@@ -319,17 +308,18 @@ Main API: >lua
     local editutor = require("editutor")
 
     editutor.setup(opts)
-    editutor.ask()              -- Normal mode ask
+    editutor.ask()              -- Normal mode ask (Q: or C:)
     editutor.ask_visual()       -- Visual mode ask
     editutor.ask_with_hints()   -- Progressive hints
-    editutor.version()          -- Returns "1.0.0"
+    editutor.version()          -- Returns "1.2.0"
 <
 
 Parser API: >lua
     local parser = require("editutor.parser")
 
-    parser.parse_line(line)           -- Returns question or nil
-    parser.has_answer_below(lines, line_num)  -- Check for A: below
+    -- Returns (question, mode) where mode is "question" or "code"
+    parser.parse_line(line)
+    parser.has_answer_below(lines, line_num)  -- Check for response below
     parser.find_query(bufnr, line, include_answered)
     parser.find_query_in_range(bufnr, start_line, end_line)
     parser.get_visual_selection()     -- Get selection info
@@ -339,7 +329,8 @@ Parser API: >lua
 Prompts API: >lua
     local prompts = require("editutor.prompts")
 
-    prompts.get_system_prompt()
+    -- mode: "question" or "code"
+    prompts.get_system_prompt(mode)
     prompts.build_user_prompt(question, context, _, selected_code)
     prompts.get_hint_prompt(level)
     prompts.get_language()

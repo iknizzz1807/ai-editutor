@@ -51,7 +51,7 @@ end
 ---@field question string User's question
 ---@field current_file string Current file path
 ---@field question_line number Line number
----@field mode string "full_project"|"lsp_selective"
+---@field mode string "full_project"|"adaptive"
 ---@field metadata table Context metadata
 ---@field system_prompt string System prompt sent to LLM
 ---@field user_prompt string Full user prompt sent to LLM
@@ -114,8 +114,14 @@ function M.log_request(request)
       table.insert(lines, string.format("[TREE]     Project structure (%d lines)",
         request.metadata.tree_structure_lines or 0))
 
-    elseif request.mode == "lsp_selective" then
-      -- LSP mode: list external definitions
+    elseif request.mode == "adaptive" then
+      -- Adaptive mode: import graph + LSP definitions
+      if request.metadata.import_graph_files then
+        for _, file in ipairs(request.metadata.import_graph_files) do
+          table.insert(lines, string.format("[IMPORT]   %s (%d lines, ~%d tokens)",
+            file.path, file.lines or 0, file.tokens or 0))
+        end
+      end
       if request.metadata.external_files then
         for _, file in ipairs(request.metadata.external_files) do
           local status = file.is_full and "full" or "truncated"

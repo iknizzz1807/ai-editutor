@@ -266,14 +266,6 @@ function M.remove_existing_response(question_line, bufnr)
 
   -- Remove the lines
   if end_remove > question_line then
-    -- Also remove the blank line before if we added one
-    local actual_start = question_line
-    if lines[question_line + 1] and lines[question_line + 1]:match("^%s*$") then
-      actual_start = question_line
-    else
-      actual_start = question_line
-    end
-
     vim.api.nvim_buf_set_lines(bufnr, question_line, end_remove, false, {})
     return end_remove - question_line
   end
