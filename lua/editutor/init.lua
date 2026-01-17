@@ -193,8 +193,8 @@ function M.ask()
   local bufnr = vim.api.nvim_get_current_buf()
   local cursor_line = query.line
 
-  -- Start loading
-  loading.start(M._msg("gathering_context"))
+  -- Start loading - bind to specific buffer and line
+  loading.start(M._msg("gathering_context"), bufnr, cursor_line - 1)
 
   -- Extract context (auto-selects full project or adaptive mode)
   context.extract(function(full_context, metadata)
@@ -236,10 +236,10 @@ function M._process_ask(query, filepath, bufnr, full_context, metadata)
   local system_prompt = prompts.get_system_prompt(mode)
   local user_prompt = prompts.build_user_prompt(query.question, full_context)
 
-  -- Get provider info
-  local provider_config = config.get_provider()
-  local provider_name = provider_config and provider_config.name or "unknown"
-  local model_name = config.options.model or (provider_config and provider_config.model) or "unknown"
+  -- Get provider info (use provider.get_info() which resolves inheritance)
+  local provider_info = provider.get_info()
+  local provider_name = provider_info.name or "unknown"
+  local model_name = provider_info.model or "unknown"
 
   -- Log request to debug file
   debug_log.log_request({
@@ -351,8 +351,8 @@ function M.ask_visual()
   local filepath = vim.api.nvim_buf_get_name(0)
   local bufnr = vim.api.nvim_get_current_buf()
 
-  -- Start loading
-  loading.start(M._msg("gathering_context"))
+  -- Start loading - bind to specific buffer and line
+  loading.start(M._msg("gathering_context"), bufnr, query.line - 1)
 
   -- The selected code becomes the primary context
   local selected_code = selection.text
@@ -391,10 +391,10 @@ function M._process_ask_visual(query, filepath, bufnr, full_context, selected_co
   local system_prompt = prompts.get_system_prompt(mode)
   local user_prompt = prompts.build_user_prompt(query.question, full_context, nil, selected_code)
 
-  -- Get provider info
-  local provider_config = config.get_provider()
-  local provider_name = provider_config and provider_config.name or "unknown"
-  local model_name = config.options.model or (provider_config and provider_config.model) or "unknown"
+  -- Get provider info (use provider.get_info() which resolves inheritance)
+  local provider_info = provider.get_info()
+  local provider_name = provider_info.name or "unknown"
+  local model_name = provider_info.model or "unknown"
 
   -- Log request
   debug_log.log_request({

@@ -11,6 +11,9 @@ M._spinner_idx = 1
 M._timer = nil
 M._extmark_id = nil
 M._namespace = vim.api.nvim_create_namespace("editutor_loading")
+-- Track the specific buffer and line where loading started
+M._target_bufnr = nil
+M._target_line = nil
 
 -- Spinner frames (braille pattern for smooth animation)
 M.SPINNERS = {
@@ -56,12 +59,25 @@ local function update_virtual_text()
     return
   end
 
-  -- Get current buffer and line
-  local bufnr = vim.api.nvim_get_current_buf()
-  local cursor = vim.api.nvim_win_get_cursor(0)
-  local line = cursor[1] - 1
+  -- Use the target buffer and line, not current cursor position
+  local bufnr = M._target_bufnr
+  local line = M._target_line
 
-  -- Clear previous extmark
+  -- Validate buffer is still valid
+  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+
+  -- Validate line is within buffer range
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  if line >= line_count then
+    line = line_count - 1
+  end
+  if line < 0 then
+    line = 0
+  end
+
+  -- Clear previous extmark in target buffer
   if M._extmark_id then
     pcall(vim.api.nvim_buf_del_extmark, bufnr, M._namespace, M._extmark_id)
   end
@@ -79,13 +95,13 @@ end
 
 ---Clear virtual text
 local function clear_virtual_text()
-  if M._extmark_id then
-    local bufnr = vim.api.nvim_get_current_buf()
-    pcall(vim.api.nvim_buf_del_extmark, bufnr, M._namespace, M._extmark_id)
-    M._extmark_id = nil
+  -- Clear extmark in target buffer
+  if M._extmark_id and M._target_bufnr and vim.api.nvim_buf_is_valid(M._target_bufnr) then
+    pcall(vim.api.nvim_buf_del_extmark, M._target_bufnr, M._namespace, M._extmark_id)
   end
+  M._extmark_id = nil
 
-  -- Also clear all extmarks in namespace (in case buffer changed)
+  -- Also clear all extmarks in namespace (cleanup any orphaned marks)
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
     if vim.api.nvim_buf_is_valid(buf) then
       pcall(vim.api.nvim_buf_clear_namespace, buf, M._namespace, 0, -1)
@@ -95,7 +111,9 @@ end
 
 ---Start loading indicator
 ---@param message? string Loading message
-function M.start(message)
+---@param bufnr? number Target buffer (defaults to current)
+---@param line? number Target line 0-indexed (defaults to cursor line)
+function M.start(message, bufnr, line)
   if M._active then
     M.stop()
   end
@@ -103,6 +121,15 @@ function M.start(message)
   M._active = true
   M._message = message or "Thinking..."
   M._spinner_idx = 1
+
+  -- Capture target buffer and line at start time
+  M._target_bufnr = bufnr or vim.api.nvim_get_current_buf()
+  if line then
+    M._target_line = line
+  else
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    M._target_line = cursor[1] - 1
+  end
 
   -- Start timer for animation
   M._timer = vim.fn.timer_start(M.config.interval_ms, function()
@@ -148,6 +175,11 @@ function M.stop()
   end
 
   clear_virtual_text()
+
+  -- Clear target tracking
+  M._target_bufnr = nil
+  M._target_line = nil
+
   vim.cmd("redrawstatus")
 end
 

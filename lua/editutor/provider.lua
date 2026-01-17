@@ -156,7 +156,9 @@ M.PROVIDERS = {
   gemini = {
     __inherited_from = "BASE_PROVIDER",
     name = "gemini",
+    -- Base URL template - streaming uses different endpoint
     url = "https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent",
+    streaming_url = "https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent",
     model = "gemini-2.0-flash-lite",
     headers = {
       ["content-type"] = "application/json",
@@ -164,10 +166,15 @@ M.PROVIDERS = {
     api_key = function()
       return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     end,
-    -- Gemini uses query param for API key, handled in build_url
+    -- Gemini uses query param for API key
     build_url = function(base_url, model, api_key)
       local url = base_url:gsub("%${model}", model)
       return url .. "?key=" .. api_key
+    end,
+    -- Streaming URL builder (uses alt=sse for SSE format)
+    build_streaming_url = function(streaming_url, model, api_key)
+      local url = streaming_url:gsub("%${model}", model)
+      return url .. "?alt=sse&key=" .. api_key
     end,
     format_request = function(data)
       return {
@@ -200,8 +207,9 @@ M.PROVIDERS = {
       end
       return "Unknown error"
     end,
-    -- Gemini streaming uses different format
     stream_enabled = true,
+    -- Gemini doesn't use stream=true in body, uses different endpoint
+    stream_in_body = false,
   },
 
   -- Ollama (local)
@@ -635,6 +643,23 @@ local function parse_sse_line(line, provider_name)
     elseif json.type == "message_stop" then
       return nil, true
     end
+  elseif provider_name == "gemini" then
+    -- Gemini SSE format: {"candidates":[{"content":{"parts":[{"text":"..."}]}}]}
+    if json.candidates and json.candidates[1] then
+      local content = json.candidates[1].content
+      if content and content.parts and content.parts[1] then
+        text = content.parts[1].text
+      end
+      -- Check for finishReason
+      local finish_reason = json.candidates[1].finishReason
+      if finish_reason and finish_reason == "STOP" then
+        return text, true
+      end
+    end
+    -- Check for error in stream
+    if json.error then
+      return nil, true
+    end
   elseif openai_compatible[provider_name] then
     -- OpenAI format: {"choices":[{"delta":{"content":"..."}}]}
     if json.choices and json.choices[1] and json.choices[1].delta then
@@ -687,10 +712,15 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
   local headers = build_headers(prov.headers, api_key)
   local model = config.options.model or prov.model
 
-  -- Build URL (some providers like Gemini need custom URL building)
-  local url = prov.url
-  if prov.build_url then
+  -- Build URL - Gemini uses different streaming endpoint
+  local url
+  if prov.build_streaming_url and prov.streaming_url then
+    -- Provider has dedicated streaming URL (e.g., Gemini)
+    url = prov.build_streaming_url(prov.streaming_url, model, api_key)
+  elseif prov.build_url then
     url = prov.build_url(prov.url, model, api_key)
+  else
+    url = prov.url
   end
 
   local request_body = prov.format_request({
@@ -700,8 +730,11 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
     message = user_message,
   })
 
-  -- Enable streaming (note: Gemini uses different streaming endpoint)
-  request_body.stream = true
+  -- Enable streaming in body (most providers except Gemini)
+  -- Gemini uses different endpoint instead of stream=true in body
+  if prov.stream_in_body ~= false then
+    request_body.stream = true
+  end
 
   -- Build curl command for streaming
   local header_args = {}
