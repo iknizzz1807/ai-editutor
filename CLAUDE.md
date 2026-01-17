@@ -376,6 +376,7 @@ dependencies = {
 M.PROVIDERS = {
   claude     = { ... },           -- Claude API (Anthropic)
   openai     = { ... },           -- OpenAI API
+  gemini     = { ... },           -- Google Gemini
   deepseek   = { __inherited_from = "openai", ... },  -- DeepSeek
   groq       = { __inherited_from = "openai", ... },  -- Groq
   together   = { __inherited_from = "openai", ... },  -- Together AI

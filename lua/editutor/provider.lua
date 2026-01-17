@@ -152,6 +152,58 @@ M.PROVIDERS = {
     end,
   },
 
+  -- Google Gemini
+  gemini = {
+    __inherited_from = "BASE_PROVIDER",
+    name = "gemini",
+    url = "https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent",
+    model = "gemini-2.0-flash-lite",
+    headers = {
+      ["content-type"] = "application/json",
+    },
+    api_key = function()
+      return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    end,
+    -- Gemini uses query param for API key, handled in build_url
+    build_url = function(base_url, model, api_key)
+      local url = base_url:gsub("%${model}", model)
+      return url .. "?key=" .. api_key
+    end,
+    format_request = function(data)
+      return {
+        contents = {
+          {
+            role = "user",
+            parts = { { text = data.message } },
+          },
+        },
+        systemInstruction = {
+          parts = { { text = data.system } },
+        },
+        generationConfig = {
+          maxOutputTokens = data.max_tokens or 4096,
+        },
+      }
+    end,
+    format_response = function(response)
+      if response.candidates and response.candidates[1] then
+        local content = response.candidates[1].content
+        if content and content.parts and content.parts[1] then
+          return content.parts[1].text
+        end
+      end
+      return nil
+    end,
+    format_error = function(response)
+      if response.error then
+        return response.error.message or response.error.status or "Unknown error"
+      end
+      return "Unknown error"
+    end,
+    -- Gemini streaming uses different format
+    stream_enabled = true,
+  },
+
   -- Ollama (local)
   ollama = {
     __inherited_from = "BASE_PROVIDER",
@@ -423,6 +475,12 @@ function M.query_async(system_prompt, user_message, callback)
   local headers = build_headers(provider.headers, api_key)
   local model = config.options.model or provider.model
 
+  -- Build URL (some providers like Gemini need custom URL building)
+  local url = provider.url
+  if provider.build_url then
+    url = provider.build_url(provider.url, model, api_key)
+  end
+
   local request_body = provider.format_request({
     model = model,
     max_tokens = 4096,
@@ -431,7 +489,7 @@ function M.query_async(system_prompt, user_message, callback)
   })
 
   -- Make request
-  make_request_async(provider.url, headers, request_body, function(response, err)
+  make_request_async(url, headers, request_body, function(response, err)
     if err then
       callback(nil, err)
       return
@@ -465,6 +523,12 @@ function M.query(system_prompt, user_message)
   local headers = build_headers(provider.headers, api_key)
   local model = config.options.model or provider.model
 
+  -- Build URL (some providers like Gemini need custom URL building)
+  local url = provider.url
+  if provider.build_url then
+    url = provider.build_url(provider.url, model, api_key)
+  end
+
   local request_body = provider.format_request({
     model = model,
     max_tokens = 4096,
@@ -473,7 +537,7 @@ function M.query(system_prompt, user_message)
   })
 
   -- Make request
-  local response = make_request_sync(provider.url, headers, request_body)
+  local response = make_request_sync(url, headers, request_body)
   return process_response(response, provider)
 end
 
@@ -623,6 +687,12 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
   local headers = build_headers(prov.headers, api_key)
   local model = config.options.model or prov.model
 
+  -- Build URL (some providers like Gemini need custom URL building)
+  local url = prov.url
+  if prov.build_url then
+    url = prov.build_url(prov.url, model, api_key)
+  end
+
   local request_body = prov.format_request({
     model = model,
     max_tokens = 4096,
@@ -630,7 +700,7 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
     message = user_message,
   })
 
-  -- Enable streaming
+  -- Enable streaming (note: Gemini uses different streaming endpoint)
   request_body.stream = true
 
   -- Build curl command for streaming
@@ -646,7 +716,7 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
     "--no-buffer",
     "-X",
     "POST",
-    prov.url,
+    url,
   }
 
   for _, h in ipairs(header_args) do

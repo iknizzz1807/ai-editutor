@@ -160,6 +160,7 @@ require("editutor").setup({
 |----------|---------------------|
 | Claude | `ANTHROPIC_API_KEY` |
 | OpenAI | `OPENAI_API_KEY` |
+| Gemini | `GEMINI_API_KEY` |
 | DeepSeek | `DEEPSEEK_API_KEY` |
 | Groq | `GROQ_API_KEY` |
 | Together | `TOGETHER_API_KEY` |
