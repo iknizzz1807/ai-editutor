@@ -289,8 +289,9 @@ function M.setup_error_hook()
   vim.notify = function(msg, level, opts)
     -- Only log ERROR level (not WARN) to prevent log spam
     if level == vim.log.levels.ERROR then
-      -- Only log editutor-related messages
-      if msg and (msg:match("editutor") or msg:match("EduTutor")) then
+      -- Only log messages FROM our plugin (starts with [ai-editutor])
+      -- This excludes errors from other plugins that happen to mention "editutor"
+      if msg and msg:match("^%[ai%-editutor%]") then
         -- Dedup: skip if same error logged recently
         local now = os.time()
         local last_logged = recent_errors[msg]
