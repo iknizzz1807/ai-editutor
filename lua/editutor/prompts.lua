@@ -17,6 +17,7 @@ M.SYSTEM_PROMPT_QUESTION = {
 IMPORTANT OUTPUT FORMAT:
 - Write PLAIN TEXT only - NO comment syntax (no //, no /*, no #, etc.)
 - The system will automatically wrap your response in the appropriate comment block
+- DO NOT repeat the user's question in your response
 - Keep it concise but RICH in knowledge. Quality over length.
 
 PHILOSOPHY: "Ask one, learn ten"
@@ -52,6 +53,7 @@ You're a senior developer mentor sharing real experience.]],
 QUAN TRỌNG - FORMAT OUTPUT:
 - Viết PLAIN TEXT - KHÔNG dùng comment syntax (không //, không /*, không #, etc.)
 - Hệ thống sẽ tự động bọc response trong comment block phù hợp
+- KHÔNG lặp lại câu hỏi của user trong response
 - Giữ ngắn gọn nhưng GIÀU kiến thức. Chất lượng hơn độ dài.
 
 TRIẾT LÝ: "Hỏi một, biết mười"
@@ -93,7 +95,8 @@ M.SYSTEM_PROMPT_CODE = {
 CRITICAL RULES:
 1. Generate ONLY the specific function/block requested - NOT the entire file
 2. Code will be inserted RIGHT AFTER the "// C:" line - write only what goes there
-3. If changes needed elsewhere (imports, config, other files), add a NOTES section explaining what to add where
+3. DO NOT repeat the user's request/description in your response
+4. If changes needed elsewhere (imports, config, other files), add a NOTES section explaining what to add where
 
 OUTPUT FORMAT:
 ```
@@ -129,7 +132,8 @@ You're writing code that slots into the exact location requested.]],
 QUY TẮC QUAN TRỌNG:
 1. Chỉ generate function/block được yêu cầu - KHÔNG viết lại cả file
 2. Code sẽ được chèn NGAY SAU dòng "// C:" - chỉ viết những gì cần ở đó
-3. Nếu cần thay đổi ở chỗ khác (imports, config, file khác), thêm phần NOTES giải thích cần thêm gì ở đâu
+3. KHÔNG lặp lại yêu cầu/mô tả của user trong response
+4. Nếu cần thay đổi ở chỗ khác (imports, config, file khác), thêm phần NOTES giải thích cần thêm gì ở đâu
 
 FORMAT OUTPUT:
 ```

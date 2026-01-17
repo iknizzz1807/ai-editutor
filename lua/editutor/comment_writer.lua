@@ -569,68 +569,12 @@ function M.insert_or_replace_code(response, question_line, bufnr)
   return M.insert_code_response(response, question_line, bufnr)
 end
 
----Remove existing code response after a C: line
+---Remove existing code response after a C: line (NOT USED - kept for compatibility)
 ---@param question_line number Line number of the C: comment (1-indexed)
 ---@param bufnr? number Buffer number
 ---@return number lines_removed
 function M.remove_existing_code_response(question_line, bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local total_lines = #lines
-
-  -- Start checking from the line after the C: comment
-  local start_remove = question_line + 1
-  if start_remove > total_lines then
-    return 0
-  end
-
-  -- Skip blank line if present
-  if lines[start_remove] and lines[start_remove]:match("^%s*$") then
-    start_remove = start_remove + 1
-  end
-
-  if start_remove > total_lines then
-    return 0
-  end
-
-  -- Find the end of the code response
-  -- Code response ends when we hit another Q: or C: comment, or end of file
-  local end_remove = start_remove - 1
-  local style = M.get_style(bufnr)
-
-  for i = start_remove, total_lines do
-    local line = lines[i]
-
-    -- Check if we hit a new Q: or C: comment (end of this response)
-    local is_new_query = false
-    if style.line then
-      local prefix = style.line:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
-      if line:match("^%s*" .. prefix .. "%s*[QqCc]:") then
-        is_new_query = true
-      end
-    end
-    if line:match("^%s*/%*%s*[QqCc]:") or line:match("^%s*<!%-%-%s*[QqCc]:") then
-      is_new_query = true
-    end
-
-    if is_new_query then
-      break
-    end
-
-    end_remove = i
-  end
-
-  -- Remove the lines (including the blank line before if present)
-  local actual_start = question_line
-  if lines[question_line + 1] and lines[question_line + 1]:match("^%s*$") then
-    actual_start = question_line
-  end
-
-  if end_remove >= start_remove then
-    vim.api.nvim_buf_set_lines(bufnr, question_line, end_remove, false, {})
-    return end_remove - question_line
-  end
-
+  -- Do nothing - just insert, don't remove anything
   return 0
 end
 
@@ -647,9 +591,6 @@ end
 ---@return StreamingStateCode state State object for updates
 function M.start_streaming_code(question_line, bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
-
-  -- Remove existing response first
-  M.remove_existing_code_response(question_line, bufnr)
 
   -- Get indentation from C: line
   local line_content = vim.api.nvim_buf_get_lines(bufnr, question_line - 1, question_line, false)[1]
@@ -703,7 +644,7 @@ function M.update_streaming_code(state, content)
     end
   end
 
-  -- Replace the code block
+  -- Replace the placeholder with actual content
   vim.api.nvim_buf_set_lines(
     state.bufnr,
     state.start_line,
