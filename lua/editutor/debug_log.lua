@@ -278,16 +278,26 @@ function M.log_error(source, error_msg, context)
   end
 end
 
----Setup vim.notify hook to catch all errors
+-- Track recently logged errors to prevent duplicates
+local recent_errors = {}
+local DEDUP_WINDOW_SEC = 60 -- Don't log same error within 60 seconds
+
+---Setup vim.notify hook to catch errors (not warnings)
 function M.setup_error_hook()
   local original_notify = vim.notify
   
   vim.notify = function(msg, level, opts)
-    -- Log errors and warnings
-    if level == vim.log.levels.ERROR or level == vim.log.levels.WARN then
+    -- Only log ERROR level (not WARN) to prevent log spam
+    if level == vim.log.levels.ERROR then
       -- Only log editutor-related messages
       if msg and (msg:match("editutor") or msg:match("EduTutor")) then
-        M.log_error("vim.notify", msg, { level = level, opts = opts })
+        -- Dedup: skip if same error logged recently
+        local now = os.time()
+        local last_logged = recent_errors[msg]
+        if not last_logged or (now - last_logged) > DEDUP_WINDOW_SEC then
+          recent_errors[msg] = now
+          M.log_error("vim.notify", msg, { level = level, opts = opts })
+        end
       end
     end
     
