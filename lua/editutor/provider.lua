@@ -756,128 +756,54 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
   table.insert(cmd, "-d")
   table.insert(cmd, vim.json.encode(request_body))
 
-  -- Streaming state with debounce
-  local full_response = {}
-  local buffer = ""
-  local pending_chunks = {}
-  local debounce_timer = nil
-  local stream_done = false
+  -- Use vim.system (Neovim 0.10+) as it's more reliable than jobstart
+  -- for capturing stdout from curl
+  local handle = vim.system(cmd, {}, function(obj)
+    vim.schedule(function()
+      if obj.code ~= 0 then
+        on_done(nil, "Request failed with code " .. obj.code .. ": " .. (obj.stderr or ""))
+        return
+      end
 
-  -- Debounced flush of pending chunks
-  local function flush_pending()
-    if #pending_chunks > 0 and not stream_done then
-      local batch = table.concat(pending_chunks, "")
-      pending_chunks = {}
+      if not obj.stdout or obj.stdout == "" then
+        on_done(nil, "No response received")
+        return
+      end
 
-      vim.schedule(function()
-        -- Call on_batch if provided (for batched UI updates)
+      -- Parse SSE response
+      local full_response = {}
+      for line in obj.stdout:gmatch("[^\n]+") do
+        local text, _ = parse_sse_line(line, prov.name)
+        if text then
+          table.insert(full_response, text)
+        end
+      end
+
+      local response_text = table.concat(full_response, "")
+      
+      if response_text ~= "" then
+        -- Call on_batch with full response for UI update
         if opts.on_batch then
-          opts.on_batch(batch, table.concat(full_response, ""))
+          opts.on_batch(response_text, response_text)
         else
-          on_chunk(batch)
+          on_chunk(response_text)
         end
-      end)
-    end
-  end
-
-  -- Schedule debounced flush
-  local function schedule_flush()
-    if debounce_timer then
-      vim.fn.timer_stop(debounce_timer)
-    end
-
-    debounce_timer = vim.fn.timer_start(debounce_ms, function()
-      flush_pending()
+        on_done(response_text, nil)
+      else
+        on_done(nil, "Failed to parse response")
+      end
     end)
-  end
+  end)
 
-  local job_id = vim.fn.jobstart(cmd, {
-    on_stdout = function(_, data, _)
-      if data then
-        for _, line in ipairs(data) do
-          -- Buffer incomplete lines
-          buffer = buffer .. line
-
-          -- Process complete lines
-          while true do
-            local newline_pos = buffer:find("\n")
-            if not newline_pos then
-              break
-            end
-
-            local complete_line = buffer:sub(1, newline_pos - 1)
-            buffer = buffer:sub(newline_pos + 1)
-
-            -- Parse SSE data
-            local text, done = parse_sse_line(complete_line, prov.name)
-
-            if text then
-              table.insert(full_response, text)
-              table.insert(pending_chunks, text)
-              schedule_flush()
-            end
-
-            if done then
-              stream_done = true
-              -- Final flush
-              if debounce_timer then
-                vim.fn.timer_stop(debounce_timer)
-              end
-              flush_pending()
-
-              vim.schedule(function()
-                on_done(table.concat(full_response, ""), nil)
-              end)
-              return
-            end
-          end
-        end
-      end
-    end,
-    on_stderr = function(_, data, _)
-      if data and data[1] ~= "" then
-        local err_msg = table.concat(data, "\n")
-        if err_msg ~= "" then
-          stream_done = true
-          vim.schedule(function()
-            on_done(nil, "Stream error: " .. err_msg)
-          end)
-        end
-      end
-    end,
-    on_exit = function(_, exit_code, _)
-      stream_done = true
-      if debounce_timer then
-        vim.fn.timer_stop(debounce_timer)
-      end
-      flush_pending()
-
-      vim.schedule(function()
-        if exit_code ~= 0 and #full_response == 0 then
-          on_done(nil, "Stream request failed with exit code: " .. exit_code)
-        elseif #full_response > 0 then
-          -- In case we didn't get a proper [DONE] signal
-          on_done(table.concat(full_response, ""), nil)
-        end
-      end)
-    end,
-    stdout_buffered = false,
-    stderr_buffered = false,
-  })
-
-  if job_id <= 0 then
-    on_done(nil, "Failed to start streaming request")
-  end
-
-  -- Return job_id for potential cancellation
-  return job_id
+  -- Return handle for potential cancellation (handle:kill() to cancel)
+  return handle
 end
 
 ---Cancel a streaming request
----@param job_id number Job ID from query_stream
-function M.cancel_stream(job_id)
-  if job_id and job_id > 0 then
-    vim.fn.jobstop(job_id)
+---@param handle any Handle from query_stream (vim.system handle)
+function M.cancel_stream(handle)
+  if handle and handle.kill then
+    handle:kill()
   end
 end
 
