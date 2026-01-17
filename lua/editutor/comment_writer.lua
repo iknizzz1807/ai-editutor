@@ -97,44 +97,93 @@ local function get_indent(line)
 end
 
 -- Default max line width for wrapping
-local MAX_LINE_WIDTH = 80
+local MAX_LINE_WIDTH = 100
 
----Wrap a single line to max width
+---Normalize text: collapse multiple spaces, join lines within same paragraph
+---@param text string Raw text from LLM
+---@return string[] paragraphs List of paragraphs (separated by blank lines)
+local function normalize_paragraphs(text)
+  local paragraphs = {}
+  local current_para = {}
+
+  for line in text:gmatch("[^\n]*") do
+    -- Trim whitespace
+    local trimmed = line:match("^%s*(.-)%s*$") or ""
+    
+    if trimmed == "" then
+      -- Blank line = paragraph break
+      if #current_para > 0 then
+        table.insert(paragraphs, table.concat(current_para, " "))
+        current_para = {}
+      end
+      -- Keep blank line as separator
+      table.insert(paragraphs, "")
+    else
+      -- Continue building paragraph
+      table.insert(current_para, trimmed)
+    end
+  end
+
+  -- Don't forget last paragraph
+  if #current_para > 0 then
+    table.insert(paragraphs, table.concat(current_para, " "))
+  end
+
+  return paragraphs
+end
+
+---Wrap text to max width
 ---@param text string Text to wrap
 ---@param max_width number Max characters per line
----@param prefix string Prefix for continuation lines (e.g., indent)
+---@param first_prefix string Prefix for first line
+---@param cont_prefix string Prefix for continuation lines
 ---@return string[] lines Wrapped lines
-local function wrap_line(text, max_width, prefix)
-  if #text <= max_width then
-    return { text }
+local function wrap_text(text, max_width, first_prefix, cont_prefix)
+  local full_text = first_prefix .. text
+  
+  if #full_text <= max_width then
+    return { full_text }
   end
 
   local lines = {}
-  local current_line = ""
-  
+  local words = {}
   for word in text:gmatch("%S+") do
-    local test_line = current_line == "" and word or (current_line .. " " .. word)
-    
+    table.insert(words, word)
+  end
+
+  local current_line = first_prefix
+  local is_first = true
+
+  for _, word in ipairs(words) do
+    local test_line = current_line == first_prefix and (current_line .. word)
+                      or (current_line .. " " .. word)
+
     if #test_line <= max_width then
       current_line = test_line
     else
-      if current_line ~= "" then
+      -- Line is full, save it
+      if current_line ~= first_prefix and current_line ~= cont_prefix then
         table.insert(lines, current_line)
       end
-      -- If single word is longer than max_width, just add it as-is
-      if #word > max_width then
-        table.insert(lines, prefix .. word)
-        current_line = ""
+      -- Start new line
+      local prefix = is_first and first_prefix or cont_prefix
+      is_first = false
+      
+      if #(cont_prefix .. word) > max_width then
+        -- Word itself is too long, just add it
+        table.insert(lines, cont_prefix .. word)
+        current_line = cont_prefix
       else
-        current_line = prefix .. word
+        current_line = cont_prefix .. word
       end
     end
   end
-  
-  if current_line ~= "" then
+
+  -- Add remaining content
+  if current_line ~= first_prefix and current_line ~= cont_prefix then
     table.insert(lines, current_line)
   end
-  
+
   return lines
 end
 
@@ -153,16 +202,15 @@ local function format_block_comment(response, style, indent)
   -- Content - prefix with A:
   table.insert(lines, indent .. "A:")
 
-  -- Calculate max width accounting for indent
-  local content_max_width = MAX_LINE_WIDTH - #indent
+  -- Normalize paragraphs (join lines within same paragraph)
+  local paragraphs = normalize_paragraphs(response)
 
-  -- Add response lines with wrapping
-  for line in response:gmatch("[^\n]*") do
-    if line == "" then
+  -- Add paragraphs with wrapping
+  for _, para in ipairs(paragraphs) do
+    if para == "" then
       table.insert(lines, "")
     else
-      -- Wrap long lines
-      local wrapped = wrap_line(indent .. line, MAX_LINE_WIDTH, indent)
+      local wrapped = wrap_text(para, MAX_LINE_WIDTH, indent, indent)
       for _, wrapped_line in ipairs(wrapped) do
         table.insert(lines, wrapped_line)
       end
@@ -185,22 +233,23 @@ local function format_line_comment(response, style, indent)
   local prefix = style.line .. " "
   local full_prefix = indent .. prefix
 
-  -- First line with A: prefix
+  -- Normalize paragraphs
+  local paragraphs = normalize_paragraphs(response)
+
+  -- First paragraph gets A: prefix
   local first = true
 
-  for line in response:gmatch("[^\n]*") do
-    if first then
-      local first_line = indent .. prefix .. "A: " .. line
-      local wrapped = wrap_line(first_line, MAX_LINE_WIDTH, full_prefix)
+  for _, para in ipairs(paragraphs) do
+    if para == "" then
+      table.insert(lines, full_prefix)
+    elseif first then
+      local wrapped = wrap_text("A: " .. para, MAX_LINE_WIDTH, full_prefix, full_prefix)
       for _, wrapped_line in ipairs(wrapped) do
         table.insert(lines, wrapped_line)
       end
       first = false
-    elseif line == "" then
-      table.insert(lines, full_prefix)
     else
-      local full_line = full_prefix .. line
-      local wrapped = wrap_line(full_line, MAX_LINE_WIDTH, full_prefix)
+      local wrapped = wrap_text(para, MAX_LINE_WIDTH, full_prefix, full_prefix)
       for _, wrapped_line in ipairs(wrapped) do
         table.insert(lines, wrapped_line)
       end
@@ -406,17 +455,19 @@ function M.update_streaming(state, content)
 
   local lines = {}
 
+  -- Normalize paragraphs
+  local paragraphs = normalize_paragraphs(content)
+
   if state.style.block then
     -- Block comment format
     table.insert(lines, state.indent .. state.style.block[1])
     table.insert(lines, state.indent .. "A:")
 
-    for line in content:gmatch("[^\n]*") do
-      if line == "" then
+    for _, para in ipairs(paragraphs) do
+      if para == "" then
         table.insert(lines, "")
       else
-        -- Wrap long lines
-        local wrapped = wrap_line(state.indent .. line, MAX_LINE_WIDTH, state.indent)
+        local wrapped = wrap_text(para, MAX_LINE_WIDTH, state.indent, state.indent)
         for _, wrapped_line in ipairs(wrapped) do
           table.insert(lines, wrapped_line)
         end
@@ -430,19 +481,17 @@ function M.update_streaming(state, content)
     local full_prefix = state.indent .. prefix
     local first = true
 
-    for line in content:gmatch("[^\n]*") do
-      if first then
-        local first_line = state.indent .. prefix .. "A: " .. line
-        local wrapped = wrap_line(first_line, MAX_LINE_WIDTH, full_prefix)
+    for _, para in ipairs(paragraphs) do
+      if para == "" then
+        table.insert(lines, full_prefix)
+      elseif first then
+        local wrapped = wrap_text("A: " .. para, MAX_LINE_WIDTH, full_prefix, full_prefix)
         for _, wrapped_line in ipairs(wrapped) do
           table.insert(lines, wrapped_line)
         end
         first = false
-      elseif line == "" then
-        table.insert(lines, full_prefix)
       else
-        local full_line = full_prefix .. line
-        local wrapped = wrap_line(full_line, MAX_LINE_WIDTH, full_prefix)
+        local wrapped = wrap_text(para, MAX_LINE_WIDTH, full_prefix, full_prefix)
         for _, wrapped_line in ipairs(wrapped) do
           table.insert(lines, wrapped_line)
         end
