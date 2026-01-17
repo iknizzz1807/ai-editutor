@@ -158,29 +158,26 @@ M.PROVIDERS = {
     name = "gemini",
     -- Base URL template - streaming uses different endpoint
     url = "https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent",
-    streaming_url = "https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent",
+    streaming_url = "https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse",
     model = "gemini-2.0-flash-lite",
     headers = {
       ["content-type"] = "application/json",
+      ["x-goog-api-key"] = "${api_key}",
     },
     api_key = function()
       return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     end,
-    -- Gemini uses query param for API key
-    build_url = function(base_url, model, api_key)
-      local url = base_url:gsub("%${model}", model)
-      return url .. "?key=" .. api_key
+    -- Gemini: just replace model in URL, API key goes in header
+    build_url = function(base_url, model, _api_key)
+      return base_url:gsub("%${model}", model)
     end,
-    -- Streaming URL builder (uses alt=sse for SSE format)
-    build_streaming_url = function(streaming_url, model, api_key)
-      local url = streaming_url:gsub("%${model}", model)
-      return url .. "?alt=sse&key=" .. api_key
+    build_streaming_url = function(streaming_url, model, _api_key)
+      return streaming_url:gsub("%${model}", model)
     end,
     format_request = function(data)
       return {
         contents = {
           {
-            role = "user",
             parts = { { text = data.message } },
           },
         },
