@@ -1,6 +1,6 @@
 -- editutor/init.lua
 -- ai-editutor - A Neovim plugin that teaches you to code better
--- v1.2.0: Two modes - Q: (question/explain) and C: (code generation)
+-- v2.0.0: Simplified - no Q:/C: prefix needed, LLM auto-detects intent
 
 local M = {}
 
@@ -10,20 +10,20 @@ local context = require("editutor.context")
 local prompts = require("editutor.prompts")
 local provider = require("editutor.provider")
 local comment_writer = require("editutor.comment_writer")
+local float_window = require("editutor.float_window")
 local knowledge = require("editutor.knowledge")
 local cache = require("editutor.cache")
 local loading = require("editutor.loading")
 local debug_log = require("editutor.debug_log")
-local project_scanner = require("editutor.project_scanner")
 
 M._name = "EduTutor"
-M._version = "1.2.0"
+M._version = "2.0.0"
 M._setup_called = false
 
 -- UI Messages for internationalization
 M._messages = {
   en = {
-    no_comment = "No query found. Write: // Q: question or // C: code description",
+    no_comment = "No comment found near cursor. Write a comment first.",
     thinking = "Thinking...",
     error = "Error: ",
     no_response = "No response received",
@@ -38,7 +38,7 @@ M._messages = {
     context_budget_exceeded = "Context exceeds budget (%d > %d tokens). Reduce scope or increase budget.",
   },
   vi = {
-    no_comment = "Khong tim thay query. Viet: // Q: cau hoi hoac // C: mo ta code",
+    no_comment = "Khong tim thay comment gan cursor. Viet comment truoc.",
     thinking = "Dang xu ly...",
     error = "Loi: ",
     no_response = "Khong nhan duoc phan hoi",
@@ -95,10 +95,15 @@ end
 
 ---Create user commands
 function M._create_commands()
-  -- Main command
+  -- Main command - ask about comment near cursor
   vim.api.nvim_create_user_command("EduTutorAsk", function()
     M.ask()
-  end, { desc = "Ask ai-editutor (write // Q: your question first)" })
+  end, { desc = "Ask ai-editutor about comment near cursor" })
+
+  -- Toggle float window for AI response
+  vim.api.nvim_create_user_command("EduTutorToggle", function()
+    float_window.toggle()
+  end, { desc = "Toggle AI response in float window" })
 
   -- Knowledge commands
   vim.api.nvim_create_user_command("EduTutorHistory", function()
@@ -161,8 +166,9 @@ end
 function M._setup_keymaps()
   local keymaps = config.options.keymaps
 
+  -- Ask keymap (normal mode + visual mode)
   if keymaps.ask then
-    -- Normal mode: ask about code at cursor
+    -- Normal mode: ask about comment at cursor
     vim.keymap.set("n", keymaps.ask, M.ask, { desc = "ai-editutor: Ask" })
     -- Visual mode: ask about selected code
     vim.keymap.set("v", keymaps.ask, function()
@@ -174,79 +180,79 @@ function M._setup_keymaps()
       end)
     end, { desc = "ai-editutor: Ask about selection" })
   end
+
+  -- Toggle float window keymap
+  if keymaps.toggle then
+    vim.keymap.set("n", keymaps.toggle, function()
+      float_window.toggle()
+    end, { desc = "ai-editutor: Toggle AI response" })
+  end
 end
 
 -- =============================================================================
 -- MAIN ASK FUNCTION
 -- =============================================================================
 
----Main ask function - find Q: comment and respond
+---Main ask function - find comment near cursor and respond
 function M.ask()
-  local query = parser.find_query()
+  local comment_info = parser.find_question_near_cursor()
 
-  if not query then
+  if not comment_info then
     vim.notify("[ai-editutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
     return
   end
 
   local filepath = vim.api.nvim_buf_get_name(0)
   local bufnr = vim.api.nvim_get_current_buf()
-  local cursor_line = query.line
+  local comment_line = comment_info.line_num
 
   -- Start loading - bind to specific buffer and line
-  loading.start(M._msg("gathering_context"), bufnr, cursor_line - 1)
+  loading.start(M._msg("gathering_context"), bufnr, comment_line - 1)
 
   -- Extract context (auto-selects full project or adaptive mode)
   context.extract(function(full_context, metadata)
     -- Check if budget exceeded (full_context is nil)
     if not full_context then
       loading.stop()
-      vim.notify(string.format("[ai-editutor] " .. M._msg("context_budget_exceeded"),
-        metadata.total_tokens, metadata.budget), vim.log.levels.ERROR)
+      vim.notify(
+        string.format("[ai-editutor] " .. M._msg("context_budget_exceeded"), metadata.total_tokens, metadata.budget),
+        vim.log.levels.ERROR
+      )
       return
     end
 
-    -- Log context mode
-    if metadata.mode == "full_project" then
-      vim.notify(string.format("[ai-editutor] " .. M._msg("context_mode_full"), metadata.total_tokens), vim.log.levels.INFO)
-    else
-      vim.notify(string.format("[ai-editutor] " .. M._msg("context_mode_adaptive"), metadata.total_tokens), vim.log.levels.INFO)
-    end
+    -- Log context mode (silent - only in debug)
+    debug_log.log("Context mode: " .. metadata.mode .. ", tokens: " .. metadata.total_tokens)
 
     loading.update(loading.states.connecting)
-    M._process_ask(query, filepath, bufnr, full_context, metadata)
+    M._process_ask(comment_info, filepath, bufnr, full_context, metadata)
   end, {
     current_file = filepath,
-    question_line = cursor_line,
+    question_line = comment_line,
   })
 end
 
 ---Process ask with context (streaming)
----@param query table
+---@param comment_info table { line_num, content, cursor_line }
 ---@param filepath string
 ---@param bufnr number
 ---@param full_context string
 ---@param metadata table
-function M._process_ask(query, filepath, bufnr, full_context, metadata)
-  -- Determine mode: "question" or "code"
-  local mode = query.mode or "question"
-  local is_code_mode = (mode == "code")
+function M._process_ask(comment_info, filepath, bufnr, full_context, metadata)
+  -- Build prompts (unified - LLM auto-detects intent)
+  local system_prompt = prompts.get_system_prompt()
+  local user_prompt = prompts.build_user_prompt(comment_info.content, full_context, comment_info.line_num)
 
-  -- Build prompts based on mode
-  local system_prompt = prompts.get_system_prompt(mode)
-  local user_prompt = prompts.build_user_prompt(query.question, full_context)
-
-  -- Get provider info (use provider.get_info() which resolves inheritance)
+  -- Get provider info
   local provider_info = provider.get_info()
   local provider_name = provider_info.name or "unknown"
   local model_name = provider_info.model or "unknown"
 
   -- Log request to debug file
   debug_log.log_request({
-    question = query.question,
+    comment = comment_info.content,
     current_file = metadata.current_file or filepath,
-    question_line = query.line,
-    mode = mode,
+    comment_line = comment_info.line_num,
     metadata = metadata,
     system_prompt = system_prompt,
     user_prompt = user_prompt,
@@ -254,13 +260,8 @@ function M._process_ask(query, filepath, bufnr, full_context, metadata)
     model = model_name,
   })
 
-  -- Start streaming - use appropriate function based on mode
-  local stream_state
-  if is_code_mode then
-    stream_state = comment_writer.start_streaming_code(query.line, bufnr)
-  else
-    stream_state = comment_writer.start_streaming(query.line, bufnr)
-  end
+  -- Start streaming
+  local stream_state = comment_writer.start_streaming(comment_info.line_num, bufnr)
   loading.update(loading.states.streaming)
   local start_time = vim.loop.hrtime()
 
@@ -273,13 +274,7 @@ function M._process_ask(query, filepath, bufnr, full_context, metadata)
     -- on_done
     function(response, err)
       loading.stop()
-
-      -- Finish streaming based on mode
-      if is_code_mode then
-        comment_writer.finish_streaming_code(stream_state)
-      else
-        comment_writer.finish_streaming(stream_state)
-      end
+      comment_writer.finish_streaming(stream_state)
 
       local duration_ms = math.floor((vim.loop.hrtime() - start_time) / 1000000)
 
@@ -302,8 +297,7 @@ function M._process_ask(query, filepath, bufnr, full_context, metadata)
 
       -- Save to knowledge
       knowledge.save({
-        mode = mode,
-        question = query.question,
+        question = comment_info.content,
         answer = response,
         language = vim.bo.filetype,
         filepath = filepath,
@@ -315,12 +309,7 @@ function M._process_ask(query, filepath, bufnr, full_context, metadata)
     {
       debounce_ms = 50,
       on_batch = function(_, full_response_so_far)
-        -- Update streaming based on mode
-        if is_code_mode then
-          comment_writer.update_streaming_code(stream_state, full_response_so_far)
-        else
-          comment_writer.update_streaming(stream_state, full_response_so_far)
-        end
+        comment_writer.update_streaming(stream_state, full_response_so_far)
       end,
     }
   )
@@ -339,11 +328,11 @@ function M.ask_visual()
     return
   end
 
-  -- Find Q:/C: comment within selection range
-  local query = parser.find_query_in_range(nil, selection.start_line, selection.end_line)
+  -- Find comment within or near selection
+  local comment_info = parser.find_question_near_cursor()
 
-  if not query then
-    -- No Q:/C: found in selection - prompt user to write one
+  if not comment_info then
+    -- No comment found - prompt user to write one
     vim.notify("[ai-editutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
     return
   end
@@ -352,7 +341,7 @@ function M.ask_visual()
   local bufnr = vim.api.nvim_get_current_buf()
 
   -- Start loading - bind to specific buffer and line
-  loading.start(M._msg("gathering_context"), bufnr, query.line - 1)
+  loading.start(M._msg("gathering_context"), bufnr, comment_info.line_num - 1)
 
   -- The selected code becomes the primary context
   local selected_code = selection.text
@@ -362,46 +351,43 @@ function M.ask_visual()
     -- Check if budget exceeded
     if not full_context then
       loading.stop()
-      vim.notify(string.format("[ai-editutor] " .. M._msg("context_budget_exceeded"),
-        metadata.total_tokens, metadata.budget), vim.log.levels.ERROR)
+      vim.notify(
+        string.format("[ai-editutor] " .. M._msg("context_budget_exceeded"), metadata.total_tokens, metadata.budget),
+        vim.log.levels.ERROR
+      )
       return
     end
 
     loading.update(loading.states.connecting)
-    M._process_ask_visual(query, filepath, bufnr, full_context, selected_code, metadata)
+    M._process_ask_visual(comment_info, filepath, bufnr, full_context, selected_code, metadata)
   end, {
     current_file = filepath,
-    question_line = query.line,
+    question_line = comment_info.line_num,
   })
 end
 
 ---Process visual ask with selected code (streaming)
----@param query table
+---@param comment_info table
 ---@param filepath string
 ---@param bufnr number
 ---@param full_context string
 ---@param selected_code string
 ---@param metadata table
-function M._process_ask_visual(query, filepath, bufnr, full_context, selected_code, metadata)
-  -- Determine mode: "question" or "code"
-  local mode = query.mode or "question"
-  local is_code_mode = (mode == "code")
+function M._process_ask_visual(comment_info, filepath, bufnr, full_context, selected_code, metadata)
+  -- Build prompts with selected code
+  local system_prompt = prompts.get_system_prompt()
+  local user_prompt = prompts.build_user_prompt(comment_info.content, full_context, comment_info.line_num, selected_code)
 
-  -- Build prompts with selected code based on mode
-  local system_prompt = prompts.get_system_prompt(mode)
-  local user_prompt = prompts.build_user_prompt(query.question, full_context, nil, selected_code)
-
-  -- Get provider info (use provider.get_info() which resolves inheritance)
+  -- Get provider info
   local provider_info = provider.get_info()
   local provider_name = provider_info.name or "unknown"
   local model_name = provider_info.model or "unknown"
 
   -- Log request
   debug_log.log_request({
-    question = query.question .. " [with visual selection]",
+    comment = comment_info.content .. " [with visual selection]",
     current_file = metadata.current_file or filepath,
-    question_line = query.line,
-    mode = mode,
+    comment_line = comment_info.line_num,
     metadata = metadata,
     system_prompt = system_prompt,
     user_prompt = user_prompt,
@@ -409,13 +395,8 @@ function M._process_ask_visual(query, filepath, bufnr, full_context, selected_co
     model = model_name,
   })
 
-  -- Start streaming - use appropriate function based on mode
-  local stream_state
-  if is_code_mode then
-    stream_state = comment_writer.start_streaming_code(query.line, bufnr)
-  else
-    stream_state = comment_writer.start_streaming(query.line, bufnr)
-  end
+  -- Start streaming
+  local stream_state = comment_writer.start_streaming(comment_info.line_num, bufnr)
   loading.update(loading.states.streaming)
   local start_time = vim.loop.hrtime()
 
@@ -428,13 +409,7 @@ function M._process_ask_visual(query, filepath, bufnr, full_context, selected_co
     -- on_done
     function(response, err)
       loading.stop()
-
-      -- Finish streaming based on mode
-      if is_code_mode then
-        comment_writer.finish_streaming_code(stream_state)
-      else
-        comment_writer.finish_streaming(stream_state)
-      end
+      comment_writer.finish_streaming(stream_state)
 
       local duration_ms = math.floor((vim.loop.hrtime() - start_time) / 1000000)
 
@@ -457,8 +432,7 @@ function M._process_ask_visual(query, filepath, bufnr, full_context, selected_co
 
       -- Save to knowledge
       knowledge.save({
-        mode = mode,
-        question = query.question,
+        question = comment_info.content,
         answer = response,
         language = vim.bo.filetype,
         filepath = filepath,
@@ -470,19 +444,21 @@ function M._process_ask_visual(query, filepath, bufnr, full_context, selected_co
     {
       debounce_ms = 50,
       on_batch = function(_, full_response_so_far)
-        -- Update streaming based on mode
-        if is_code_mode then
-          comment_writer.update_streaming_code(stream_state, full_response_so_far)
-        else
-          comment_writer.update_streaming(stream_state, full_response_so_far)
-        end
+        comment_writer.update_streaming(stream_state, full_response_so_far)
       end,
     }
   )
 end
 
 -- =============================================================================
--- HINTS FUNCTION
+-- FLOAT WINDOW
+-- =============================================================================
+
+---Toggle float window for AI response
+function M.toggle_float()
+  float_window.toggle()
+end
+
 -- =============================================================================
 -- KNOWLEDGE FUNCTIONS
 -- =============================================================================
@@ -553,12 +529,12 @@ function M.browse_knowledge(date)
   local lines = {
     string.format("Knowledge for %s", date),
     string.format("%d entries", #entries),
-    string.rep("=", 40), "",
+    string.rep("=", 40),
+    "",
   }
 
   for i, entry in ipairs(entries) do
-    local mode_label = (entry.mode == "code") and "C" or "Q"
-    table.insert(lines, string.format("%d. [%s] %s", i, mode_label, entry.question:sub(1, 60)))
+    table.insert(lines, string.format("%d. %s", i, entry.question:sub(1, 60)))
     if entry.language then
       table.insert(lines, string.format("   Language: %s", entry.language))
     end
@@ -581,8 +557,12 @@ function M.set_language(lang)
   end
 
   local valid = {
-    ["English"] = "English", ["english"] = "English", ["en"] = "English",
-    ["Vietnamese"] = "Vietnamese", ["vietnamese"] = "Vietnamese", ["vi"] = "Vietnamese",
+    ["English"] = "English",
+    ["english"] = "English",
+    ["en"] = "English",
+    ["Vietnamese"] = "Vietnamese",
+    ["vietnamese"] = "Vietnamese",
+    ["vi"] = "Vietnamese",
   }
 
   local normalized = valid[lang]

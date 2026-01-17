@@ -15,7 +15,7 @@ You could switch to ChatGPT. Open a browser. Lose your flow. Copy context back a
 Or you could just ask. Right here. Right now. In your code.
 
 ```javascript
-// Q: What is closure?
+// What is closure?
 ```
 
 Press `<leader>ma`. Get an answer. Keep building.
@@ -32,52 +32,48 @@ This is about the moments when you're building something and you think *"wait, I
 
 Every question you ask is a chance to level up. Every answer stays in your codebase as a note to your future self.
 
-## Two Modes
+## v2.0 - No Prefix Needed
 
-### Q: Question - Learn deeply
-
-Ask anything. Get explanations that stick.
-
-```python
-# Q: What does this regex actually do?
-pattern = r'^(?=.*[A-Z])(?=.*\d).{8,}$'
-#
-# A: This regex validates password strength:
-# - (?=.*[A-Z]) - requires at least one uppercase letter
-# - (?=.*\d) - requires at least one digit
-# - .{8,} - requires minimum 8 characters
-#
-# The ^ and $ anchors ensure the entire string is checked.
-# Lookaheads (?=...) check conditions without consuming characters.
-#
-# Watch out: This won't catch weak passwords like "Aaaaaaaa1"
-# Consider: Adding special character requirement, or use zxcvbn library
-```
-
-### C: Code - Generate with understanding
-
-Need code? Get working code + notes on what matters.
+Just write a comment. The AI figures out what you want.
 
 ```javascript
-// C: debounce function with cancel
-function debounce(fn, delay) {
-  let timeoutId;
-  
-  const debounced = (...args) => {
-    clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => fn(...args), delay);
-  };
-  
-  debounced.cancel = () => clearTimeout(timeoutId);
-  return debounced;
+// What is closure?                    -> AI explains
+// function to validate email          -> AI generates code
+// Review this for security issues     -> AI reviews
+// Why does this return nil?           -> AI debugs
+```
+
+All responses use the `/* [AI] ... */` format - easy to identify and edit.
+
+### Example
+
+```javascript
+// What is a closure?
+/* [AI]
+A closure is a function that "remembers" variables from its outer scope
+even after that scope has finished executing.
+
+Example:
+function counter() {
+  let count = 0;
+  return () => ++count;
 }
-/*
-Notes:
-- Returns a wrapper that delays execution until delay ms of inactivity
-- .cancel() lets you abort pending calls (useful for cleanup)
-- Consider: lodash.debounce for leading/trailing options
+const inc = counter();
+inc(); // 1
+inc(); // 2
+
+Best practice: Use for data privacy, callbacks, and factory functions.
+Watch out: Can cause memory leaks if holding references to large objects.
 */
 ```
+
+### Float Window
+
+Press `<leader>mt` to open the AI response in a floating window:
+- Syntax highlighting (markdown)
+- Editable - make changes directly
+- `<C-s>` or `:w` to save changes back to source file
+- `q` or `<Esc>` to close without saving
 
 ## Quick Start
 
@@ -86,11 +82,11 @@ Notes:
 ```lua
 -- lazy.nvim
 {
-  "your-username/ai-editutor",
+  "iknizzz1807/ai-editutor",
   dependencies = { "nvim-lua/plenary.nvim" },
   config = function()
     require("editutor").setup({
-      provider = "claude",  -- or openai, deepseek, ollama
+      provider = "claude",  -- or openai, deepseek, gemini, ollama
     })
   end,
 }
@@ -102,10 +98,10 @@ Notes:
 export ANTHROPIC_API_KEY="your-key"
 ```
 
-**3. Write a question in your code**
+**3. Write a comment in your code**
 
 ```javascript
-// Q: Why would I use Map instead of a plain object?
+// Why would I use Map instead of a plain object?
 ```
 
 **4. Press `<leader>ma`**
@@ -113,6 +109,26 @@ export ANTHROPIC_API_KEY="your-key"
 Answer appears as a comment. You keep coding. You keep learning.
 
 ## Features
+
+### No Prefix Needed
+Just write natural comments. The AI auto-detects your intent:
+- Questions get explanations
+- Code requests get working code
+- Review requests get feedback
+
+### [AI] Marker
+All responses are marked with `[AI]` - easy to identify, search, and manage:
+```javascript
+/* [AI]
+This is an AI response...
+*/
+```
+
+### Float Window Toggle
+Press `<leader>mt` to view/edit responses in a floating window:
+- Markdown syntax highlighting
+- Editable buffer
+- Sync changes back to source file
 
 ### Context-Aware
 Your questions get answered with full project context:
@@ -123,10 +139,13 @@ Your questions get answered with full project context:
 Select confusing code, ask about it:
 ```
 1. Visual select a code block
-2. Add: // Q: What does this do?
+2. Add: // What does this do?
 3. <leader>ma
 ```
 The AI focuses on your selection.
+
+### Skip Answered
+Comments that already have an `[AI]` response below are automatically skipped.
 
 ### Knowledge That Stays
 Every Q&A is saved by date. Review your learning history:
@@ -140,7 +159,7 @@ Every Q&A is saved by date. Review your learning history:
 
 ```lua
 require("editutor").setup({
-  provider = "claude",           -- claude, openai, deepseek, groq, ollama
+  provider = "claude",           -- claude, openai, deepseek, gemini, groq, ollama
   model = "claude-sonnet-4-20250514",
   language = "English",          -- or "Vietnamese"
   
@@ -149,7 +168,8 @@ require("editutor").setup({
   },
   
   keymaps = {
-    ask = "<leader>ma",
+    ask = "<leader>ma",          -- Ask about comment
+    toggle = "<leader>mt",       -- Toggle float window
   },
 })
 ```
@@ -171,11 +191,20 @@ require("editutor").setup({
 
 | Command | What it does |
 |---------|-------------|
-| `:EduTutorAsk` | Process Q:/C: at cursor |
+| `:EduTutorAsk` | Ask about comment near cursor |
+| `:EduTutorToggle` | Toggle AI response in float window |
 | `:EduTutorHistory` | Recent Q&A history |
 | `:EduTutorBrowse` | Browse by date |
 | `:EduTutorExport` | Export to markdown |
 | `:EduTutorLang` | Switch language |
+
+## Keymaps
+
+| Keymap | Mode | What it does |
+|--------|------|-------------|
+| `<leader>ma` | Normal | Ask about comment near cursor |
+| `<leader>ma` | Visual | Ask about selected code |
+| `<leader>mt` | Normal | Toggle AI response in float window |
 
 ---
 

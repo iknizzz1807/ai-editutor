@@ -15,6 +15,7 @@ local M = {}
 
 ---@class EditutorKeymaps
 ---@field ask string Trigger mentor ask
+---@field toggle string Toggle AI response in float window
 
 ---@class EditutorContextConfig
 ---@field token_budget number Max tokens for context (default 20000)
@@ -44,7 +45,8 @@ M.defaults = {
 
   -- Keymaps
   keymaps = {
-    ask = "<leader>ma",
+    ask = "<leader>ma",      -- Ask AI about comment near cursor
+    toggle = "<leader>mt",   -- Toggle AI response in float window
   },
 
   -- Custom provider overrides (built-in providers are in provider.lua)

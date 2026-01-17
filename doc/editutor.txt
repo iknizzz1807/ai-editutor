@@ -8,8 +8,8 @@ CONTENTS                                                    *editutor-contents*
     3. Installation .......................... |editutor-installation|
     4. Configuration ......................... |editutor-configuration|
     5. Usage ................................. |editutor-usage|
-    6. Q: Mode ............................... |editutor-q-mode|
-    7. C: Mode ............................... |editutor-c-mode|
+    6. Response Format ....................... |editutor-response|
+    7. Float Window .......................... |editutor-float-window|
     8. Visual Selection ...................... |editutor-visual|
     9. Skip Answered ......................... |editutor-skip-answered|
    10. Context Extraction .................... |editutor-context|
@@ -28,21 +28,21 @@ ai-editutor is a Neovim plugin for developers who learn by building.
 You're building something real. You have questions. Instead of breaking
 your flow to search Stack Overflow or switch to ChatGPT, you ask right
 here in your code: >
-    // Q: What is closure?
+    // What is closure?
 <
 Press <leader>ma. Get an answer. Keep building. Keep learning.
 
 This is not about coding faster. It's about understanding what you write.
 Every question is a chance to level up.
 
-Two Modes:
-  Q: (Question) - Deep explanations that stick
-  C: (Code)     - Working code with notes on what matters
+v2.0 - No Prefix Needed:
+  Just write a comment naturally. The AI auto-detects your intent.
 
 Examples: >
-    // Q: What is closure?           -> explains the concept deeply
-    // Q: Why does this return nil?  -> guides your debugging
-    // C: validate email function    -> generates actual code + notes
+    // What is closure?                -> AI explains
+    // function to validate email      -> AI generates code
+    // Review this for security        -> AI reviews
+    // Why does this return nil?       -> AI debugs
 <
 
 ==============================================================================
@@ -62,7 +62,7 @@ Recommended:
 
 Using lazy.nvim: >lua
     {
-      "your-username/ai-editutor",
+      "iknizzz1807/ai-editutor",
       dependencies = {
         "nvim-lua/plenary.nvim",
         "nvim-treesitter/nvim-treesitter",  -- Recommended
@@ -81,7 +81,7 @@ Using lazy.nvim: >lua
 Default configuration: >lua
     require("editutor").setup({
       -- LLM Provider
-      provider = "claude",  -- claude, openai, deepseek, groq, ollama
+      provider = "claude",  -- claude, openai, deepseek, gemini, groq, ollama
       model = "claude-sonnet-4-20250514",
 
       -- Behavior
@@ -94,7 +94,8 @@ Default configuration: >lua
 
       -- Keymaps
       keymaps = {
-        ask = "<leader>ma",
+        ask = "<leader>ma",      -- Ask about comment near cursor
+        toggle = "<leader>mt",   -- Toggle float window
       },
     })
 <
@@ -104,63 +105,64 @@ Default configuration: >lua
 
 Basic Usage:
 
-1. Write a comment with Q: or C: prefix: >
-    // Q: What does this function do?
-    // C: helper to format date
+1. Write a comment (no special prefix needed): >
+    // What does this function do?
+    // function to validate email
+    // Review this for security issues
 <
 
 2. Press <leader>ma (or your configured keymap)
 
-3. The response is inserted below:
-   - Q: mode -> response as comment block
-   - C: mode -> actual code + notes
-
-==============================================================================
-6. Q: MODE                                                   *editutor-q-mode*
-
-Use Q: prefix to ask questions. The response is inserted as a comment.
-
-Examples: >
-    // Q: What is closure?
-    // Q: Why does this return undefined?
-    // Q: Review this function for security issues
-    // Q: Explain async/await
-<
-
-Response format: >
-    // Q: What is closure?
-    /*
-    A: A closure is a function that "remembers" variables from its
-    outer scope even after that scope has finished executing.
-
-    Why it matters: Enables data privacy and callbacks.
-    Watch out: Accidental closures in loops.
+3. The response is inserted below as a comment with [AI] marker: >
+    /* [AI]
+    Your answer here...
     */
 <
 
+4. Press <leader>mt to view/edit response in float window
+
 ==============================================================================
-7. C: MODE                                                   *editutor-c-mode*
+6. RESPONSE FORMAT                                        *editutor-response*
 
-Use C: prefix to generate code. The response is inserted as actual code.
+All AI responses use the `[AI]` marker format: >
+    // What is closure?
+    /* [AI]
+    A closure is a function that "remembers" variables from its outer scope
+    even after that scope has finished executing.
 
-Examples: >
-    // C: function to validate email
-    // C: async fetch with retry logic
-    // C: helper to deep clone object
-<
-
-Response format: >
-    // C: validate email
-    function validateEmail(email) {
-      const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      return regex.test(email);
+    Example:
+    function counter() {
+      let count = 0;
+      return () => ++count;
     }
-    /*
-    Notes:
-    - Simple regex for common formats
-    - For strict validation, consider validator.js
+
+    Best practice: Use for data privacy, callbacks, factory functions.
+    Watch out: Can cause memory leaks if holding large objects.
     */
 <
+
+The `[AI]` marker makes it easy to:
+  - Identify AI-generated content
+  - Search for AI responses in your codebase
+  - Skip already-answered questions
+
+==============================================================================
+7. FLOAT WINDOW                                         *editutor-float-window*
+
+Press <leader>mt to toggle the AI response in a floating window.
+
+Features:
+  - Markdown syntax highlighting
+  - Editable buffer - make changes directly
+  - Changes sync back to source file on save
+
+Keymaps in float window:
+  q          Close without saving
+  <Esc>      Close without saving
+  <C-s>      Save changes and close
+  :w         Save changes and close
+  :wq        Save changes and close
+  :q         Close without saving
 
 ==============================================================================
 8. VISUAL SELECTION                                          *editutor-visual*
@@ -170,7 +172,7 @@ Select code and ask focused questions about it.
 Usage:
   1. Enter visual mode (v or V)
   2. Select the code block you want to focus on
-  3. Include a // Q: or // C: comment within the selection
+  3. Write a comment about it (or have one in selection)
   4. Press <leader>ma
 
 The selected code is sent with priority focus in the prompt.
@@ -178,16 +180,16 @@ The selected code is sent with priority focus in the prompt.
 ==============================================================================
 9. SKIP ANSWERED                                       *editutor-skip-answered*
 
-Questions that already have responses below are automatically skipped.
+Comments that already have `[AI]` responses below are automatically skipped.
 
 Example: >
     function test() {
-      // Q: What is closure?       <- SKIPPED (has answer below)
-      /*
-      A: A closure is...
+      // What is closure?       <- SKIPPED (has [AI] response below)
+      /* [AI]
+      A closure is...
       */
 
-      // Q: How does async work?   <- FOUND (unanswered)
+      // How does async work?   <- FOUND (unanswered)
       return 42;
     }
 <
@@ -230,7 +232,8 @@ Commands:
 12. COMMANDS                                                *editutor-commands*
 
 Core Commands:
-  :EduTutorAsk            Ask about current Q:/C: comment
+  :EduTutorAsk            Ask about comment near cursor
+  :EduTutorToggle         Toggle AI response in float window
 
 Knowledge Commands:
   :EduTutorHistory        Show recent Q&A history
@@ -253,10 +256,11 @@ Other Commands:
 Default keymaps (configurable):
 
   Normal mode:
-    <leader>ma    Ask about Q:/C: at cursor
+    <leader>ma    Ask about comment near cursor
+    <leader>mt    Toggle AI response in float window
 
   Visual mode:
-    <leader>ma    Ask about selected code (with Q:/C: in selection)
+    <leader>ma    Ask about selected code
 
 ==============================================================================
 14. API                                                          *editutor-api*
@@ -267,23 +271,37 @@ Main API: >lua
     editutor.setup(opts)
     editutor.ask()              -- Normal mode ask
     editutor.ask_visual()       -- Visual mode ask
+    editutor.toggle_float()     -- Toggle float window
     editutor.version()          -- Returns version string
 <
 
 Parser API: >lua
     local parser = require("editutor.parser")
 
-    -- Returns (question, mode) where mode is "question" or "code"
-    parser.parse_line(line)
-    parser.find_query(bufnr, line, include_answered)
-    parser.get_visual_selection()
+    parser.find_question_near_cursor(bufnr)  -- Find comment near cursor
+    parser.is_ai_response_start(line, style) -- Check if line starts [AI] response
+    parser.find_ai_response_block(bufnr, line) -- Find AI response block
+    parser.get_visual_selection()            -- Get visual selection
 <
 
-Prompts API: >lua
-    local prompts = require("editutor.prompts")
+Comment Writer API: >lua
+    local comment_writer = require("editutor.comment_writer")
 
-    prompts.get_system_prompt(mode)  -- mode: "question" or "code"
-    prompts.build_user_prompt(question, context, _, selected_code)
+    comment_writer.AI_MARKER                           -- "[AI]" constant
+    comment_writer.format_response(response, bufnr)    -- Format as comment
+    comment_writer.start_streaming(line, bufnr)        -- Start streaming
+    comment_writer.update_streaming(state, content)    -- Update streaming
+    comment_writer.finish_streaming(state)             -- Finish streaming
+    comment_writer.find_ai_response_block(bufnr, line) -- Find [AI] block
+<
+
+Float Window API: >lua
+    local float_window = require("editutor.float_window")
+
+    float_window.toggle(bufnr)    -- Toggle float window
+    float_window.open(bufnr)      -- Open float window
+    float_window.close(bufnr, save) -- Close, optionally save
+    float_window.is_open(bufnr)   -- Check if open
 <
 
 Provider API: >lua

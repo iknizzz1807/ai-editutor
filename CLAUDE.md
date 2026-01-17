@@ -8,30 +8,32 @@
 
 > **Build projects. Ask questions. Level up.**
 
-For developers building real projects who want to understand their code, not just ship it. Ask questions inline (`// Q:`), generate code with context (`// C:`), get answers without breaking flow.
+For developers building real projects who want to understand their code, not just ship it. Write comments naturally, get AI responses without breaking flow.
 
 **Not** about coding faster. **About** learning while you build.
 
-**Two modes:**
-- **Q: (Question)** - Deep explanations that stick ("ask one, learn ten")
-- **C: (Code)** - Working code with notes on what matters
+### v2.0.0 - Simplified: No Prefix Needed
 
-### v1.2.0 - Two Modes: Q: and C:
+**Key Change:** No more `Q:` or `C:` prefixes. Just write a comment naturally, and the LLM auto-detects your intent.
 
-**Q: Mode** - Question/Explain (teach, don't just answer):
-- `// Q: What is closure?` → deep explanation with best practices, pitfalls, resources
-- `// Q: Review this code` → constructive code review
-- `// Q: Debug: why does this return nil?` → guided debugging
-- Response inserted as **comment block** (A: prefix)
+```javascript
+// What is a closure?                    -> LLM explains
+// function to validate email            -> LLM generates code
+// Review this for security issues       -> LLM reviews
+// Why does this return nil?             -> LLM debugs
+```
 
-**C: Mode** - Code Generation (working code + notes):
-- `// C: function to validate email with regex` → generates actual code
-- `// C: async function to fetch user data with retry` → production-ready code
-- Response inserted as **actual code** + notes block
+**Response Format:**
+- All responses in `/* [AI] ... */` block comment format
+- Press `<leader>mt` to toggle response in float window (editable, syntax highlighted)
+- Edit in float window, changes sync back to source file
 
 **Key Features:**
-- **Skip answered questions** - Q:/C: with response below are automatically skipped
-- **Visual selection support** - Select code block and ask about it
+- **No prefix needed** - LLM auto-detects question vs code request
+- **[AI] marker** - Easy to identify AI responses: `/* [AI] ... */`
+- **Float window toggle** - View/edit responses in floating window
+- **Skip answered** - Comments with `[AI]` response below are skipped
+- **Visual selection** - Select code block and ask about it
 - **Streaming** - See response as it's generated
 - **Adaptive context** - Full project (<20K tokens) or import graph + LSP
 
@@ -43,18 +45,19 @@ For developers building real projects who want to understand their code, not jus
 ai-editutor/
 ├── lua/
 │   └── editutor/
-│       ├── init.lua              # Plugin entry point (v1.2.0)
+│       ├── init.lua              # Plugin entry point (v2.0.0)
 │       ├── config.lua            # Configuration management
-│       ├── parser.lua            # Comment parsing (Q: and C: modes)
+│       ├── parser.lua            # Comment detection near cursor
 │       ├── context.lua           # Context extraction (full/adaptive)
 │       ├── lsp_context.lua       # LSP-based context (go-to-definition)
 │       ├── import_graph.lua      # Import graph analysis
-│       ├── comment_writer.lua    # Insert responses (Q: as comments, C: as code)
-│       ├── prompts.lua           # Mode-specific prompts (Q: teach, C: generate)
+│       ├── comment_writer.lua    # Insert responses with [AI] marker
+│       ├── float_window.lua      # Toggle float window for responses
+│       ├── prompts.lua           # Unified prompt (LLM auto-detects)
 │       ├── provider.lua          # LLM API with inheritance + streaming
-│       ├── knowledge.lua         # Knowledge tracking (date-based JSON files)
+│       ├── knowledge.lua         # Knowledge tracking (date-based JSON)
 │       ├── project_scanner.lua   # Project file scanning
-│       ├── cache.lua             # LRU cache with TTL + autocmd invalidation
+│       ├── cache.lua             # LRU cache with TTL
 │       ├── loading.lua           # Loading indicator
 │       ├── debug_log.lua         # Debug logging
 │       └── health.lua            # :checkhealth editutor
@@ -63,8 +66,6 @@ ai-editutor/
 ├── doc/
 │   └── editutor.txt              # Vim help documentation
 ├── tests/
-│   ├── simplified_spec.lua       # v1.0 simplified tests
-│   ├── comprehensive_test.lua    # Full test suite
 │   └── ...
 ├── README.md
 └── CLAUDE.md                     # This file
@@ -74,69 +75,70 @@ ai-editutor/
 
 ## Architecture Overview
 
-### Two-Mode Flow (v1.2)
+### v2.0 Flow (Simplified)
 
 ```
-User writes: // Q: What is closure?     OR     // C: validate email function
-                    │                                      │
-                    ▼                                      ▼
+User writes comment: // What is a closure?
+                           │
+                           ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ 1. Parse Q:/C: comment and detect mode                                  │
-│ 2. Check if already answered → skip if yes                              │
+│ 1. Find comment near cursor                                             │
+│ 2. Check if already has [AI] response below -> skip if yes             │
 │ 3. Extract context (full project < 20K OR import graph + LSP)          │
-│ 4. Build mode-specific prompt (Q: pedagogical / C: code generation)    │
-│ 5. Stream to LLM (Claude/OpenAI/DeepSeek/etc.)                         │
-│ 6. Insert response based on mode                                        │
+│ 4. Send to LLM (LLM auto-detects: question or code request)            │
+│ 5. Stream response                                                      │
+│ 6. Insert as /* [AI] ... */ block comment                              │
 └─────────────────────────────────────────────────────────────────────────┘
-                    │                                      │
-                    ▼                                      ▼
-Q: Result:                              C: Result:
-    // Q: What is closure?                  // C: validate email function
-    /*                                      
-    A: A closure is a function...           function validateEmail(email) {
-    - Best practice: ...                      const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    - Watch out: ...                          return regex.test(email);
-    - Learn more: ...                       }
-    */                                      /*
-                                            Notes:
-                                            - This uses a simplified regex...
-                                            - For production, consider...
-                                            */
+                           │
+                           ▼
+Result:
+    // What is a closure?
+    /* [AI]
+    A closure is a function that captures variables from its surrounding
+    scope. When a function is defined inside another function, it has
+    access to the outer function's variables even after the outer
+    function has returned.
+    
+    Best practice: Use closures for data privacy and factory functions.
+    Watch out: Memory leaks if closures hold references to large objects.
+    */
 ```
 
-### Skip Answered Questions
+### Float Window Toggle
+
+Press `<leader>mt` near an AI response to:
+1. Open float window with response content
+2. Syntax highlighting (markdown)
+3. Editable - make changes
+4. `q` or `<Esc>` to close without saving
+5. `<C-s>` or `:w` to save changes back to source file
+
+### Skip Answered Comments
 
 ```javascript
 function test() {
-  // Q: What is closure?       ← SKIPPED (already has A: below)
-  /*
-  A: A closure is a function...
+  // What is closure?           <- SKIPPED (already has [AI] below)
+  /* [AI]
+  A closure is a function...
   */
 
-  // C: helper to format date  ← SKIPPED (code already generated below)
-  function formatDate(d) { ... }
-
-  // Q: How does async work?   ← FOUND (unanswered)
+  // How does async work?       <- FOUND (unanswered)
   return 42;
 }
 ```
 
-The parser automatically detects responses below Q:/C: comments and skips them.
+The parser detects `/* [AI]` marker below comments and skips them.
 
 ### Visual Selection Support
 
 ```
 1. Select code block with visual mode (v or V)
-2. Write // Q: Explain this function (or // C: refactor this)
+2. Write a comment about it
 3. Press <leader>ma
 4. Selected code is sent with "FOCUS ON THIS" label
 ```
 
-The selected code becomes the primary context, with surrounding code as secondary context.
-
-### Context Extraction: Two-Mode Approach
-
-ai-editutor uses **adaptive context extraction** based on project size:
+### Context Extraction
 
 ```
                     Project Size Check
@@ -157,17 +159,9 @@ ai-editutor uses **adaptive context extraction** based on project size:
                               └────────────────┘
 ```
 
-**ADAPTIVE Mode Details:**
-1. **Current file** - Always included with line numbers
-2. **Import graph (depth=1)** - Files imported by current + files that import current
-3. **LSP definitions** - Deduplicated (skips files already in import graph)
-4. **Project tree** - Always included
-
-If adaptive context > 20K tokens → Error, won't execute
-
 ### Comment Style Detection
 
-The plugin automatically detects the appropriate comment style based on filetype:
+The plugin automatically detects comment style based on filetype:
 
 | Languages | Line Comment | Block Comment |
 |-----------|--------------|---------------|
@@ -176,65 +170,50 @@ The plugin automatically detects the appropriate comment style based on filetype
 | Lua/SQL/Haskell | `--` | `--[[ ]]` or `{- -}` |
 | HTML/XML | - | `<!-- -->` |
 
-Block comments are preferred when available.
+AI responses always use block comments with `[AI]` marker.
 
 ---
 
 ## Key Files
 
 ### init.lua - Plugin Entry Point
-- Version: 1.2.0
-- Creates user commands (`:EduTutorAsk`, etc.)
-- Sets up keymaps (normal mode + visual mode)
-- Main functions: `ask()`, `ask_visual()`
+- Version: 2.0.0
+- Creates user commands (`:EduTutorAsk`, `:EduTutorToggle`, etc.)
+- Sets up keymaps (ask + toggle)
+- Main functions: `ask()`, `ask_visual()`, `toggle_float()`
 - Multi-language UI messages (English, Vietnamese)
-- Mode-aware processing (Q: vs C:)
 
-### parser.lua - Comment Parsing (Q: and C: modes)
-- Parses `Q:` (question) and `C:` (code) prefixes (case insensitive)
-- `parse_line()` - Returns `(question, mode)` tuple
-- `has_answer_below()` - Detects response below Q:/C: comment
-- `find_query()` - Finds unanswered query, skips answered ones
+### parser.lua - Comment Detection
+- `find_question_near_cursor()` - Finds comment near cursor without [AI] response below
+- `is_ai_response_start()` - Detects `/* [AI]` or `// [AI]` marker
+- `find_ai_response_block()` - Finds and extracts AI response content
 - `get_visual_selection()` - Get visual selection range and content
-- `find_query_in_range()` - Find Q:/C: within visual selection
 
-### prompts.lua - Mode-Specific Prompts
-- **Q: mode (SYSTEM_PROMPT_QUESTION):**
-  - "Ask one, learn ten" philosophy
-  - Best practices, pitfalls, real-world examples
-  - Direct answer + why + watch out + learn more
-- **C: mode (SYSTEM_PROMPT_CODE):**
-  - Generate working code (not pseudocode)
-  - Match project's coding style
-  - Include notes block with caveats/alternatives
-- `get_system_prompt(mode)` - Returns prompt based on mode
+### prompts.lua - Unified Prompt
+- Single `SYSTEM_PROMPT` - LLM auto-detects question vs code request
+- No more mode-specific prompts
 - Bilingual support (English, Vietnamese)
+- `build_user_prompt()` - Includes cursor position hint
 
 ### comment_writer.lua - Response Insertion
-- **Q: mode:** Response as block/line comments with A: prefix
-- **C: mode:** Code inserted as-is + notes block
-- Streaming support:
-  - `start_streaming()`, `update_streaming()`, `finish_streaming()` - Q: mode
-  - `start_streaming_code()`, `update_streaming_code()`, `finish_streaming_code()` - C: mode
+- Always uses `/* [AI] ... */` format (or line comment equivalent)
+- `AI_MARKER = "[AI]"` constant
+- Streaming support: `start_streaming()`, `update_streaming()`, `finish_streaming()`
+- `find_ai_response_block()` - For float window sync
 - Supports 40+ languages
+
+### float_window.lua - Float Window Toggle
+- `toggle()` - Open/close float window for AI response
+- `open()` - Open float with stripped comment content
+- `close(save)` - Close, optionally save changes back
+- Keymaps: `q`/`<Esc>` close, `<C-s>`/`:w` save
+- Markdown syntax highlighting
+- Editable buffer
 
 ### provider.lua - LLM API Client
 - Declarative provider definitions with inheritance
-- Built-in: Claude, OpenAI, DeepSeek, Groq, Together, OpenRouter, Ollama
+- Built-in: Claude, OpenAI, Gemini, DeepSeek, Groq, Together, OpenRouter, Ollama
 - Streaming with debounced UI updates
-
-### import_graph.lua - Import Analysis (NEW in v1.1)
-- Parse import statements for 12+ languages (JS/TS, Python, Lua, Go, Rust, etc.)
-- `get_outgoing_imports()` - Files imported by current file
-- `get_incoming_imports()` - Files that import current file
-- `resolve_import()` - Resolve import path to actual file
-- Library detection (node_modules, stdlib, etc.)
-
-### context.lua - Context Extraction
-- `detect_mode()` - Choose FULL_PROJECT or ADAPTIVE based on token budget
-- `build_full_project_context()` - All source files for small projects
-- `build_adaptive_context()` - Import graph + LSP (deduped) for large projects
-- Budget enforcement: returns error if > 20K tokens
 
 ---
 
@@ -250,16 +229,17 @@ stylua lua/
 
 # Run tests
 nvim --headless -u tests/minimal_init.lua -c "lua require('tests.simplified_spec').run_all()" -c "qa"
-nvim --headless -u tests/minimal_init.lua -c "lua require('tests.comprehensive_test').run_all()" -c "qa"
 ```
 
 ### Plugin Usage (in Neovim)
 ```vim
-" Core command (normal mode + visual mode)
-<leader>ma           " Ask - response inserted as inline comment
+" Core keymaps
+<leader>ma           " Ask about comment near cursor
+<leader>mt           " Toggle AI response in float window
 
-" Main command
-:EduTutorAsk         " Ask (same as <leader>ma)
+" Commands
+:EduTutorAsk         " Same as <leader>ma
+:EduTutorToggle      " Same as <leader>mt
 
 " Knowledge commands
 :EduTutorHistory     " Show Q&A history
@@ -281,61 +261,77 @@ nvim --headless -u tests/minimal_init.lua -c "lua require('tests.comprehensive_t
 
 ---
 
-## Comment Syntax (Simplified)
+## Usage Examples
 
-Use `Q:` prefix for questions and `C:` prefix for code generation:
+### Asking Questions (No Prefix Needed)
 
 ```javascript
-// Q: What is the time complexity of this algorithm?
-// Q: Review this function for security issues
-// Q: Debug: why does this sometimes return nil?
-// Q: Explain closures in JavaScript
-// Q: Help me understand this using Socratic method
-// Q: What could be improved in this code?
-
-// Lowercase also works
-// q: what is a closure?
+// What is the time complexity of this algorithm?
+// Explain how closures work
+// Review this function for security issues
+// Why does this sometimes return nil?
+// What's the best practice for error handling here?
 ```
 
-Supported comment styles:
-- `// Q:` - JavaScript, TypeScript, Go, Rust, C, C++, Java
-- `# Q:` - Python, Ruby, Shell, YAML
-- `-- Q:` - Lua, SQL, Haskell
-- `/* Q:` - CSS, multi-line blocks
-- `<!-- Q:` - HTML, XML
-
----
-
-## C: Code Generation Mode
-
-Use `C:` prefix to generate code:
+### Requesting Code (No Prefix Needed)
 
 ```javascript
-// C: function to validate email with regex
-// C: async function to fetch user with retry logic
-// C: React hook for debouncing input
-// C: helper to deep clone an object
-
-// Lowercase also works
-// c: sort array by property
+// function to validate email with regex
+// async function to fetch user with retry logic
+// React hook for debouncing input
+// helper to deep clone an object
 ```
 
-**Response format:**
+### Response Format
+
 ```javascript
-// C: function to validate email
-function validateEmail(email) {
-  const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return regex.test(email);
+// What is a closure?
+/* [AI]
+A closure is a function that "closes over" variables from its outer scope,
+maintaining access to them even after the outer function has returned.
+
+Example:
+```js
+function counter() {
+  let count = 0;
+  return () => ++count;
 }
-/*
-Notes:
-- This regex handles most common email formats
-- For strict validation, consider: validator.js library
-- Edge cases: + aliases, unicode domains
+const increment = counter();
+increment(); // 1
+increment(); // 2
+```
+
+Best practice: Use for data privacy, callbacks, and factory functions.
+Watch out: Can cause memory leaks if holding large objects.
 */
 ```
 
-The code is inserted as actual executable code, followed by a notes comment block.
+### Using Float Window
+
+1. Position cursor near an AI response
+2. Press `<leader>mt` to open in float window
+3. Edit the content (markdown syntax highlighting)
+4. Press `<C-s>` to save changes back to source file
+5. Press `q` to close without saving
+
+---
+
+## Configuration
+
+```lua
+require('editutor').setup({
+  provider = "deepseek",  -- or "claude", "openai", "gemini", etc.
+  model = "deepseek-chat",
+  language = "Vietnamese",  -- or "English"
+  keymaps = {
+    ask = "<leader>ma",      -- Ask about comment
+    toggle = "<leader>mt",   -- Toggle float window
+  },
+  context = {
+    token_budget = 20000,    -- Max tokens for context
+  },
+})
+```
 
 ---
 
@@ -350,74 +346,18 @@ The code is inserted as actual executable code, followed by a notes comment bloc
 
 ---
 
-## Key Dependencies
-
-### Required
-```lua
-dependencies = {
-  "nvim-lua/plenary.nvim",      -- Async utilities, HTTP
-}
-```
-
-### Recommended
-```lua
-dependencies = {
-  "nvim-treesitter/nvim-treesitter",  -- AST parsing, better code context
-}
-```
-
----
-
-## Provider System
-
-### Built-in Providers
-```lua
--- Available providers with inheritance
-M.PROVIDERS = {
-  claude     = { ... },           -- Claude API (Anthropic)
-  openai     = { ... },           -- OpenAI API
-  gemini     = { ... },           -- Google Gemini
-  deepseek   = { __inherited_from = "openai", ... },  -- DeepSeek
-  groq       = { __inherited_from = "openai", ... },  -- Groq
-  together   = { __inherited_from = "openai", ... },  -- Together AI
-  openrouter = { __inherited_from = "openai", ... },  -- OpenRouter
-  ollama     = { ... },           -- Local Ollama
-}
-```
-
-### Adding Custom Providers
-```lua
-require('editutor.provider').register_provider('my_provider', {
-  __inherited_from = 'openai',
-  name = 'my_provider',
-  url = 'https://my-api.com/v1/chat/completions',
-  model = 'my-model',
-  api_key = function()
-    return os.getenv('MY_API_KEY')
-  end,
-})
-```
-
----
-
 ## Development Phases
 
-### Phase 1-7: COMPLETE (v0.1 - v0.9)
+### Phase 1-9: COMPLETE (v0.1 - v1.2)
 See git history for details.
 
-### Phase 8: Simplification - COMPLETE (v1.0.0)
-- [x] Simplified to Q: only mode (removed S/R/D/E)
-- [x] Unified system prompt that adapts to intent
-- [x] Skip answered questions (Q: with A: below)
-- [x] Visual selection support
-- [x] Visual mode keymap
-
-### Phase 9: C: Mode + Streaming - COMPLETE (v1.2.0)
-- [x] Added C: code generation mode
-- [x] Mode-specific prompts (Q: teach, C: generate)
-- [x] Streaming support for both modes
-- [x] Import graph for adaptive context
-- [x] DeepSeek provider support
+### Phase 10: v2.0 Simplification - COMPLETE
+- [x] Removed Q:/C: prefix requirement
+- [x] LLM auto-detects intent (question vs code request)
+- [x] Unified `/* [AI] ... */` response format
+- [x] Float window toggle for viewing/editing responses
+- [x] Float window sync back to source file
+- [x] Simplified keymaps (ask + toggle)
 
 ### Future Enhancements
 - [ ] Obsidian integration
@@ -425,65 +365,26 @@ See git history for details.
 
 ---
 
-## Testing Strategy
-
-### Test Files
-```bash
-# v1.0 simplified tests (69 tests)
-tests/simplified_spec.lua
-
-# Comprehensive tests (34 tests)
-tests/comprehensive_test.lua
-
-# Integration tests (24 tests)
-tests/integration_test.lua
-
-# Call graph tests (19 tests)
-tests/call_graph_spec.lua
-
-# Adaptive budget tests (19 tests)
-tests/adaptive_budget_spec.lua
-```
-
-### Running Tests
-```bash
-# Run all simplified tests
-nvim --headless -u tests/minimal_init.lua -c "lua require('tests.simplified_spec').run_all()" -c "qa"
-
-# Run comprehensive tests
-nvim --headless -u tests/minimal_init.lua -c "lua require('tests.comprehensive_test').run_all()" -c "qa"
-```
-
----
-
 ## Common Issues & Solutions
 
-### Issue: Q: not detected
+### Issue: Comment not detected
 ```lua
--- Make sure the format is correct:
-// Q: your question here   -- Correct
-// Q your question         -- Wrong (missing colon)
-//Q: question              -- Correct (no space after //)
+-- Make sure you're near a comment line
+-- The plugin searches 15 lines up/down from cursor
+-- Comments with [AI] response below are skipped
 ```
 
-### Issue: Already answered question being re-asked
+### Issue: Float window not opening
 ```lua
--- The parser should skip Q: with A: below
--- Check if the A: response format is correct:
-/*
-A: response here
-*/
--- or
-// A: response here
+-- Make sure there's an AI response below the comment
+-- Look for /* [AI] ... */ block
+-- Position cursor on or near the original comment
 ```
 
-### Issue: Visual selection not working
-```vim
-" Make sure to:
-1. Enter visual mode (v or V)
-2. Select the code block
-3. Include a // Q: comment in the selection
-4. Press <leader>ma
+### Issue: Changes not saving from float window
+```lua
+-- Press <C-s> or use :w command in float window
+-- Just pressing q or <Esc> closes without saving
 ```
 
 ### Issue: LLM API timeout

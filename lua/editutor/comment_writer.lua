@@ -1,12 +1,12 @@
 -- editutor/comment_writer.lua
--- Insert AI responses as inline comments
+-- Insert AI responses as block comments with [AI] marker
+-- Simplified: always use block comment format /* [AI] ... */
 
 local M = {}
 
 -- Comment syntax definitions by filetype
--- { line = "//", block = { "/*", "*/" } }
 M.comment_styles = {
-  -- C-style languages (prefer block comments)
+  -- C-style languages
   c = { line = "//", block = { "/*", "*/" } },
   cpp = { line = "//", block = { "/*", "*/" } },
   java = { line = "//", block = { "/*", "*/" } },
@@ -80,6 +80,9 @@ M.comment_styles = {
 -- Fallback for unknown filetypes
 M.default_style = { line = "//", block = { "/*", "*/" } }
 
+-- AI response marker
+M.AI_MARKER = "[AI]"
+
 ---Get comment style for current buffer
 ---@param bufnr? number Buffer number
 ---@return table style Comment style { line, block }
@@ -109,7 +112,7 @@ local function normalize_paragraphs(text)
   for line in text:gmatch("[^\n]*") do
     -- Trim whitespace
     local trimmed = line:match("^%s*(.-)%s*$") or ""
-    
+
     if trimmed == "" then
       -- Blank line = paragraph break
       if #current_para > 0 then
@@ -135,12 +138,11 @@ end
 ---Wrap text to max width
 ---@param text string Text to wrap
 ---@param max_width number Max characters per line
----@param first_prefix string Prefix for first line
----@param cont_prefix string Prefix for continuation lines
+---@param prefix string Prefix for all lines
 ---@return string[] lines Wrapped lines
-local function wrap_text(text, max_width, first_prefix, cont_prefix)
-  local full_text = first_prefix .. text
-  
+local function wrap_text(text, max_width, prefix)
+  local full_text = prefix .. text
+
   if #full_text <= max_width then
     return { full_text }
   end
@@ -151,43 +153,38 @@ local function wrap_text(text, max_width, first_prefix, cont_prefix)
     table.insert(words, word)
   end
 
-  local current_line = first_prefix
-  local is_first = true
+  local current_line = prefix
 
   for _, word in ipairs(words) do
-    local test_line = current_line == first_prefix and (current_line .. word)
-                      or (current_line .. " " .. word)
+    local test_line = current_line == prefix and (current_line .. word) or (current_line .. " " .. word)
 
     if #test_line <= max_width then
       current_line = test_line
     else
       -- Line is full, save it
-      if current_line ~= first_prefix and current_line ~= cont_prefix then
+      if current_line ~= prefix then
         table.insert(lines, current_line)
       end
-      -- Start new line
-      local prefix = is_first and first_prefix or cont_prefix
-      is_first = false
-      
-      if #(cont_prefix .. word) > max_width then
+
+      if #(prefix .. word) > max_width then
         -- Word itself is too long, just add it
-        table.insert(lines, cont_prefix .. word)
-        current_line = cont_prefix
+        table.insert(lines, prefix .. word)
+        current_line = prefix
       else
-        current_line = cont_prefix .. word
+        current_line = prefix .. word
       end
     end
   end
 
   -- Add remaining content
-  if current_line ~= first_prefix and current_line ~= cont_prefix then
+  if current_line ~= prefix then
     table.insert(lines, current_line)
   end
 
   return lines
 end
 
----Format response as block comment
+---Format response as block comment with [AI] marker
 ---@param response string Response text
 ---@param style table Comment style
 ---@param indent string Indentation to use
@@ -196,11 +193,8 @@ local function format_block_comment(response, style, indent)
   local lines = {}
   local block_start, block_end = style.block[1], style.block[2]
 
-  -- Opening
-  table.insert(lines, indent .. block_start)
-
-  -- Content - prefix with A:
-  table.insert(lines, indent .. "A:")
+  -- Opening with [AI] marker
+  table.insert(lines, indent .. block_start .. " " .. M.AI_MARKER)
 
   -- Normalize paragraphs (join lines within same paragraph)
   local paragraphs = normalize_paragraphs(response)
@@ -210,7 +204,7 @@ local function format_block_comment(response, style, indent)
     if para == "" then
       table.insert(lines, "")
     else
-      local wrapped = wrap_text(para, MAX_LINE_WIDTH, indent, indent)
+      local wrapped = wrap_text(para, MAX_LINE_WIDTH, indent)
       for _, wrapped_line in ipairs(wrapped) do
         table.insert(lines, wrapped_line)
       end
@@ -223,7 +217,7 @@ local function format_block_comment(response, style, indent)
   return lines
 end
 
----Format response as line comments
+---Format response as line comments with [AI] marker (fallback for langs without block comments)
 ---@param response string Response text
 ---@param style table Comment style
 ---@param indent string Indentation to use
@@ -233,23 +227,17 @@ local function format_line_comment(response, style, indent)
   local prefix = style.line .. " "
   local full_prefix = indent .. prefix
 
+  -- First line with [AI] marker
+  table.insert(lines, full_prefix .. M.AI_MARKER)
+
   -- Normalize paragraphs
   local paragraphs = normalize_paragraphs(response)
-
-  -- First paragraph gets A: prefix
-  local first = true
 
   for _, para in ipairs(paragraphs) do
     if para == "" then
       table.insert(lines, full_prefix)
-    elseif first then
-      local wrapped = wrap_text("A: " .. para, MAX_LINE_WIDTH, full_prefix, full_prefix)
-      for _, wrapped_line in ipairs(wrapped) do
-        table.insert(lines, wrapped_line)
-      end
-      first = false
     else
-      local wrapped = wrap_text(para, MAX_LINE_WIDTH, full_prefix, full_prefix)
+      local wrapped = wrap_text(para, MAX_LINE_WIDTH, full_prefix)
       for _, wrapped_line in ipairs(wrapped) do
         table.insert(lines, wrapped_line)
       end
@@ -259,7 +247,7 @@ local function format_line_comment(response, style, indent)
   return lines
 end
 
----Format response as comments
+---Format response as comments with [AI] marker
 ---@param response string Response text
 ---@param bufnr? number Buffer number
 ---@param reference_line? number Line to get indentation from
@@ -283,8 +271,8 @@ function M.format_response(response, bufnr, reference_line)
   elseif style.line then
     return format_line_comment(response, style, indent)
   else
-    -- Fallback: just return as-is with indent
-    local lines = {}
+    -- Fallback: just return as-is with indent and marker
+    local lines = { indent .. M.AI_MARKER }
     for line in response:gmatch("[^\n]*") do
       table.insert(lines, indent .. line)
     end
@@ -312,87 +300,142 @@ function M.insert_response(response, after_line, bufnr)
   return true
 end
 
----Remove existing response after a question line
----@param question_line number Line number of the question (1-indexed)
----@param bufnr? number Buffer number
----@return number lines_removed Number of lines removed
-function M.remove_existing_response(question_line, bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
-  local style = M.get_style(bufnr)
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local total_lines = #lines
+---Check if a line starts an AI response block
+---@param line string
+---@param style table Comment style
+---@return boolean
+function M.is_ai_response_start(line, style)
+  local marker = M.AI_MARKER:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
 
-  -- Start checking from the line after the question
-  local start_remove = question_line + 1
-  local end_remove = question_line
-
-  -- Skip blank line if present
-  if start_remove <= total_lines and lines[start_remove]:match("^%s*$") then
-    start_remove = start_remove + 1
-    end_remove = question_line + 1
+  -- Check block comment with [AI] marker
+  if style.block then
+    local block_start = style.block[1]:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
+    if line:match("^%s*" .. block_start .. "%s*" .. marker) then
+      return true
+    end
   end
 
-  if start_remove > total_lines then
+  -- Check line comment with [AI] marker
+  if style.line then
+    local line_prefix = style.line:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
+    if line:match("^%s*" .. line_prefix .. "%s*" .. marker) then
+      return true
+    end
+  end
+
+  return false
+end
+
+---Find AI response block starting at or near a line
+---@param bufnr number
+---@param start_search_line number 1-indexed line to start searching from
+---@return table|nil result { start_line, end_line, content }
+function M.find_ai_response_block(bufnr, start_search_line)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local style = M.get_style(bufnr)
+
+  -- Search down from start_search_line for AI response (within 5 lines)
+  local response_start = nil
+  for i = start_search_line, math.min(start_search_line + 5, #lines) do
+    if M.is_ai_response_start(lines[i], style) then
+      response_start = i
+      break
+    end
+  end
+
+  if not response_start then
+    return nil
+  end
+
+  -- Find end of comment block
+  local response_end = response_start
+
+  if style.block then
+    local block_end = style.block[2]:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
+    for i = response_start, #lines do
+      response_end = i
+      if lines[i]:match(block_end .. "%s*$") then
+        break
+      end
+    end
+  elseif style.line then
+    -- For line comments, find consecutive comment lines
+    local line_prefix = style.line:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
+    for i = response_start + 1, #lines do
+      if lines[i]:match("^%s*" .. line_prefix) then
+        response_end = i
+      else
+        break
+      end
+    end
+  end
+
+  -- Extract content (strip comment markers and [AI] marker)
+  local content_lines = {}
+  for i = response_start, response_end do
+    local line = lines[i]
+    -- Remove block comment markers
+    if style.block then
+      line = line:gsub("^%s*" .. style.block[1]:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1") .. "%s*", "")
+      line = line:gsub("%s*" .. style.block[2]:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1") .. "%s*$", "")
+    end
+    -- Remove line comment prefix
+    if style.line then
+      local line_prefix = style.line:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
+      line = line:gsub("^%s*" .. line_prefix .. "%s*", "")
+    end
+    -- Remove [AI] marker
+    line = line:gsub("^%[AI%]%s*", "")
+    table.insert(content_lines, line)
+  end
+
+  return {
+    start_line = response_start,
+    end_line = response_end,
+    content = table.concat(content_lines, "\n"),
+  }
+end
+
+---Remove existing AI response after a comment line
+---@param comment_line number Line number of the user's comment (1-indexed)
+---@param bufnr? number Buffer number
+---@return number lines_removed Number of lines removed
+function M.remove_existing_response(comment_line, bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+
+  -- Find AI response block
+  local response = M.find_ai_response_block(bufnr, comment_line + 1)
+
+  if not response then
     return 0
   end
 
-  local next_line = lines[start_remove]
-
-  -- Check if it's a block comment response
-  if style.block then
-    local block_start = style.block[1]:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
-    if next_line:match("^%s*" .. block_start) then
-      -- Find the end of block comment
-      local block_end = style.block[2]:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
-      for i = start_remove, total_lines do
-        end_remove = i
-        if lines[i]:match(block_end .. "%s*$") then
-          break
-        end
-      end
-    end
+  -- Also remove blank line before response if present
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local start_remove = response.start_line
+  if start_remove > 1 and lines[start_remove - 1]:match("^%s*$") then
+    start_remove = start_remove - 1
   end
 
-  -- Check if it's a line comment response starting with A:
-  if style.line and end_remove == question_line then
-    local line_prefix = style.line:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
-    local pattern = "^%s*" .. line_prefix .. "%s*A:"
-    if next_line:match(pattern) then
-      end_remove = start_remove
-      -- Find all consecutive comment lines
-      for i = start_remove + 1, total_lines do
-        local check_line = lines[i]
-        if check_line:match("^%s*" .. line_prefix) then
-          end_remove = i
-        else
-          break
-        end
-      end
-    end
-  end
+  -- Remove the lines (0-indexed)
+  vim.api.nvim_buf_set_lines(bufnr, start_remove - 1, response.end_line, false, {})
 
-  -- Remove the lines
-  if end_remove > question_line then
-    vim.api.nvim_buf_set_lines(bufnr, question_line, end_remove, false, {})
-    return end_remove - question_line
-  end
-
-  return 0
+  return response.end_line - start_remove + 1
 end
 
----Insert or replace response for a question
+---Insert or replace response for a comment
 ---@param response string Response text
----@param question_line number Line number of the question (1-indexed)
+---@param comment_line number Line number of the user's comment (1-indexed)
 ---@param bufnr? number Buffer number
 ---@return boolean success
-function M.insert_or_replace(response, question_line, bufnr)
+function M.insert_or_replace(response, comment_line, bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
 
   -- Remove existing response first
-  M.remove_existing_response(question_line, bufnr)
+  M.remove_existing_response(comment_line, bufnr)
 
   -- Insert new response
-  return M.insert_response(response, question_line, bufnr)
+  return M.insert_response(response, comment_line, bufnr)
 end
 
 -- =============================================================================
@@ -401,45 +444,46 @@ end
 
 ---@class StreamingState
 ---@field bufnr number Buffer number
----@field question_line number Question line number
+---@field comment_line number User's comment line number
 ---@field start_line number Start line of inserted comment
 ---@field end_line number Current end line of comment
 ---@field style table Comment style
 ---@field indent string Indentation
 
 ---Start streaming response - inserts placeholder
----@param question_line number Line number of the question (1-indexed)
+---@param comment_line number Line number of the user's comment (1-indexed)
 ---@param bufnr? number Buffer number
 ---@return StreamingState state State object for updates
-function M.start_streaming(question_line, bufnr)
+function M.start_streaming(comment_line, bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   local style = M.get_style(bufnr)
 
   -- Remove existing response first
-  M.remove_existing_response(question_line, bufnr)
+  M.remove_existing_response(comment_line, bufnr)
 
-  -- Get indentation from question line
-  local line_content = vim.api.nvim_buf_get_lines(bufnr, question_line - 1, question_line, false)[1]
+  -- Get indentation from comment line
+  local line_content = vim.api.nvim_buf_get_lines(bufnr, comment_line - 1, comment_line, false)[1]
   local indent = line_content and line_content:match("^(%s*)") or ""
 
   -- Insert placeholder
   local placeholder_lines = { "" } -- blank line
 
   if style.block then
-    table.insert(placeholder_lines, indent .. style.block[1])
-    table.insert(placeholder_lines, indent .. "A: ...")
+    table.insert(placeholder_lines, indent .. style.block[1] .. " " .. M.AI_MARKER)
+    table.insert(placeholder_lines, indent .. "...")
     table.insert(placeholder_lines, indent .. style.block[2])
   elseif style.line then
-    table.insert(placeholder_lines, indent .. style.line .. " A: ...")
+    table.insert(placeholder_lines, indent .. style.line .. " " .. M.AI_MARKER)
+    table.insert(placeholder_lines, indent .. style.line .. " ...")
   end
 
-  vim.api.nvim_buf_set_lines(bufnr, question_line, question_line, false, placeholder_lines)
+  vim.api.nvim_buf_set_lines(bufnr, comment_line, comment_line, false, placeholder_lines)
 
   return {
     bufnr = bufnr,
-    question_line = question_line,
-    start_line = question_line + 1, -- after blank line
-    end_line = question_line + #placeholder_lines,
+    comment_line = comment_line,
+    start_line = comment_line + 1, -- after blank line
+    end_line = comment_line + #placeholder_lines,
     style = style,
     indent = indent,
   }
@@ -459,15 +503,14 @@ function M.update_streaming(state, content)
   local paragraphs = normalize_paragraphs(content)
 
   if state.style.block then
-    -- Block comment format
-    table.insert(lines, state.indent .. state.style.block[1])
-    table.insert(lines, state.indent .. "A:")
+    -- Block comment format with [AI] marker
+    table.insert(lines, state.indent .. state.style.block[1] .. " " .. M.AI_MARKER)
 
     for _, para in ipairs(paragraphs) do
       if para == "" then
         table.insert(lines, "")
       else
-        local wrapped = wrap_text(para, MAX_LINE_WIDTH, state.indent, state.indent)
+        local wrapped = wrap_text(para, MAX_LINE_WIDTH, state.indent)
         for _, wrapped_line in ipairs(wrapped) do
           table.insert(lines, wrapped_line)
         end
@@ -476,22 +519,17 @@ function M.update_streaming(state, content)
 
     table.insert(lines, state.indent .. state.style.block[2])
   elseif state.style.line then
-    -- Line comment format
+    -- Line comment format with [AI] marker
     local prefix = state.style.line .. " "
     local full_prefix = state.indent .. prefix
-    local first = true
+
+    table.insert(lines, full_prefix .. M.AI_MARKER)
 
     for _, para in ipairs(paragraphs) do
       if para == "" then
         table.insert(lines, full_prefix)
-      elseif first then
-        local wrapped = wrap_text("A: " .. para, MAX_LINE_WIDTH, full_prefix, full_prefix)
-        for _, wrapped_line in ipairs(wrapped) do
-          table.insert(lines, wrapped_line)
-        end
-        first = false
       else
-        local wrapped = wrap_text(para, MAX_LINE_WIDTH, full_prefix, full_prefix)
+        local wrapped = wrap_text(para, MAX_LINE_WIDTH, full_prefix)
         for _, wrapped_line in ipairs(wrapped) do
           table.insert(lines, wrapped_line)
         end
@@ -500,14 +538,7 @@ function M.update_streaming(state, content)
   end
 
   -- Replace the comment block
-  -- start_line is after the blank line, so we replace from start_line to end_line
-  vim.api.nvim_buf_set_lines(
-    state.bufnr,
-    state.start_line,
-    state.end_line,
-    false,
-    lines
-  )
+  vim.api.nvim_buf_set_lines(state.bufnr, state.start_line, state.end_line, false, lines)
 
   -- Update end_line for next update
   state.end_line = state.start_line + #lines
@@ -516,150 +547,6 @@ end
 ---Finish streaming (cleanup if needed)
 ---@param state StreamingState State from start_streaming
 function M.finish_streaming(state)
-  -- Currently no cleanup needed
-  -- Could add final formatting here if desired
-end
-
--- =============================================================================
--- Code Generation Mode (C:) Support
--- Response is inserted AS-IS (code + comments already formatted by LLM)
--- =============================================================================
-
----Insert code generation response (for C: mode)
----Response is inserted as-is, not wrapped in comments
----@param response string Response text (code + notes from LLM)
----@param after_line number Line number to insert after (1-indexed)
----@param bufnr? number Buffer number
----@return boolean success
-function M.insert_code_response(response, after_line, bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
-
-  -- Get indentation from the C: line
-  local line_content = vim.api.nvim_buf_get_lines(bufnr, after_line - 1, after_line, false)[1]
-  local indent = line_content and line_content:match("^(%s*)") or ""
-
-  -- Split response into lines and add indentation
-  local lines = { "" } -- blank line first
-  for line in response:gmatch("[^\n]*") do
-    if line == "" then
-      table.insert(lines, "")
-    else
-      table.insert(lines, indent .. line)
-    end
-  end
-
-  -- Insert into buffer
-  vim.api.nvim_buf_set_lines(bufnr, after_line, after_line, false, lines)
-
-  return true
-end
-
----Insert or replace code response for C: mode
----@param response string Response text
----@param question_line number Line number of the C: comment (1-indexed)
----@param bufnr? number Buffer number
----@return boolean success
-function M.insert_or_replace_code(response, question_line, bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
-
-  -- Remove existing response first (reuse Q: logic - works for code too)
-  M.remove_existing_code_response(question_line, bufnr)
-
-  -- Insert new code response
-  return M.insert_code_response(response, question_line, bufnr)
-end
-
----Remove existing code response after a C: line (NOT USED - kept for compatibility)
----@param question_line number Line number of the C: comment (1-indexed)
----@param bufnr? number Buffer number
----@return number lines_removed
-function M.remove_existing_code_response(question_line, bufnr)
-  -- Do nothing - just insert, don't remove anything
-  return 0
-end
-
----@class StreamingStateCode
----@field bufnr number Buffer number
----@field question_line number Question line number
----@field start_line number Start line of inserted code
----@field end_line number Current end line
----@field indent string Indentation
-
----Start streaming code response - inserts placeholder
----@param question_line number Line number of the C: comment (1-indexed)
----@param bufnr? number Buffer number
----@return StreamingStateCode state State object for updates
-function M.start_streaming_code(question_line, bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
-
-  -- Get indentation from C: line
-  local line_content = vim.api.nvim_buf_get_lines(bufnr, question_line - 1, question_line, false)[1]
-  local indent = line_content and line_content:match("^(%s*)") or ""
-
-  -- Insert placeholder
-  local placeholder_lines = { "", indent .. "// Generating code..." }
-  vim.api.nvim_buf_set_lines(bufnr, question_line, question_line, false, placeholder_lines)
-
-  return {
-    bufnr = bufnr,
-    question_line = question_line,
-    start_line = question_line + 1, -- after blank line
-    end_line = question_line + #placeholder_lines,
-    indent = indent,
-    mode = "code",
-  }
-end
-
----Strip markdown code blocks from LLM response
----@param content string Raw content from LLM
----@return string Cleaned content
-local function strip_markdown_code_blocks(content)
-  -- Strip opening ```language at the start
-  content = content:gsub("^```%w*\n", "")
-  -- Strip closing ``` at the end
-  content = content:gsub("\n```%s*$", "")
-  -- Also handle case where ``` is on its own line in the middle (shouldn't happen but safe)
-  content = content:gsub("\n```\n", "\n")
-  return content
-end
-
----Update streaming code response with new content
----@param state StreamingStateCode State from start_streaming_code
----@param content string Full content so far
-function M.update_streaming_code(state, content)
-  if not state or not vim.api.nvim_buf_is_valid(state.bufnr) then
-    return
-  end
-
-  -- Strip markdown code blocks that LLM might add
-  content = strip_markdown_code_blocks(content)
-
-  local lines = {}
-
-  for line in content:gmatch("[^\n]*") do
-    if line == "" then
-      table.insert(lines, "")
-    else
-      table.insert(lines, state.indent .. line)
-    end
-  end
-
-  -- Replace the placeholder with actual content
-  vim.api.nvim_buf_set_lines(
-    state.bufnr,
-    state.start_line,
-    state.end_line,
-    false,
-    lines
-  )
-
-  -- Update end_line for next update
-  state.end_line = state.start_line + #lines
-end
-
----Finish streaming code (cleanup if needed)
----@param state StreamingStateCode State from start_streaming_code
-function M.finish_streaming_code(state)
   -- Currently no cleanup needed
 end
 
