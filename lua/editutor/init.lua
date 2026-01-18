@@ -1,6 +1,6 @@
 -- editutor/init.lua
 -- ai-editutor - A Neovim plugin that teaches you to code better
--- v2.0.0: Simplified - no Q:/C: prefix needed, LLM auto-detects intent
+-- v3.0: New flow - spawn question blocks, batch process pending questions
 
 local M = {}
 
@@ -10,47 +10,43 @@ local context = require("editutor.context")
 local prompts = require("editutor.prompts")
 local provider = require("editutor.provider")
 local comment_writer = require("editutor.comment_writer")
-local float_window = require("editutor.float_window")
 local knowledge = require("editutor.knowledge")
 local cache = require("editutor.cache")
 local loading = require("editutor.loading")
 local debug_log = require("editutor.debug_log")
 
 M._name = "EduTutor"
-M._version = "2.0.0"
+M._version = "3.0.0"
 M._setup_called = false
 
--- UI Messages for internationalization
+-- =============================================================================
+-- UI Messages
+-- =============================================================================
+
 M._messages = {
   en = {
-    no_comment = "No comment found near cursor. Write a comment first.",
-    thinking = "Thinking...",
+    no_pending = "No pending questions in this file. Use <leader>mq to create one.",
+    spawned = "Question block created. Type your question, then use <leader>ma to get answer.",
+    processing = "Processing %d question(s)...",
+    gathering_context = "Gathering context...",
+    success = "Answered %d question(s)",
+    partial_success = "Answered %d/%d question(s). %d failed.",
     error = "Error: ",
     no_response = "No response received",
-    response_inserted = "Response inserted",
-    history_title = "ai-editutor - Recent History",
-    history_empty = "No history found",
-    export_success = "Exported to: ",
-    export_failed = "Export failed: ",
-    gathering_context = "Gathering context...",
-    context_mode_full = "Using full project context (%d tokens)",
-    context_mode_adaptive = "Using adaptive context (%d tokens)",
-    context_budget_exceeded = "Context exceeds budget (%d > %d tokens). Reduce scope or increase budget.",
+    invalid_json = "Failed to parse LLM response as JSON",
+    context_budget_exceeded = "Context exceeds budget (%d > %d tokens)",
   },
   vi = {
-    no_comment = "Khong tim thay comment gan cursor. Viet comment truoc.",
-    thinking = "Dang xu ly...",
+    no_pending = "Khong co cau hoi pending. Dung <leader>mq de tao moi.",
+    spawned = "Da tao question block. Nhap cau hoi, sau do dung <leader>ma de nhan tra loi.",
+    processing = "Dang xu ly %d cau hoi...",
+    gathering_context = "Dang thu thap context...",
+    success = "Da tra loi %d cau hoi",
+    partial_success = "Da tra loi %d/%d cau hoi. %d that bai.",
     error = "Loi: ",
     no_response = "Khong nhan duoc phan hoi",
-    response_inserted = "Da chen response",
-    history_title = "ai-editutor - Lich Su",
-    history_empty = "Khong co lich su",
-    export_success = "Da xuat ra: ",
-    export_failed = "Xuat that bai: ",
-    gathering_context = "Dang thu thap context...",
-    context_mode_full = "Su dung full project context (%d tokens)",
-    context_mode_adaptive = "Su dung adaptive context (%d tokens)",
-    context_budget_exceeded = "Context vuot budget (%d > %d tokens). Giam scope hoac tang budget.",
+    invalid_json = "Khong the parse JSON tu LLM response",
+    context_budget_exceeded = "Context vuot budget (%d > %d tokens)",
   },
 }
 
@@ -63,47 +59,51 @@ function M._msg(key)
   return messages[key] or M._messages.en[key] or key
 end
 
+-- =============================================================================
+-- Setup
+-- =============================================================================
+
 ---Setup the plugin
 ---@param opts? table User configuration
 function M.setup(opts)
   M._setup_called = true
   config.setup(opts)
 
-  -- Create user commands
   M._create_commands()
-
-  -- Setup keymaps
   M._setup_keymaps()
-
-  -- Initialize cache
   cache.setup()
 
-  -- Ensure .editutor.log is in .gitignore
   vim.schedule(function()
     debug_log.ensure_gitignore()
   end)
 
-  -- Setup error logging hook
   debug_log.setup_error_hook()
 
-  -- Check provider on setup
   local ready, err = provider.check_provider()
   if not ready then
     vim.notify("[ai-editutor] Warning: " .. (err or "Provider not ready"), vim.log.levels.WARN)
   end
 end
 
----Create user commands
+-- =============================================================================
+-- Commands
+-- =============================================================================
+
 function M._create_commands()
-  -- Main command - ask about comment near cursor
+  -- Spawn question block
+  vim.api.nvim_create_user_command("EduTutorQuestion", function()
+    M.spawn_question()
+  end, { desc = "Spawn a new question block" })
+
+  -- Process pending questions
   vim.api.nvim_create_user_command("EduTutorAsk", function()
     M.ask()
-  end, { desc = "Ask ai-editutor about comment near cursor" })
+  end, { desc = "Process all pending questions in current file" })
 
-  -- Toggle float window for AI response
-  vim.api.nvim_create_user_command("EduTutorToggle", function()
-    float_window.toggle()
-  end, { desc = "Toggle AI response in float window" })
+  -- Show pending count
+  vim.api.nvim_create_user_command("EduTutorPending", function()
+    M.show_pending()
+  end, { desc = "Show pending question count" })
 
   -- Knowledge commands
   vim.api.nvim_create_user_command("EduTutorHistory", function()
@@ -113,6 +113,16 @@ function M._create_commands()
   vim.api.nvim_create_user_command("EduTutorExport", function(opts)
     M.export_knowledge(opts.args)
   end, { nargs = "?", desc = "Export knowledge to markdown" })
+
+  vim.api.nvim_create_user_command("EduTutorBrowse", function(opts)
+    M.browse_knowledge(opts.args)
+  end, {
+    nargs = "?",
+    complete = function()
+      return knowledge.get_dates()
+    end,
+    desc = "Browse knowledge by date",
+  })
 
   -- Language command
   vim.api.nvim_create_user_command("EduTutorLang", function(opts)
@@ -127,228 +137,125 @@ function M._create_commands()
 
   -- Cache command
   vim.api.nvim_create_user_command("EduTutorClearCache", function()
-    M.clear_cache()
+    cache.clear()
+    vim.notify("[ai-editutor] Cache cleared", vim.log.levels.INFO)
   end, { desc = "Clear context cache" })
 
-  -- Debug log command
+  -- Debug commands
   vim.api.nvim_create_user_command("EduTutorLog", function()
     debug_log.open()
-  end, { desc = "Open debug log file" })
+  end, { desc = "Open debug log" })
 
   vim.api.nvim_create_user_command("EduTutorClearLog", function()
     debug_log.clear()
     vim.notify("[ai-editutor] Debug log cleared", vim.log.levels.INFO)
-  end, { desc = "Clear debug log file" })
-
-  -- Error log commands
-  vim.api.nvim_create_user_command("EduTutorErrors", function()
-    debug_log.open_error_log()
-  end, { desc = "Open error log file" })
-
-  vim.api.nvim_create_user_command("EduTutorClearErrors", function()
-    debug_log.clear_error_log()
-    vim.notify("[ai-editutor] Error log cleared", vim.log.levels.INFO)
-  end, { desc = "Clear error log file" })
-
-  -- Browse by date command
-  vim.api.nvim_create_user_command("EduTutorBrowse", function(opts)
-    M.browse_knowledge(opts.args)
-  end, {
-    nargs = "?",
-    complete = function()
-      return knowledge.get_dates()
-    end,
-    desc = "Browse knowledge by date (YYYY-MM-DD)",
-  })
+  end, { desc = "Clear debug log" })
 end
 
----Setup keymaps
+-- =============================================================================
+-- Keymaps
+-- =============================================================================
+
 function M._setup_keymaps()
   local keymaps = config.options.keymaps
 
-  -- Ask keymap (normal mode + visual mode)
-  if keymaps.ask then
-    -- Normal mode: ask about comment at cursor
-    vim.keymap.set("n", keymaps.ask, M.ask, { desc = "ai-editutor: Ask" })
-    -- Visual mode: ask about selected code
-    vim.keymap.set("v", keymaps.ask, function()
-      -- Exit visual mode first to set '< and '> marks
+  -- Spawn question block (normal mode)
+  if keymaps.question then
+    vim.keymap.set("n", keymaps.question, M.spawn_question, {
+      desc = "ai-editutor: Spawn question block",
+    })
+
+    -- Visual mode: spawn with selected code
+    vim.keymap.set("v", keymaps.question, function()
       vim.cmd("normal! ")
-      -- Small delay to let marks be set
       vim.schedule(function()
-        M.ask_visual()
+        M.spawn_question_visual()
       end)
-    end, { desc = "ai-editutor: Ask about selection" })
+    end, {
+      desc = "ai-editutor: Spawn question about selection",
+    })
   end
 
-  -- Toggle float window keymap
-  if keymaps.toggle then
-    vim.keymap.set("n", keymaps.toggle, function()
-      float_window.toggle()
-    end, { desc = "ai-editutor: Toggle AI response" })
+  -- Process pending questions
+  if keymaps.ask then
+    vim.keymap.set("n", keymaps.ask, M.ask, {
+      desc = "ai-editutor: Process pending questions",
+    })
   end
 end
 
 -- =============================================================================
--- MAIN ASK FUNCTION
+-- Spawn Question Block
 -- =============================================================================
 
----Main ask function - find comment near cursor and respond
-function M.ask()
-  local comment_info = parser.find_question_near_cursor()
-
-  if not comment_info then
-    vim.notify("[ai-editutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
-    return
-  end
-
-  local filepath = vim.api.nvim_buf_get_name(0)
+---Spawn a new question block at cursor position
+function M.spawn_question()
   local bufnr = vim.api.nvim_get_current_buf()
-  local comment_line = comment_info.line_num
+  local id, cursor_line = comment_writer.spawn_question_block(bufnr)
 
-  -- Start loading - bind to specific buffer and line
-  loading.start(M._msg("gathering_context"), bufnr, comment_line - 1)
+  -- Move cursor to the question input line
+  vim.api.nvim_win_set_cursor(0, { cursor_line, 0 })
 
-  -- Extract context (auto-selects full project or adaptive mode)
-  context.extract(function(full_context, metadata)
-    -- Check if budget exceeded (full_context is nil)
-    if not full_context then
-      loading.stop()
-      vim.notify(
-        string.format("[ai-editutor] " .. M._msg("context_budget_exceeded"), metadata.total_tokens, metadata.budget),
-        vim.log.levels.ERROR
-      )
-      return
-    end
+  -- Enter insert mode
+  vim.cmd("startinsert!")
 
-    -- Log context mode (silent - only in debug)
-    debug_log.log("Context mode: " .. metadata.mode .. ", tokens: " .. metadata.total_tokens)
+  vim.notify("[ai-editutor] " .. M._msg("spawned"), vim.log.levels.INFO)
 
-    loading.update(loading.states.connecting)
-    M._process_ask(comment_info, filepath, bufnr, full_context, metadata)
-  end, {
-    current_file = filepath,
-    question_line = comment_line,
-  })
+  debug_log.log("Spawned question block: " .. id)
 end
 
----Process ask with context (streaming)
----@param comment_info table { line_num, content, cursor_line }
----@param filepath string
----@param bufnr number
----@param full_context string
----@param metadata table
-function M._process_ask(comment_info, filepath, bufnr, full_context, metadata)
-  -- Build prompts (unified - LLM auto-detects intent)
-  local system_prompt = prompts.get_system_prompt()
-  local user_prompt = prompts.build_user_prompt(comment_info.content, full_context, comment_info.line_num)
+---Spawn question block with visual selection
+function M.spawn_question_visual()
+  local bufnr = vim.api.nvim_get_current_buf()
 
-  -- Get provider info
-  local provider_info = provider.get_info()
-  local provider_name = provider_info.name or "unknown"
-  local model_name = provider_info.model or "unknown"
+  -- Get visual selection
+  local start_pos = vim.fn.getpos("'<")
+  local end_pos = vim.fn.getpos("'>")
+  local start_line = start_pos[2]
+  local end_line = end_pos[2]
 
-  -- Log request to debug file
-  debug_log.log_request({
-    comment = comment_info.content,
-    current_file = metadata.current_file or filepath,
-    comment_line = comment_info.line_num,
-    metadata = metadata,
-    system_prompt = system_prompt,
-    user_prompt = user_prompt,
-    provider = provider_name,
-    model = model_name,
-  })
-
-  -- Start streaming
-  local stream_state = comment_writer.start_streaming(comment_info.line_num, bufnr)
-  loading.update(loading.states.streaming)
-  local start_time = vim.loop.hrtime()
-
-  -- Query LLM with streaming
-  provider.query_stream(
-    system_prompt,
-    user_prompt,
-    -- on_chunk (not used, we use on_batch instead)
-    function() end,
-    -- on_done
-    function(response, err)
-      loading.stop()
-      comment_writer.finish_streaming(stream_state)
-
-      local duration_ms = math.floor((vim.loop.hrtime() - start_time) / 1000000)
-
-      -- Log response
-      debug_log.log_response({
-        response = response,
-        error = err,
-        duration_ms = duration_ms,
-      })
-
-      if err then
-        vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
-        return
-      end
-
-      if not response then
-        vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
-        return
-      end
-
-      -- Save to knowledge
-      knowledge.save({
-        question = comment_info.content,
-        answer = response,
-        language = vim.bo.filetype,
-        filepath = filepath,
-      })
-
-      vim.notify("[ai-editutor] " .. M._msg("response_inserted"), vim.log.levels.INFO)
-    end,
-    -- opts
-    {
-      debounce_ms = 50,
-      on_batch = function(_, full_response_so_far)
-        comment_writer.update_streaming(stream_state, full_response_so_far)
-      end,
-    }
-  )
-end
-
--- =============================================================================
--- VISUAL SELECTION ASK
--- =============================================================================
-
----Ask about visually selected code
-function M.ask_visual()
-  local selection = parser.get_visual_selection()
-
-  if not selection then
+  if start_line == 0 or end_line == 0 or start_line > end_line then
     vim.notify("[ai-editutor] No visual selection found", vim.log.levels.WARN)
     return
   end
 
-  -- Find comment within or near selection
-  local comment_info = parser.find_question_near_cursor()
+  local lines = vim.api.nvim_buf_get_lines(bufnr, start_line - 1, end_line, false)
+  local selected_code = table.concat(lines, "\n")
 
-  if not comment_info then
-    -- No comment found - prompt user to write one
-    vim.notify("[ai-editutor] " .. M._msg("no_comment"), vim.log.levels.WARN)
+  local id, cursor_line = comment_writer.spawn_question_block(bufnr, selected_code)
+
+  -- Move cursor to the question input line
+  vim.api.nvim_win_set_cursor(0, { cursor_line, 0 })
+
+  -- Enter insert mode
+  vim.cmd("startinsert!")
+
+  vim.notify("[ai-editutor] " .. M._msg("spawned"), vim.log.levels.INFO)
+
+  debug_log.log("Spawned question block with selection: " .. id)
+end
+
+-- =============================================================================
+-- Process Pending Questions
+-- =============================================================================
+
+---Process all pending questions in current file
+function M.ask()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local questions = parser.find_pending_questions(bufnr)
+
+  if #questions == 0 then
+    vim.notify("[ai-editutor] " .. M._msg("no_pending"), vim.log.levels.INFO)
     return
   end
 
-  local filepath = vim.api.nvim_buf_get_name(0)
-  local bufnr = vim.api.nvim_get_current_buf()
+  local filepath = vim.api.nvim_buf_get_name(bufnr)
 
-  -- Start loading - bind to specific buffer and line
-  loading.start(M._msg("gathering_context"), bufnr, comment_info.line_num - 1)
+  -- Start loading
+  loading.start(string.format(M._msg("processing"), #questions), bufnr, 0)
 
-  -- The selected code becomes the primary context
-  local selected_code = selection.text
-
-  -- Extract full context
+  -- Extract context
   context.extract(function(full_context, metadata)
-    -- Check if budget exceeded
     if not full_context then
       loading.stop()
       vim.notify(
@@ -358,121 +265,142 @@ function M.ask_visual()
       return
     end
 
+    debug_log.log("Context mode: " .. metadata.mode .. ", tokens: " .. metadata.total_tokens)
+
     loading.update(loading.states.connecting)
-    M._process_ask_visual(comment_info, filepath, bufnr, full_context, selected_code, metadata)
+    M._process_questions(questions, filepath, bufnr, full_context, metadata)
   end, {
     current_file = filepath,
-    question_line = comment_info.line_num,
   })
 end
 
----Process visual ask with selected code (streaming)
----@param comment_info table
+---Process questions with context
+---@param questions table[] Pending questions
 ---@param filepath string
 ---@param bufnr number
 ---@param full_context string
----@param selected_code string
 ---@param metadata table
-function M._process_ask_visual(comment_info, filepath, bufnr, full_context, selected_code, metadata)
-  -- Build prompts with selected code
+function M._process_questions(questions, filepath, bufnr, full_context, metadata)
+  -- Build prompts
   local system_prompt = prompts.get_system_prompt()
-  local user_prompt = prompts.build_user_prompt(comment_info.content, full_context, comment_info.line_num, selected_code)
+  local user_prompt = prompts.build_user_prompt(questions, full_context)
 
   -- Get provider info
   local provider_info = provider.get_info()
-  local provider_name = provider_info.name or "unknown"
-  local model_name = provider_info.model or "unknown"
 
   -- Log request
   debug_log.log_request({
-    comment = comment_info.content .. " [with visual selection]",
+    questions = vim.tbl_map(function(q)
+      return { id = q.id, question = q.question }
+    end, questions),
     current_file = metadata.current_file or filepath,
-    comment_line = comment_info.line_num,
     metadata = metadata,
     system_prompt = system_prompt,
     user_prompt = user_prompt,
-    provider = provider_name,
-    model = model_name,
+    provider = provider_info.name or "unknown",
+    model = provider_info.model or "unknown",
   })
 
-  -- Start streaming
-  local stream_state = comment_writer.start_streaming(comment_info.line_num, bufnr)
-  loading.update(loading.states.streaming)
   local start_time = vim.loop.hrtime()
 
-  -- Query LLM with streaming
-  provider.query_stream(
-    system_prompt,
-    user_prompt,
-    -- on_chunk (not used, we use on_batch instead)
-    function() end,
-    -- on_done
-    function(response, err)
-      loading.stop()
-      comment_writer.finish_streaming(stream_state)
+  -- Query LLM (no streaming - wait for full response)
+  provider.query(system_prompt, user_prompt, function(response, err)
+    loading.stop()
 
-      local duration_ms = math.floor((vim.loop.hrtime() - start_time) / 1000000)
+    local duration_ms = math.floor((vim.loop.hrtime() - start_time) / 1000000)
 
-      -- Log response
-      debug_log.log_response({
-        response = response,
-        error = err,
-        duration_ms = duration_ms,
-      })
+    debug_log.log_response({
+      response = response,
+      error = err,
+      duration_ms = duration_ms,
+    })
 
-      if err then
-        vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
-        return
+    if err then
+      vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
+      return
+    end
+
+    if not response then
+      vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
+      return
+    end
+
+    -- Parse JSON response
+    local responses = M._parse_json_response(response)
+    if not responses then
+      vim.notify("[ai-editutor] " .. M._msg("invalid_json"), vim.log.levels.ERROR)
+      debug_log.log("Failed to parse JSON: " .. response)
+      return
+    end
+
+    -- Replace pending markers with responses
+    local success_count, fail_count = comment_writer.replace_pending_batch(responses, bufnr)
+
+    -- Save to knowledge
+    for _, q in ipairs(questions) do
+      if responses[q.id] then
+        knowledge.save({
+          question = q.question,
+          answer = responses[q.id],
+          language = vim.bo.filetype,
+          filepath = filepath,
+        })
       end
+    end
 
-      if not response then
-        vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
-        return
-      end
+    -- Notify result
+    if fail_count == 0 then
+      vim.notify("[ai-editutor] " .. string.format(M._msg("success"), success_count), vim.log.levels.INFO)
+    else
+      vim.notify(
+        "[ai-editutor] " .. string.format(M._msg("partial_success"), success_count, #questions, fail_count),
+        vim.log.levels.WARN
+      )
+    end
+  end)
+end
 
-      -- Save to knowledge
-      knowledge.save({
-        question = comment_info.content,
-        answer = response,
-        language = vim.bo.filetype,
-        filepath = filepath,
-      })
+---Parse JSON response from LLM
+---@param response string Raw response
+---@return table<string, string>|nil Map of id -> answer
+function M._parse_json_response(response)
+  -- Try to extract JSON from response (in case LLM adds extra text)
+  local json_str = response:match("```json%s*(.-)%s*```")
+    or response:match("```%s*(.-)%s*```")
+    or response:match("(%b{})")
+    or response
 
-      vim.notify("[ai-editutor] " .. M._msg("response_inserted"), vim.log.levels.INFO)
-    end,
-    -- opts
-    {
-      debounce_ms = 50,
-      on_batch = function(_, full_response_so_far)
-        comment_writer.update_streaming(stream_state, full_response_so_far)
-      end,
-    }
-  )
+  -- Clean up potential issues
+  json_str = json_str:gsub("^%s*", ""):gsub("%s*$", "")
+
+  local ok, result = pcall(vim.json.decode, json_str)
+  if ok and type(result) == "table" then
+    return result
+  end
+
+  return nil
 end
 
 -- =============================================================================
--- FLOAT WINDOW
+-- Utility Functions
 -- =============================================================================
 
----Toggle float window for AI response
-function M.toggle_float()
-  float_window.toggle()
+---Show pending question count
+function M.show_pending()
+  local count = parser.count_pending_questions()
+  vim.notify(string.format("[ai-editutor] %d pending question(s) in current file", count), vim.log.levels.INFO)
 end
-
--- =============================================================================
--- KNOWLEDGE FUNCTIONS
--- =============================================================================
 
 ---Show recent history
 function M.show_history()
   local entries = knowledge.get_recent(20)
 
   if #entries == 0 then
-    vim.notify("[ai-editutor] " .. M._msg("history_empty"), vim.log.levels.INFO)
+    vim.notify("[ai-editutor] No history found", vim.log.levels.INFO)
     return
   end
 
-  local lines = { M._msg("history_title"), string.rep("=", 40), "" }
+  local lines = { "ai-editutor - Recent History", string.rep("=", 40), "" }
 
   for i, entry in ipairs(entries) do
     table.insert(lines, string.format("%d. %s", i, entry.question:sub(1, 60)))
@@ -491,16 +419,15 @@ function M.export_knowledge(filepath)
 
   if success then
     local path = filepath or (os.getenv("HOME") .. "/editutor_export.md")
-    vim.notify("[ai-editutor] " .. M._msg("export_success") .. path, vim.log.levels.INFO)
+    vim.notify("[ai-editutor] Exported to: " .. path, vim.log.levels.INFO)
   else
-    vim.notify("[ai-editutor] " .. M._msg("export_failed") .. (err or ""), vim.log.levels.ERROR)
+    vim.notify("[ai-editutor] Export failed: " .. (err or ""), vim.log.levels.ERROR)
   end
 end
 
 ---Browse knowledge by date
 function M.browse_knowledge(date)
   if not date or date == "" then
-    -- Show available dates
     local dates = knowledge.get_dates()
     if #dates == 0 then
       vim.notify("[ai-editutor] No knowledge entries yet", vim.log.levels.INFO)
@@ -519,7 +446,6 @@ function M.browse_knowledge(date)
     return
   end
 
-  -- Show entries for specific date
   local entries = knowledge.get_by_date(date)
   if #entries == 0 then
     vim.notify("[ai-editutor] No entries for " .. date, vim.log.levels.INFO)
@@ -543,10 +469,6 @@ function M.browse_knowledge(date)
 
   print(table.concat(lines, "\n"))
 end
-
--- =============================================================================
--- LANGUAGE
--- =============================================================================
 
 ---Set language
 function M.set_language(lang)
@@ -574,12 +496,6 @@ function M.set_language(lang)
   config.options.language = normalized
   local msg = normalized == "English" and "Language set to English" or "Da chuyen sang tieng Viet"
   vim.notify("[ai-editutor] " .. msg, vim.log.levels.INFO)
-end
-
----Clear cache
-function M.clear_cache()
-  cache.clear()
-  vim.notify("[ai-editutor] Cache cleared", vim.log.levels.INFO)
 end
 
 ---Get version

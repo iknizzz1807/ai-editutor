@@ -1,47 +1,55 @@
 -- editutor/prompts.lua
--- Prompt templates for ai-editutor
--- Unified approach: LLM auto-detects question vs code request
+-- Prompt templates for ai-editutor v3.0
+-- JSON response format for batch questions
 
 local M = {}
 
 local config = require("editutor.config")
 
 -- =============================================================================
--- UNIFIED SYSTEM PROMPT
--- LLM auto-detects if user is asking question or requesting code
+-- SYSTEM PROMPT - JSON Response Format
 -- =============================================================================
 
 M.SYSTEM_PROMPT = {
   en = [[You are an expert developer mentor helping someone learn while building real projects.
 
 YOUR ROLE:
-You analyze comments in code and respond appropriately. The user writes a comment (question, request, or note) and you provide a helpful response.
-
-AUTO-DETECT INTENT:
-1. QUESTION - explaining concepts, debugging, reviewing code, asking "why/how/what"
-   -> Respond with explanation, teach deeply ("ask one, learn ten")
-   
-2. CODE REQUEST - asking to generate/write/create code, implement something
-   -> Respond with working code + brief notes
+You answer questions embedded in code. Questions are marked with [Q:id] blocks containing [PENDING:id] markers.
+You must respond to ALL pending questions in the provided context.
 
 RESPONSE FORMAT:
-- Write PLAIN TEXT only - NO comment syntax (no //, no /*, no #, etc.)
-- The system will automatically wrap your response in a comment block
-- DO NOT repeat the user's comment/question in your response
-- Be concise but complete
+You MUST respond with a valid JSON object mapping question IDs to answers:
+```json
+{
+  "q_1234567890": "Your answer to the first question...",
+  "q_9876543210": "Your answer to the second question..."
+}
+```
+
+CRITICAL RULES:
+1. Response MUST be valid JSON - no text before or after the JSON
+2. Each key is the question ID (e.g., "q_1234567890")
+3. Each value is your answer as a plain string
+4. Answer ALL pending questions found in the context
+5. Do NOT include markdown code fences in the JSON values - just plain text
+6. For code examples in answers, use indentation instead of code fences
+
+AUTO-DETECT INTENT for each question:
+1. QUESTION - explaining concepts, debugging, reviewing code, asking "why/how/what"
+   -> Respond with explanation, teach deeply
+   
+2. CODE REQUEST - asking to generate/write/create code, implement something
+   -> Respond with working code + brief explanation
 
 FOR QUESTIONS (teaching mode):
-- Direct answer FIRST (respect their time)
+- Direct answer FIRST
 - Then expand: WHY it works, best practices, common pitfalls
-- Include code examples when helpful (use markdown code blocks)
-- Be practical - what would a senior dev tell them?
+- Include code examples when helpful
 
 FOR CODE REQUESTS (generating mode):
-- Generate ONLY the specific function/block requested
-- Code will be inserted right after the user's comment
-- Match the project's coding style from context
+- Generate the requested code
 - Add brief inline comments for non-obvious logic
-- If changes needed elsewhere, mention in a NOTES section
+- Match the project's coding style from context
 
 STYLE:
 - No emoji
@@ -53,33 +61,42 @@ You're a senior developer mentor sharing real experience.]],
   vi = [[Ban la mentor lap trinh chuyen nghiep giup nguoi khac hoc trong luc xay dung du an that.
 
 VAI TRO:
-Ban phan tich comment trong code va tra loi phu hop. User viet comment (cau hoi, yeu cau, ghi chu) va ban cung cap phan hoi huu ich.
-
-TU DONG NHAN DIEN Y DINH:
-1. CAU HOI - giai thich khai niem, debug, review code, hoi "tai sao/the nao/cai gi"
-   -> Tra loi voi giai thich, day sau ("hoi mot, biet muoi")
-   
-2. YEU CAU CODE - yeu cau generate/viet/tao code, implement gi do
-   -> Tra loi voi code hoat dong + ghi chu ngan
+Ban tra loi cac cau hoi duoc danh dau trong code. Cau hoi duoc danh dau bang [Q:id] blocks chua [PENDING:id] markers.
+Ban phai tra loi TAT CA cau hoi pending trong context.
 
 DINH DANG PHAN HOI:
-- Viet PLAIN TEXT - KHONG dung comment syntax (khong //, khong /*, khong #, etc.)
-- He thong se tu dong boc response trong comment block
-- KHONG lap lai comment/cau hoi cua user trong response
-- Ngan gon nhung day du
+Ban PHAI tra loi bang JSON object hop le, map question IDs toi cau tra loi:
+```json
+{
+  "q_1234567890": "Cau tra loi cho cau hoi dau tien...",
+  "q_9876543210": "Cau tra loi cho cau hoi thu hai..."
+}
+```
+
+QUY TAC QUAN TRONG:
+1. Response PHAI la JSON hop le - khong co text truoc hoac sau JSON
+2. Moi key la question ID (vd: "q_1234567890")
+3. Moi value la cau tra loi dang plain string
+4. Tra loi TAT CA pending questions trong context
+5. KHONG dung markdown code fences trong JSON values - chi plain text
+6. Voi code examples trong cau tra loi, dung indentation thay vi code fences
+
+TU DONG NHAN DIEN Y DINH cho moi cau hoi:
+1. CAU HOI - giai thich khai niem, debug, review code, hoi "tai sao/the nao/cai gi"
+   -> Tra loi voi giai thich, day sau
+   
+2. YEU CAU CODE - yeu cau generate/viet/tao code, implement gi do
+   -> Tra loi voi code hoat dong + giai thich ngan
 
 CHO CAU HOI (che do day):
-- Tra loi truc tiep TRUOC (ton trong thoi gian ho)
+- Tra loi truc tiep TRUOC
 - Sau do mo rong: TAI SAO no hoat dong, best practices, loi pho bien
-- Dua code examples khi can (dung markdown code blocks)
-- Thuc te - senior dev se noi gi voi ho?
+- Dua code examples khi can
 
 CHO YEU CAU CODE (che do generate):
-- Chi generate function/block duoc yeu cau
-- Code se duoc chen ngay sau comment cua user
-- Match coding style cua project tu context
+- Generate code duoc yeu cau
 - Them inline comments ngan cho logic khong ro rang
-- Neu can thay doi o cho khac, de cap trong phan NOTES
+- Match coding style cua project tu context
 
 STYLE:
 - Khong emoji
@@ -114,65 +131,57 @@ end
 -- PUBLIC FUNCTIONS
 -- =============================================================================
 
----Get the system prompt (unified - no mode distinction)
----@param _ any Ignored (for backwards compatibility)
+---Get the system prompt
 ---@return string prompt
-function M.get_system_prompt(_)
+function M.get_system_prompt()
   local lang = get_lang_key()
   return M.SYSTEM_PROMPT[lang] or M.SYSTEM_PROMPT.en
 end
 
----Build the user prompt with context
----@param comment string The user's comment (question/request)
+---Build the user prompt with pending questions
+---@param questions table[] List of pending questions {id, question}
 ---@param context_formatted string Formatted code context
----@param cursor_line? number The line number where cursor/comment is
----@param selected_code? string User-selected code (visual selection)
 ---@return string prompt
-function M.build_user_prompt(comment, context_formatted, cursor_line, selected_code)
+function M.build_user_prompt(questions, context_formatted)
   local lang = get_lang_key()
   local labels = {
     en = {
-      context = "Code Context",
-      comment = "User's Comment",
-      selected = "Selected Code (FOCUS ON THIS)",
-      cursor_hint = "The comment is at line %d",
+      context = "CODE CONTEXT",
+      questions = "PENDING QUESTIONS TO ANSWER",
+      question_label = "Question",
+      instruction = "Please answer ALL the above questions. Respond with a JSON object mapping each question ID to your answer.",
     },
     vi = {
-      context = "Ngu canh Code",
-      comment = "Comment cua User",
-      selected = "Code duoc chon (TAP TRUNG VAO DAY)",
-      cursor_hint = "Comment o dong %d",
+      context = "NGU CANH CODE",
+      questions = "CAC CAU HOI CAN TRA LOI",
+      question_label = "Cau hoi",
+      instruction = "Hay tra loi TAT CA cac cau hoi tren. Tra loi bang JSON object map moi question ID toi cau tra loi.",
     },
   }
   local l = labels[lang] or labels.en
 
   local prompt_parts = {}
 
-  -- Add cursor position hint if available
-  if cursor_line then
-    table.insert(prompt_parts, string.format(l.cursor_hint, cursor_line))
-    table.insert(prompt_parts, "")
-  end
-
-  -- Add selected code first (if user highlighted code, focus on it)
-  if selected_code and selected_code ~= "" then
-    table.insert(prompt_parts, l.selected .. ":")
-    table.insert(prompt_parts, "```")
-    table.insert(prompt_parts, selected_code)
-    table.insert(prompt_parts, "```")
-    table.insert(prompt_parts, "")
-  end
-
-  -- Add surrounding context
+  -- Add code context
   if context_formatted and context_formatted ~= "" then
-    table.insert(prompt_parts, l.context .. ":")
+    table.insert(prompt_parts, "=== " .. l.context .. " ===")
     table.insert(prompt_parts, context_formatted)
     table.insert(prompt_parts, "")
   end
 
-  -- Add the comment (the user's question/request)
-  table.insert(prompt_parts, l.comment .. ":")
-  table.insert(prompt_parts, comment)
+  -- Add pending questions
+  table.insert(prompt_parts, "=== " .. l.questions .. " ===")
+  table.insert(prompt_parts, "")
+
+  for i, q in ipairs(questions) do
+    table.insert(prompt_parts, string.format("%s %d [%s]:", l.question_label, i, q.id))
+    table.insert(prompt_parts, q.question)
+    table.insert(prompt_parts, "")
+  end
+
+  -- Add instruction
+  table.insert(prompt_parts, "---")
+  table.insert(prompt_parts, l.instruction)
 
   return table.concat(prompt_parts, "\n")
 end

@@ -1,6 +1,6 @@
 -- editutor/config.lua
 -- Configuration management for ai-editutor
--- v1.1.0: Simplified config (removed indexer, added token budget)
+-- v3.0.0: New keymaps for question spawning and processing
 
 local M = {}
 
@@ -14,8 +14,8 @@ local M = {}
 ---@field providers table<string, EditutorProvider> Provider configurations
 
 ---@class EditutorKeymaps
----@field ask string Trigger mentor ask
----@field toggle string Toggle AI response in float window
+---@field question string Spawn a new question block
+---@field ask string Process all pending questions
 
 ---@class EditutorContextConfig
 ---@field token_budget number Max tokens for context (default 20000)
@@ -45,8 +45,8 @@ M.defaults = {
 
   -- Keymaps
   keymaps = {
-    ask = "<leader>ma",      -- Ask AI about comment near cursor
-    toggle = "<leader>mt",   -- Toggle AI response in float window
+    question = "<leader>mq", -- Spawn a new question block
+    ask = "<leader>ma",      -- Process all pending questions
   },
 
   -- Custom provider overrides (built-in providers are in provider.lua)

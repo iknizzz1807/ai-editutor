@@ -8,34 +8,44 @@
 
 > **Build projects. Ask questions. Level up.**
 
-For developers building real projects who want to understand their code, not just ship it. Write comments naturally, get AI responses without breaking flow.
+For developers building real projects who want to understand their code, not just ship it. Write questions naturally in comment blocks, get AI responses without breaking flow.
 
 **Not** about coding faster. **About** learning while you build.
 
-### v2.0.0 - Simplified: No Prefix Needed
+### v3.0.0 - Question Blocks
 
-**Key Change:** No more `Q:` or `C:` prefixes. Just write a comment naturally, and the LLM auto-detects your intent.
+**Key Change:** Explicit question blocks with `[Q:id]` and `[PENDING:id]` markers.
 
 ```javascript
-// What is a closure?                    -> LLM explains
-// function to validate email            -> LLM generates code
-// Review this for security issues       -> LLM reviews
-// Why does this return nil?             -> LLM debugs
+// User spawns question block with <leader>mq
+/* [Q:q_1737200000000]
+What is a closure and when should I use it?
+[PENDING:q_1737200000000]
+*/
+
+// After <leader>ma, AI responds:
+/* [Q:q_1737200000000]
+What is a closure and when should I use it?
+
+A closure is a function that captures variables from its surrounding scope.
+When the inner function is returned, it maintains access to those variables
+even after the outer function has finished executing.
+
+Use closures for:
+- Data privacy (private variables)
+- Factory functions
+- Callbacks and event handlers
+
+Watch out for memory leaks if closures hold references to large objects.
+*/
 ```
 
-**Response Format:**
-- All responses in `/* [AI] ... */` block comment format
-- Press `<leader>mt` to toggle response in float window (editable, syntax highlighted)
-- Edit in float window, changes sync back to source file
-
 **Key Features:**
-- **No prefix needed** - LLM auto-detects question vs code request
-- **[AI] marker** - Easy to identify AI responses: `/* [AI] ... */`
-- **Float window toggle** - View/edit responses in floating window
-- **Skip answered** - Comments with `[AI]` response below are skipped
-- **Visual selection** - Select code block and ask about it
-- **Streaming** - See response as it's generated
-- **Adaptive context** - Full project (<20K tokens) or import graph + LSP
+- **Spawn question block** - `<leader>mq` creates a block with unique ID
+- **Visual selection support** - Select code, then `<leader>mq` to ask about it
+- **Batch processing** - Multiple `[PENDING]` questions answered in one request
+- **JSON response** - LLM returns structured responses, reliable parsing
+- **No streaming** - Wait for complete response (simpler, more reliable)
 
 ---
 
@@ -45,16 +55,15 @@ For developers building real projects who want to understand their code, not jus
 ai-editutor/
 ├── lua/
 │   └── editutor/
-│       ├── init.lua              # Plugin entry point (v2.0.0)
+│       ├── init.lua              # Plugin entry point (v3.0.0)
 │       ├── config.lua            # Configuration management
-│       ├── parser.lua            # Comment detection near cursor
+│       ├── parser.lua            # Question block detection
 │       ├── context.lua           # Context extraction (full/adaptive)
-│       ├── lsp_context.lua       # LSP-based context (go-to-definition)
+│       ├── lsp_context.lua       # LSP-based context
 │       ├── import_graph.lua      # Import graph analysis
-│       ├── comment_writer.lua    # Insert responses with [AI] marker
-│       ├── float_window.lua      # Toggle float window for responses
-│       ├── prompts.lua           # Unified prompt (LLM auto-detects)
-│       ├── provider.lua          # LLM API with inheritance + streaming
+│       ├── comment_writer.lua    # Spawn blocks, write responses
+│       ├── prompts.lua           # System prompt (JSON response format)
+│       ├── provider.lua          # LLM API client
 │       ├── knowledge.lua         # Knowledge tracking (date-based JSON)
 │       ├── project_scanner.lua   # Project file scanning
 │       ├── cache.lua             # LRU cache with TTL
@@ -75,68 +84,65 @@ ai-editutor/
 
 ## Architecture Overview
 
-### v2.0 Flow (Simplified)
+### v3.0 Flow
 
 ```
-User writes comment: // What is a closure?
-                           │
-                           ▼
+1. User presses <leader>mq
+         │
+         ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ 1. Find comment near cursor                                             │
-│ 2. Check if already has [AI] response below -> skip if yes             │
-│ 3. Extract context (full project < 20K OR import graph + LSP)          │
-│ 4. Send to LLM (LLM auto-detects: question or code request)            │
-│ 5. Stream response                                                      │
-│ 6. Insert as /* [AI] ... */ block comment                              │
+│ Spawn question block with unique ID (timestamp-based)                   │
+│ /* [Q:q_1737200000000]                                                 │
+│                                                                         │
+│ [PENDING:q_1737200000000]                                              │
+│ */                                                                      │
+│ Cursor placed in block, insert mode                                     │
 └─────────────────────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-Result:
-    // What is a closure?
-    /* [AI]
-    A closure is a function that captures variables from its surrounding
-    scope. When a function is defined inside another function, it has
-    access to the outer function's variables even after the outer
-    function has returned.
-    
-    Best practice: Use closures for data privacy and factory functions.
-    Watch out: Memory leaks if closures hold references to large objects.
-    */
+         │
+         ▼
+2. User types question, exits insert mode
+         │
+         ▼
+3. User presses <leader>ma
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 1. Scan current file for [PENDING:*] markers                           │
+│ 2. If none found → notify user, stop                                   │
+│ 3. Extract context (full project < 20K OR adaptive)                    │
+│ 4. Build user prompt with all pending questions                        │
+│ 5. Send to LLM, expect JSON response                                   │
+│ 6. Parse JSON: { "q_123": "answer1", "q_456": "answer2" }             │
+│ 7. Replace each [PENDING:id] with corresponding answer                 │
+│ 8. Save to knowledge base                                              │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
-
-### Float Window Toggle
-
-Press `<leader>mt` near an AI response to:
-1. Open float window with response content
-2. Syntax highlighting (markdown)
-3. Editable - make changes
-4. `q` or `<Esc>` to close without saving
-5. `<C-s>` or `:w` to save changes back to source file
-
-### Skip Answered Comments
-
-```javascript
-function test() {
-  // What is closure?           <- SKIPPED (already has [AI] below)
-  /* [AI]
-  A closure is a function...
-  */
-
-  // How does async work?       <- FOUND (unanswered)
-  return 42;
-}
-```
-
-The parser detects `/* [AI]` marker below comments and skips them.
 
 ### Visual Selection Support
 
 ```
 1. Select code block with visual mode (v or V)
-2. Write a comment about it
-3. Press <leader>ma
-4. Selected code is sent with "FOCUS ON THIS" label
+2. Press <leader>mq
+3. Question block spawned with selected code quoted:
+
+/* [Q:q_1737200000000]
+Regarding this code:
 ```
+function foo() {
+  return bar();
+}
+```
+
+[PENDING:q_1737200000000]
+*/
+```
+
+### Question ID Format
+
+- Format: `q_<timestamp_ms>` (e.g., `q_1737200000000`)
+- Generated using `vim.loop.hrtime() / 1000000`
+- Unique per question, no conflicts across files
+- Future-proof for potential cross-file features
 
 ### Context Extraction
 
@@ -159,61 +165,49 @@ The parser detects `/* [AI]` marker below comments and skips them.
                               └────────────────┘
 ```
 
-### Comment Style Detection
+### JSON Response Format
 
-The plugin automatically detects comment style based on filetype:
+LLM responds with JSON mapping question IDs to answers:
 
-| Languages | Line Comment | Block Comment |
-|-----------|--------------|---------------|
-| JS/TS/Go/Rust/C/C++/Java | `//` | `/* */` |
-| Python/Ruby/Shell | `#` | `""" """` or `=begin =end` |
-| Lua/SQL/Haskell | `--` | `--[[ ]]` or `{- -}` |
-| HTML/XML | - | `<!-- -->` |
-
-AI responses always use block comments with `[AI]` marker.
+```json
+{
+  "q_1737200000000": "A closure is a function that...",
+  "q_1737200001000": "Async/await allows you to write..."
+}
+```
 
 ---
 
 ## Key Files
 
 ### init.lua - Plugin Entry Point
-- Version: 2.0.0
-- Creates user commands (`:EduTutorAsk`, `:EduTutorToggle`, etc.)
-- Sets up keymaps (ask + toggle)
-- Main functions: `ask()`, `ask_visual()`, `toggle_float()`
-- Multi-language UI messages (English, Vietnamese)
+- Version: 3.0.0
+- Main functions: `spawn_question()`, `spawn_question_visual()`, `ask()`
+- Creates user commands and keymaps
+- Parses JSON response from LLM
 
-### parser.lua - Comment Detection
-- `find_question_near_cursor()` - Finds comment near cursor without [AI] response below
-- `is_ai_response_start()` - Detects `/* [AI]` or `// [AI]` marker
-- `find_ai_response_block()` - Finds and extracts AI response content
-- `get_visual_selection()` - Get visual selection range and content
+### parser.lua - Question Block Detection
+- `generate_id()` - Generate unique timestamp-based ID
+- `find_pending_questions()` - Scan buffer for `[PENDING:*]` blocks
+- `find_question_by_id()` - Find specific question by ID
+- `has_pending_questions()` - Check if any pending
+- Supports both block and line comment styles
 
-### prompts.lua - Unified Prompt
-- Single `SYSTEM_PROMPT` - LLM auto-detects question vs code request
-- No more mode-specific prompts
+### comment_writer.lua - Block Spawning & Response Writing
+- `spawn_question_block()` - Create new `[Q:id]...[PENDING:id]` block
+- `replace_pending_with_response()` - Replace `[PENDING:id]` with answer
+- `replace_pending_batch()` - Batch replace multiple questions
+- Handles 40+ languages
+
+### prompts.lua - System Prompt
+- Instructs LLM to respond with JSON format
+- Auto-detects question vs code request
 - Bilingual support (English, Vietnamese)
-- `build_user_prompt()` - Includes cursor position hint
 
-### comment_writer.lua - Response Insertion
-- Always uses `/* [AI] ... */` format (or line comment equivalent)
-- `AI_MARKER = "[AI]"` constant
-- Streaming support: `start_streaming()`, `update_streaming()`, `finish_streaming()`
-- `find_ai_response_block()` - For float window sync
-- Supports 40+ languages
-
-### float_window.lua - Float Window Toggle
-- `toggle()` - Open/close float window for AI response
-- `open()` - Open float with stripped comment content
-- `close(save)` - Close, optionally save changes back
-- Keymaps: `q`/`<Esc>` close, `<C-s>`/`:w` save
-- Markdown syntax highlighting
-- Editable buffer
-
-### provider.lua - LLM API Client
-- Declarative provider definitions with inheritance
-- Built-in: Claude, OpenAI, Gemini, DeepSeek, Groq, Together, OpenRouter, Ollama
-- Streaming with debounced UI updates
+### context.lua - Context Extraction
+- `extract()` - Main entry, auto-selects mode
+- `build_full_project_context()` - For small projects
+- `build_adaptive_context()` - For large projects
 
 ---
 
@@ -228,18 +222,19 @@ luacheck lua/
 stylua lua/
 
 # Run tests
-nvim --headless -u tests/minimal_init.lua -c "lua require('tests.simplified_spec').run_all()" -c "qa"
+nvim --headless -u tests/minimal_init.lua -c "lua require('tests.spec').run_all()" -c "qa"
 ```
 
 ### Plugin Usage (in Neovim)
 ```vim
 " Core keymaps
-<leader>ma           " Ask about comment near cursor
-<leader>mt           " Toggle AI response in float window
+<leader>mq           " Spawn new question block
+<leader>ma           " Process all pending questions
 
 " Commands
+:EduTutorQuestion    " Same as <leader>mq
 :EduTutorAsk         " Same as <leader>ma
-:EduTutorToggle      " Same as <leader>mt
+:EduTutorPending     " Show pending question count
 
 " Knowledge commands
 :EduTutorHistory     " Show Q&A history
@@ -263,56 +258,65 @@ nvim --headless -u tests/minimal_init.lua -c "lua require('tests.simplified_spec
 
 ## Usage Examples
 
-### Asking Questions (No Prefix Needed)
+### Basic Question
 
 ```javascript
-// What is the time complexity of this algorithm?
-// Explain how closures work
-// Review this function for security issues
-// Why does this sometimes return nil?
-// What's the best practice for error handling here?
-```
+// Press <leader>mq, type question:
+/* [Q:q_1737200000000]
+What is the time complexity of this algorithm?
+[PENDING:q_1737200000000]
+*/
 
-### Requesting Code (No Prefix Needed)
+// Press <leader>ma, AI responds:
+/* [Q:q_1737200000000]
+What is the time complexity of this algorithm?
 
-```javascript
-// function to validate email with regex
-// async function to fetch user with retry logic
-// React hook for debouncing input
-// helper to deep clone an object
-```
-
-### Response Format
-
-```javascript
-// What is a closure?
-/* [AI]
-A closure is a function that "closes over" variables from its outer scope,
-maintaining access to them even after the outer function has returned.
-
-Example:
-```js
-function counter() {
-  let count = 0;
-  return () => ++count;
-}
-const increment = counter();
-increment(); // 1
-increment(); // 2
-```
-
-Best practice: Use for data privacy, callbacks, and factory functions.
-Watch out: Can cause memory leaks if holding large objects.
+The algorithm has O(n log n) time complexity because...
 */
 ```
 
-### Using Float Window
+### Multiple Questions
 
-1. Position cursor near an AI response
-2. Press `<leader>mt` to open in float window
-3. Edit the content (markdown syntax highlighting)
-4. Press `<C-s>` to save changes back to source file
-5. Press `q` to close without saving
+```javascript
+/* [Q:q_1737200000000]
+What is closure?
+[PENDING:q_1737200000000]
+*/
+
+function example() {
+  // ...code...
+}
+
+/* [Q:q_1737200001000]
+How does async work?
+[PENDING:q_1737200001000]
+*/
+```
+
+Both answered in single request when `<leader>ma` is pressed.
+
+### Visual Selection
+
+```javascript
+// Select this function, press <leader>mq:
+function processData(items) {
+  return items.filter(x => x.active).map(x => x.value);
+}
+
+// Question block created:
+/* [Q:q_1737200000000]
+Regarding this code:
+```
+function processData(items) {
+  return items.filter(x => x.active).map(x => x.value);
+}
+```
+
+[PENDING:q_1737200000000]
+*/
+
+// Type your question after the code block
+```
 
 ---
 
@@ -324,8 +328,8 @@ require('editutor').setup({
   model = "deepseek-chat",
   language = "Vietnamese",  -- or "English"
   keymaps = {
-    ask = "<leader>ma",      -- Ask about comment
-    toggle = "<leader>mt",   -- Toggle float window
+    question = "<leader>mq", -- Spawn question block
+    ask = "<leader>ma",      -- Process pending questions
   },
   context = {
     token_budget = 20000,    -- Max tokens for context
@@ -341,57 +345,52 @@ require('editutor').setup({
 - Use `local` for all variables
 - Prefer `vim.tbl_*` functions for table operations
 - Use `vim.notify` for user messages
-- Async operations via `plenary.job` and LSP async callbacks
 - Follow LazyVim conventions
 
 ---
 
-## Development Phases
+## Version History
 
-### Phase 1-9: COMPLETE (v0.1 - v1.2)
-See git history for details.
+### v3.0.0 - Question Blocks (Current)
+- New `[Q:id]` / `[PENDING:id]` block format
+- Timestamp-based unique IDs
+- Batch processing multiple questions
+- JSON response format from LLM
+- Removed streaming (simpler, more reliable)
+- Removed float window (no longer needed)
+- Visual selection support for code context
 
-### Phase 10: v2.0 Simplification - COMPLETE
-- [x] Removed Q:/C: prefix requirement
-- [x] LLM auto-detects intent (question vs code request)
-- [x] Unified `/* [AI] ... */` response format
-- [x] Float window toggle for viewing/editing responses
-- [x] Float window sync back to source file
-- [x] Simplified keymaps (ask + toggle)
+### v2.0.0 - Simplified
+- Removed Q:/C: prefix requirement
+- LLM auto-detects intent
+- Float window for viewing/editing responses
 
-### Future Enhancements
-- [ ] Obsidian integration
-- [ ] Team sharing
+### v1.x - Initial
+- Basic Q&A with prefix markers
+- Single question processing
 
 ---
 
 ## Common Issues & Solutions
 
-### Issue: Comment not detected
+### Issue: No pending questions found
 ```lua
--- Make sure you're near a comment line
--- The plugin searches 15 lines up/down from cursor
--- Comments with [AI] response below are skipped
+-- Make sure you have [PENDING:id] markers in the file
+-- Use <leader>mq to spawn a question block first
 ```
 
-### Issue: Float window not opening
+### Issue: JSON parse error
 ```lua
--- Make sure there's an AI response below the comment
--- Look for /* [AI] ... */ block
--- Position cursor on or near the original comment
-```
-
-### Issue: Changes not saving from float window
-```lua
--- Press <C-s> or use :w command in float window
--- Just pressing q or <Esc> closes without saving
+-- LLM may return malformed JSON
+-- Check :EduTutorLog for raw response
+-- Try again or simplify your question
 ```
 
 ### Issue: LLM API timeout
 ```lua
 require('editutor').setup({
   provider = {
-    timeout = 30000,  -- 30 seconds
+    timeout = 60000,  -- 60 seconds
   }
 })
 ```
@@ -403,4 +402,3 @@ require('editutor').setup({
 - [Tree-sitter Neovim Guide](https://tree-sitter.github.io/tree-sitter/)
 - [Neovim LSP Documentation](https://neovim.io/doc/user/lsp.html)
 - [Claude API Docs](https://docs.anthropic.com/)
-- [Pedagogical AI Research (CS50.ai)](https://cs50.ai/)
