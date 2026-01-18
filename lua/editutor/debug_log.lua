@@ -341,4 +341,28 @@ function M.open()
   end
 end
 
+-- =============================================================================
+-- SIMPLE LOGGING
+-- =============================================================================
+
+---Simple log message (appends to project log)
+---@param message string Message to log
+function M.log(message)
+  local log_path = M.get_log_path()
+  local line = string.format("[%s] %s", timestamp(), message)
+  
+  -- Read existing content
+  local existing = ""
+  if vim.fn.filereadable(log_path) == 1 then
+    local existing_lines = vim.fn.readfile(log_path)
+    existing = table.concat(existing_lines, "\n")
+    if existing ~= "" then
+      existing = existing .. "\n"
+    end
+  end
+  
+  -- Append new line
+  vim.fn.writefile(vim.split(existing .. line, "\n"), log_path)
+end
+
 return M
