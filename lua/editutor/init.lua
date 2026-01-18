@@ -251,8 +251,11 @@ function M.ask()
 
   local filepath = vim.api.nvim_buf_get_name(bufnr)
 
-  -- Start loading
-  loading.start(string.format(M._msg("processing"), #questions), bufnr, 0)
+  -- Get cursor position for loading indicator (use first pending question's line)
+  local loading_line = questions[1] and questions[1].block_start and (questions[1].block_start - 1) or nil
+
+  -- Start loading at the first pending question's position
+  loading.start(string.format(M._msg("processing"), #questions), bufnr, loading_line)
 
   -- Extract context
   context.extract(function(full_context, metadata)
@@ -303,8 +306,8 @@ function M._process_questions(questions, filepath, bufnr, full_context, metadata
 
   local start_time = vim.loop.hrtime()
 
-  -- Query LLM (no streaming - wait for full response)
-  provider.query(system_prompt, user_prompt, function(response, err)
+  -- Query LLM (async - wait for full response)
+  provider.query_async(system_prompt, user_prompt, function(response, err)
     loading.stop()
 
     local duration_ms = math.floor((vim.loop.hrtime() - start_time) / 1000000)
