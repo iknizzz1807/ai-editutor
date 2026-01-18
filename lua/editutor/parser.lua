@@ -101,7 +101,7 @@ end
 ---@field indent string Indentation of the block
 
 ---Find all pending questions in current buffer
----Looks for blocks with [PENDING:id] marker
+---Simple approach: find [PENDING:id], then find matching [Q:id]
 ---@param bufnr? number Buffer number
 ---@return PendingQuestion[] questions List of pending questions
 function M.find_pending_questions(bufnr)
@@ -110,66 +110,65 @@ function M.find_pending_questions(bufnr)
   local style = M.get_comment_style(bufnr)
   local questions = {}
 
-  if not style.block then
-    -- For languages without block comments, use line comment detection
-    return M._find_pending_line_comments(lines, style)
+  -- First pass: find all [PENDING:id] markers
+  local pending_markers = {} -- id -> line_number
+  for i, line in ipairs(lines) do
+    local id = line:match("%[PENDING:(q_%d+)%]")
+    if id then
+      pending_markers[id] = i
+    end
   end
 
-  local block_start_pattern = escape_pattern(style.block[1])
-  local block_end_pattern = escape_pattern(style.block[2])
+  -- If no pending markers, return empty
+  if vim.tbl_isempty(pending_markers) then
+    return questions
+  end
 
-  local i = 1
-  while i <= #lines do
-    local line = lines[i]
-
-    -- Check for block start with [Q:id]
+  -- Second pass: find [Q:id] and match with pending
+  for i, line in ipairs(lines) do
     local id = line:match("%[Q:(q_%d+)%]")
-    if id and line:match("^%s*" .. block_start_pattern) then
-      local indent = line:match("^(%s*)") or ""
+    if id and pending_markers[id] then
+      local pending_line = pending_markers[id]
       local block_start = i
-      local block_end = nil
-      local pending_line = nil
-      local question_lines = {}
+      local block_end = pending_line
+      local indent = line:match("^(%s*)") or ""
 
-      -- Search for block end and [PENDING:id]
-      for j = i + 1, #lines do
-        local check_line = lines[j]
-
-        -- Check for [PENDING:id]
-        if check_line:match("%[PENDING:" .. escape_pattern(id) .. "%]") then
-          pending_line = j
+      -- Look backwards for block comment start (/* or similar)
+      if style.block then
+        for j = i, math.max(1, i - 10), -1 do
+          if lines[j]:match(escape_pattern(style.block[1])) then
+            block_start = j
+            indent = lines[j]:match("^(%s*)") or ""
+            break
+          end
         end
 
-        -- Check for block end
-        if check_line:match(block_end_pattern .. "%s*$") then
-          block_end = j
-          break
-        end
-
-        -- Collect question text (lines between start and PENDING)
-        if not pending_line then
-          local content = check_line:gsub("^%s*", "")
-          if content ~= "" then
-            table.insert(question_lines, content)
+        -- Look forwards for block comment end (*/ or similar)
+        for j = pending_line, math.min(#lines, pending_line + 10) do
+          if lines[j]:match(escape_pattern(style.block[2])) then
+            block_end = j
+            break
           end
         end
       end
 
-      -- If we found a complete block with PENDING marker
-      if block_end and pending_line then
-        table.insert(questions, {
-          id = id,
-          question = table.concat(question_lines, "\n"),
-          block_start = block_start,
-          block_end = block_end,
-          pending_line = pending_line,
-          indent = indent,
-        })
+      -- Extract question text (between [Q:id] line and [PENDING:id] line)
+      local question_lines = {}
+      for j = i + 1, pending_line - 1 do
+        local content = lines[j]:gsub("^%s*", ""):gsub("%s*$", "")
+        if content ~= "" then
+          table.insert(question_lines, content)
+        end
       end
 
-      i = block_end and (block_end + 1) or (i + 1)
-    else
-      i = i + 1
+      table.insert(questions, {
+        id = id,
+        question = table.concat(question_lines, "\n"),
+        block_start = block_start,
+        block_end = block_end,
+        pending_line = pending_line,
+        indent = indent,
+      })
     end
   end
 
