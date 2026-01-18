@@ -165,63 +165,38 @@ end
 ---@return string[] lines Formatted lines
 function M._format_response(response, indent)
   local lines = {}
-  local max_width = 90
+  local max_width = 120 -- Wide enough for most screens
 
-  -- Split by lines first
-  local raw_lines = {}
-  for line in response:gmatch("[^\n]*") do
-    table.insert(raw_lines, line)
-  end
+  -- Split by double newlines (paragraphs)
+  local paragraphs = vim.split(response, "\n\n", { plain = true })
 
-  -- Process lines: detect code blocks (lines starting with spaces) vs text
-  local i = 1
-  while i <= #raw_lines do
-    local line = raw_lines[i]
-    local trimmed = line:match("^%s*(.-)%s*$") or ""
+  for _, para in ipairs(paragraphs) do
+    local trimmed = para:gsub("^%s+", ""):gsub("%s+$", "")
 
-    -- Empty line = paragraph break
     if trimmed == "" then
+      -- Empty paragraph = blank line
       table.insert(lines, indent)
-      i = i + 1
-
-    -- Code line (starts with 2+ spaces or tab) - preserve as-is
-    elseif line:match("^  ") or line:match("^\t") then
-      table.insert(lines, indent .. line)
-      i = i + 1
-
-    -- Regular text line - collect paragraph and wrap
-    else
-      local para_lines = { trimmed }
-      local j = i + 1
-
-      -- Collect consecutive non-empty, non-code lines
-      while j <= #raw_lines do
-        local next_line = raw_lines[j]
-        local next_trimmed = next_line:match("^%s*(.-)%s*$") or ""
-
-        -- Stop at empty line, code line, or special markers
-        if next_trimmed == "" or next_line:match("^  ") or next_line:match("^\t") then
-          break
-        end
-
-        -- Check for list items or special lines (don't merge)
-        if next_trimmed:match("^[%-%*%d]+[%.%)%s]") or next_trimmed:match("^[A-Z][a-z]+:") then
-          break
-        end
-
-        table.insert(para_lines, next_trimmed)
-        j = j + 1
+    elseif trimmed:match("^%s%s") or trimmed:match("^\t") or trimmed:match("```") then
+      -- Code block - preserve line breaks
+      for line in para:gmatch("[^\n]+") do
+        table.insert(lines, indent .. line)
       end
-
-      -- Join and wrap the paragraph
-      local para_text = table.concat(para_lines, " ")
-      local wrapped = M._wrap_text(para_text, max_width - #indent)
+    else
+      -- Regular paragraph - join all lines with space, then wrap
+      local joined = trimmed:gsub("\n", " "):gsub("%s+", " ")
+      local wrapped = M._wrap_text(joined, max_width - #indent)
       for _, wrapped_line in ipairs(wrapped) do
         table.insert(lines, indent .. wrapped_line)
       end
-
-      i = j
     end
+
+    -- Add blank line between paragraphs
+    table.insert(lines, indent)
+  end
+
+  -- Remove trailing blank line
+  if #lines > 0 and lines[#lines] == indent then
+    table.remove(lines)
   end
 
   return lines

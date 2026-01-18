@@ -15,7 +15,7 @@ local cache = require("editutor.cache")
 local loading = require("editutor.loading")
 local debug_log = require("editutor.debug_log")
 
-M._name = "EduTutor"
+M._name = "Editutor"
 M._version = "3.0.0"
 M._setup_called = false
 
@@ -33,7 +33,7 @@ M._messages = {
     partial_success = "Answered %d/%d question(s). %d failed.",
     error = "Error: ",
     no_response = "No response received",
-    invalid_json = "Failed to parse LLM response as JSON",
+    invalid_response = "Failed to parse LLM response (missing [ANSWER:id] markers)",
     context_budget_exceeded = "Context exceeds budget (%d > %d tokens)",
   },
   vi = {
@@ -45,7 +45,7 @@ M._messages = {
     partial_success = "Da tra loi %d/%d cau hoi. %d that bai.",
     error = "Loi: ",
     no_response = "Khong nhan duoc phan hoi",
-    invalid_json = "Khong the parse JSON tu LLM response",
+    invalid_response = "Khong the parse LLM response (thieu [ANSWER:id] markers)",
     context_budget_exceeded = "Context vuot budget (%d > %d tokens)",
   },
 }
@@ -91,30 +91,30 @@ end
 
 function M._create_commands()
   -- Spawn question block
-  vim.api.nvim_create_user_command("EduTutorQuestion", function()
+  vim.api.nvim_create_user_command("EditutorQuestion", function()
     M.spawn_question()
   end, { desc = "Spawn a new question block" })
 
   -- Process pending questions
-  vim.api.nvim_create_user_command("EduTutorAsk", function()
+  vim.api.nvim_create_user_command("EditutorAsk", function()
     M.ask()
   end, { desc = "Process all pending questions in current file" })
 
   -- Show pending count
-  vim.api.nvim_create_user_command("EduTutorPending", function()
+  vim.api.nvim_create_user_command("EditutorPending", function()
     M.show_pending()
   end, { desc = "Show pending question count" })
 
   -- Knowledge commands
-  vim.api.nvim_create_user_command("EduTutorHistory", function()
+  vim.api.nvim_create_user_command("EditutorHistory", function()
     M.show_history()
   end, { desc = "Show Q&A history" })
 
-  vim.api.nvim_create_user_command("EduTutorExport", function(opts)
+  vim.api.nvim_create_user_command("EditutorExport", function(opts)
     M.export_knowledge(opts.args)
   end, { nargs = "?", desc = "Export knowledge to markdown" })
 
-  vim.api.nvim_create_user_command("EduTutorBrowse", function(opts)
+  vim.api.nvim_create_user_command("EditutorBrowse", function(opts)
     M.browse_knowledge(opts.args)
   end, {
     nargs = "?",
@@ -125,7 +125,7 @@ function M._create_commands()
   })
 
   -- Language command
-  vim.api.nvim_create_user_command("EduTutorLang", function(opts)
+  vim.api.nvim_create_user_command("EditutorLang", function(opts)
     M.set_language(opts.args ~= "" and opts.args or nil)
   end, {
     nargs = "?",
@@ -136,17 +136,17 @@ function M._create_commands()
   })
 
   -- Cache command
-  vim.api.nvim_create_user_command("EduTutorClearCache", function()
+  vim.api.nvim_create_user_command("EditutorClearCache", function()
     cache.clear()
     vim.notify("[ai-editutor] Cache cleared", vim.log.levels.INFO)
   end, { desc = "Clear context cache" })
 
   -- Debug commands
-  vim.api.nvim_create_user_command("EduTutorLog", function()
+  vim.api.nvim_create_user_command("EditutorLog", function()
     debug_log.open()
   end, { desc = "Open debug log" })
 
-  vim.api.nvim_create_user_command("EduTutorClearLog", function()
+  vim.api.nvim_create_user_command("EditutorClearLog", function()
     debug_log.clear()
     vim.notify("[ai-editutor] Debug log cleared", vim.log.levels.INFO)
   end, { desc = "Clear debug log" })
@@ -332,11 +332,11 @@ function M._process_questions(questions, filepath, bufnr, full_context, metadata
       return
     end
 
-    -- Parse JSON response
-    local responses = M._parse_json_response(response)
+    -- Parse marker-based response
+    local responses = M._parse_response(response)
     if not responses then
-      vim.notify("[ai-editutor] " .. M._msg("invalid_json"), vim.log.levels.ERROR)
-      debug_log.log("Failed to parse JSON: " .. response)
+      vim.notify("[ai-editutor] " .. M._msg("invalid_response"), vim.log.levels.ERROR)
+      debug_log.log("Failed to parse response: " .. response:sub(1, 500))
       return
     end
 
@@ -367,76 +367,34 @@ function M._process_questions(questions, filepath, bufnr, full_context, metadata
   end)
 end
 
----Parse JSON response from LLM
+---Parse marker-based response from LLM
+---Format: [ANSWER:q_123]...[/ANSWER:q_123]
 ---@param response string Raw response
 ---@return table<string, string>|nil Map of id -> answer
-function M._parse_json_response(response)
+function M._parse_response(response)
   if not response or response == "" then
     return nil
   end
 
-  local json_str = nil
+  local results = {}
+  local found_any = false
 
-  -- Strategy 1: Remove markdown code fences if present
-  -- Handle ```json ... ``` or ``` ... ```
-  local stripped = response:gsub("^%s*```json?%s*", ""):gsub("%s*```%s*$", "")
-  if stripped ~= response then
-    json_str = stripped
+  -- Pattern: [ANSWER:q_xxxxx] ... [/ANSWER:q_xxxxx]
+  -- Use non-greedy match to handle multiple answers
+  for id, answer in response:gmatch("%[ANSWER:(q_%d+)%](.-)%[/ANSWER:q_%d+%]") do
+    -- Trim whitespace from answer
+    answer = answer:gsub("^%s*\n?", ""):gsub("\n?%s*$", "")
+    results[id] = answer
+    found_any = true
+    debug_log.log("Parsed answer for " .. id .. " (" .. #answer .. " chars)")
   end
 
-  -- Strategy 2: Find JSON object by locating first { and matching }
-  if not json_str then
-    local start_idx = response:find("{")
-    if start_idx then
-      local depth = 0
-      local in_string = false
-      local escape_next = false
-
-      for i = start_idx, #response do
-        local char = response:sub(i, i)
-
-        if escape_next then
-          escape_next = false
-        elseif char == "\\" and in_string then
-          escape_next = true
-        elseif char == '"' and not escape_next then
-          in_string = not in_string
-        elseif not in_string then
-          if char == "{" then
-            depth = depth + 1
-          elseif char == "}" then
-            depth = depth - 1
-            if depth == 0 then
-              json_str = response:sub(start_idx, i)
-              break
-            end
-          end
-        end
-      end
-    end
+  if found_any then
+    return results
   end
 
-  if not json_str then
-    json_str = response
-  end
-
-  -- Clean whitespace
-  json_str = json_str:gsub("^%s+", ""):gsub("%s+$", "")
-
-  -- Try to parse
-  local ok, result = pcall(vim.json.decode, json_str)
-  if ok and type(result) == "table" then
-    return result
-  end
-
-  -- Try fixing trailing commas
-  json_str = json_str:gsub(",%s*}", "}")
-  ok, result = pcall(vim.json.decode, json_str)
-  if ok and type(result) == "table" then
-    return result
-  end
-
-  debug_log.log("JSON parse failed. Extracted: " .. json_str:sub(1, 200))
+  -- Fallback: try to find any answer content if markers are malformed
+  debug_log.log("No [ANSWER:id] markers found. Raw response: " .. response:sub(1, 300))
   return nil
 end
 
@@ -499,7 +457,7 @@ function M.browse_knowledge(date)
       table.insert(lines, string.format("%d. %s (%d entries)", i, d, #entries))
     end
     table.insert(lines, "")
-    table.insert(lines, "Usage: :EduTutorBrowse YYYY-MM-DD")
+    table.insert(lines, "Usage: :EditutorBrowse YYYY-MM-DD")
 
     print(table.concat(lines, "\n"))
     return
@@ -533,7 +491,7 @@ end
 function M.set_language(lang)
   if not lang then
     local current = config.options.language
-    print(string.format("Current language: %s\nUsage: :EduTutorLang English or :EduTutorLang Vietnamese", current))
+    print(string.format("Current language: %s\nUsage: :EditutorLang English or :EditutorLang Vietnamese", current))
     return
   end
 

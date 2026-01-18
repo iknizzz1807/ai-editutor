@@ -223,31 +223,31 @@ Storage Structure: >
 Each day gets its own file. Easy to manage, review, or delete.
 
 Commands:
-  :EduTutorHistory        Show recent Q&A (last 7 days)
-  :EduTutorBrowse         List available dates
-  :EduTutorBrowse [date]  Show entries for specific date
-  :EduTutorExport [path]  Export to markdown
+  :EditutorHistory        Show recent Q&A (last 7 days)
+  :EditutorBrowse         List available dates
+  :EditutorBrowse [date]  Show entries for specific date
+  :EditutorExport [path]  Export to markdown
 
 ==============================================================================
 12. COMMANDS                                                *editutor-commands*
 
 Core Commands:
-  :EduTutorAsk            Ask about comment near cursor
-  :EduTutorToggle         Toggle AI response in float window
+  :EditutorAsk            Ask about comment near cursor
+  :EditutorToggle         Toggle AI response in float window
 
 Knowledge Commands:
-  :EduTutorHistory        Show recent Q&A history
-  :EduTutorBrowse [date]  Browse by date (tab-complete dates)
-  :EduTutorExport [path]  Export to markdown
+  :EditutorHistory        Show recent Q&A history
+  :EditutorBrowse [date]  Browse by date (tab-complete dates)
+  :EditutorExport [path]  Export to markdown
 
 Language Commands:
-  :EduTutorLang           Show/set language
-  :EduTutorLang English   English responses
-  :EduTutorLang Vietnamese Vietnamese responses
+  :EditutorLang           Show/set language
+  :EditutorLang English   English responses
+  :EditutorLang Vietnamese Vietnamese responses
 
 Other Commands:
-  :EduTutorClearCache     Clear context cache
-  :EduTutorLog            Open debug log
+  :EditutorClearCache     Clear context cache
+  :EditutorLog            Open debug log
   :checkhealth editutor   Check plugin health
 
 ==============================================================================

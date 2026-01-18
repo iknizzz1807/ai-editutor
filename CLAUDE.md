@@ -232,23 +232,23 @@ nvim --headless -u tests/minimal_init.lua -c "lua require('tests.spec').run_all(
 <leader>ma           " Process all pending questions
 
 " Commands
-:EduTutorQuestion    " Same as <leader>mq
-:EduTutorAsk         " Same as <leader>ma
-:EduTutorPending     " Show pending question count
+:EditutorQuestion    " Same as <leader>mq
+:EditutorAsk         " Same as <leader>ma
+:EditutorPending     " Show pending question count
 
 " Knowledge commands
-:EduTutorHistory     " Show Q&A history
-:EduTutorBrowse      " Browse by date
-:EduTutorExport      " Export to markdown
+:EditutorHistory     " Show Q&A history
+:EditutorBrowse      " Browse by date
+:EditutorExport      " Export to markdown
 
 " Language commands
-:EduTutorLang             " Show current language
-:EduTutorLang Vietnamese  " Switch to Vietnamese
-:EduTutorLang English     " Switch to English
+:EditutorLang             " Show current language
+:EditutorLang Vietnamese  " Switch to Vietnamese
+:EditutorLang English     " Switch to English
 
 " Other commands
-:EduTutorClearCache   " Clear context cache
-:EduTutorLog          " Open debug log
+:EditutorClearCache   " Clear context cache
+:EditutorLog          " Open debug log
 
 " Health check
 :checkhealth editutor
@@ -382,7 +382,7 @@ require('editutor').setup({
 ### Issue: JSON parse error
 ```lua
 -- LLM may return malformed JSON
--- Check :EduTutorLog for raw response
+-- Check :EditutorLog for raw response
 -- Try again or simplify your question
 ```
 

@@ -26,7 +26,7 @@ function M.setup()
     return -- Already setup
   end
 
-  M._autocmd_group = vim.api.nvim_create_augroup("EduTutorCache", { clear = true })
+  M._autocmd_group = vim.api.nvim_create_augroup("EditutorCache", { clear = true })
 
   -- Invalidate file-specific cache on file save
   vim.api.nvim_create_autocmd("BufWritePost", {

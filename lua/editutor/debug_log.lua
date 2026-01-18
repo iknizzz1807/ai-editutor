@@ -69,7 +69,7 @@ function M.log_request(request)
 
   -- Header
   table.insert(lines, separator())
-  table.insert(lines, string.format("[%s] EduTutor Request", timestamp()))
+  table.insert(lines, string.format("[%s] Editutor Request", timestamp()))
   table.insert(lines, separator())
   table.insert(lines, "")
 

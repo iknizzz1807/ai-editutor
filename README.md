@@ -150,9 +150,9 @@ Comments that already have an `[AI]` response below are automatically skipped.
 ### Knowledge That Stays
 Every Q&A is saved by date. Review your learning history:
 ```vim
-:EduTutorHistory           " Recent Q&A
-:EduTutorBrowse            " Browse by date
-:EduTutorExport            " Export to markdown
+:EditutorHistory           " Recent Q&A
+:EditutorBrowse            " Browse by date
+:EditutorExport            " Export to markdown
 ```
 
 ## Configuration
@@ -191,12 +191,12 @@ require("editutor").setup({
 
 | Command | What it does |
 |---------|-------------|
-| `:EduTutorAsk` | Ask about comment near cursor |
-| `:EduTutorToggle` | Toggle AI response in float window |
-| `:EduTutorHistory` | Recent Q&A history |
-| `:EduTutorBrowse` | Browse by date |
-| `:EduTutorExport` | Export to markdown |
-| `:EduTutorLang` | Switch language |
+| `:EditutorAsk` | Ask about comment near cursor |
+| `:EditutorToggle` | Toggle AI response in float window |
+| `:EditutorHistory` | Recent Q&A history |
+| `:EditutorBrowse` | Browse by date |
+| `:EditutorExport` | Export to markdown |
+| `:EditutorLang` | Switch language |
 
 ## Keymaps
 

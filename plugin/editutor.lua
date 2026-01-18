@@ -10,7 +10,7 @@ vim.g.loaded_editutor = true
 -- This allows users to configure the plugin in their lazy.nvim spec
 
 -- Create the main command that triggers lazy loading
-vim.api.nvim_create_user_command("EduTutor", function(opts)
+vim.api.nvim_create_user_command("Editutor", function(opts)
   local editutor = require("editutor")
 
   -- If setup hasn't been called, call with defaults
@@ -26,7 +26,7 @@ vim.api.nvim_create_user_command("EduTutor", function(opts)
   elseif subcommand == "version" then
     vim.notify("ai-editutor v" .. editutor.version(), vim.log.levels.INFO)
   else
-    vim.notify("Unknown command: " .. subcommand .. ". Use :EduTutor ask", vim.log.levels.ERROR)
+    vim.notify("Unknown command: " .. subcommand .. ". Use :Editutor ask", vim.log.levels.ERROR)
   end
 end, {
   nargs = "?",
