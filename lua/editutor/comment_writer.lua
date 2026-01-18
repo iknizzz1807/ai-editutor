@@ -167,37 +167,60 @@ function M._format_response(response, indent)
   local lines = {}
   local max_width = 90
 
-  -- Split response into paragraphs
-  local paragraphs = {}
-  local current_para = {}
-
+  -- Split by lines first
+  local raw_lines = {}
   for line in response:gmatch("[^\n]*") do
+    table.insert(raw_lines, line)
+  end
+
+  -- Process lines: detect code blocks (lines starting with spaces) vs text
+  local i = 1
+  while i <= #raw_lines do
+    local line = raw_lines[i]
     local trimmed = line:match("^%s*(.-)%s*$") or ""
 
+    -- Empty line = paragraph break
     if trimmed == "" then
-      if #current_para > 0 then
-        table.insert(paragraphs, table.concat(current_para, " "))
-        current_para = {}
+      table.insert(lines, indent)
+      i = i + 1
+
+    -- Code line (starts with 2+ spaces or tab) - preserve as-is
+    elseif line:match("^  ") or line:match("^\t") then
+      table.insert(lines, indent .. line)
+      i = i + 1
+
+    -- Regular text line - collect paragraph and wrap
+    else
+      local para_lines = { trimmed }
+      local j = i + 1
+
+      -- Collect consecutive non-empty, non-code lines
+      while j <= #raw_lines do
+        local next_line = raw_lines[j]
+        local next_trimmed = next_line:match("^%s*(.-)%s*$") or ""
+
+        -- Stop at empty line, code line, or special markers
+        if next_trimmed == "" or next_line:match("^  ") or next_line:match("^\t") then
+          break
+        end
+
+        -- Check for list items or special lines (don't merge)
+        if next_trimmed:match("^[%-%*%d]+[%.%)%s]") or next_trimmed:match("^[A-Z][a-z]+:") then
+          break
+        end
+
+        table.insert(para_lines, next_trimmed)
+        j = j + 1
       end
-      table.insert(paragraphs, "")
-    else
-      table.insert(current_para, trimmed)
-    end
-  end
 
-  if #current_para > 0 then
-    table.insert(paragraphs, table.concat(current_para, " "))
-  end
-
-  -- Wrap paragraphs
-  for _, para in ipairs(paragraphs) do
-    if para == "" then
-      table.insert(lines, indent .. "")
-    else
-      local wrapped = M._wrap_text(para, max_width - #indent)
+      -- Join and wrap the paragraph
+      local para_text = table.concat(para_lines, " ")
+      local wrapped = M._wrap_text(para_text, max_width - #indent)
       for _, wrapped_line in ipairs(wrapped) do
         table.insert(lines, indent .. wrapped_line)
       end
+
+      i = j
     end
   end
 

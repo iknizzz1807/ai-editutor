@@ -288,6 +288,10 @@ function M._process_questions(questions, filepath, bufnr, full_context, metadata
   local system_prompt = prompts.get_system_prompt()
   local user_prompt = prompts.build_user_prompt(questions, full_context)
 
+  -- Log context size for debugging
+  local prompt_size = #system_prompt + #user_prompt
+  debug_log.log(string.format("Prompt size: %d chars (~%d tokens)", prompt_size, math.floor(prompt_size / 4)))
+
   -- Get provider info
   local provider_info = provider.get_info()
 
@@ -367,16 +371,70 @@ end
 ---@param response string Raw response
 ---@return table<string, string>|nil Map of id -> answer
 function M._parse_json_response(response)
-  -- Try to extract JSON from response (in case LLM adds extra text)
-  local json_str = response:match("```json%s*(.-)%s*```")
-    or response:match("```%s*(.-)%s*```")
-    or response:match("(%b{})")
-    or response
+  if not response or response == "" then
+    return nil
+  end
 
-  -- Clean up potential issues
+  -- Try multiple extraction strategies
+  local json_str = nil
+
+  -- Strategy 1: Extract from markdown code fence
+  json_str = response:match("```json%s*(.-)%s*```")
+  if not json_str then
+    json_str = response:match("```%s*(.-)%s*```")
+  end
+
+  -- Strategy 2: Find JSON object with balanced braces
+  if not json_str then
+    -- Find first { and match to closing }
+    local start_idx = response:find("{")
+    if start_idx then
+      local depth = 0
+      local in_string = false
+      local escape_next = false
+
+      for i = start_idx, #response do
+        local char = response:sub(i, i)
+
+        if escape_next then
+          escape_next = false
+        elseif char == "\\" and in_string then
+          escape_next = true
+        elseif char == '"' and not escape_next then
+          in_string = not in_string
+        elseif not in_string then
+          if char == "{" then
+            depth = depth + 1
+          elseif char == "}" then
+            depth = depth - 1
+            if depth == 0 then
+              json_str = response:sub(start_idx, i)
+              break
+            end
+          end
+        end
+      end
+    end
+  end
+
+  -- Strategy 3: Use whole response
+  if not json_str then
+    json_str = response
+  end
+
+  -- Clean up
   json_str = json_str:gsub("^%s*", ""):gsub("%s*$", "")
 
+  -- Try to parse
   local ok, result = pcall(vim.json.decode, json_str)
+  if ok and type(result) == "table" then
+    return result
+  end
+
+  -- Last resort: try to fix common issues
+  -- Remove trailing commas before }
+  json_str = json_str:gsub(",%s*}", "}")
+  ok, result = pcall(vim.json.decode, json_str)
   if ok and type(result) == "table" then
     return result
   end
