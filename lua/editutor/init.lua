@@ -375,18 +375,17 @@ function M._parse_json_response(response)
     return nil
   end
 
-  -- Try multiple extraction strategies
   local json_str = nil
 
-  -- Strategy 1: Extract from markdown code fence
-  json_str = response:match("```json%s*(.-)%s*```")
-  if not json_str then
-    json_str = response:match("```%s*(.-)%s*```")
+  -- Strategy 1: Remove markdown code fences if present
+  -- Handle ```json ... ``` or ``` ... ```
+  local stripped = response:gsub("^%s*```json?%s*", ""):gsub("%s*```%s*$", "")
+  if stripped ~= response then
+    json_str = stripped
   end
 
-  -- Strategy 2: Find JSON object with balanced braces
+  -- Strategy 2: Find JSON object by locating first { and matching }
   if not json_str then
-    -- Find first { and match to closing }
     local start_idx = response:find("{")
     if start_idx then
       local depth = 0
@@ -417,13 +416,12 @@ function M._parse_json_response(response)
     end
   end
 
-  -- Strategy 3: Use whole response
   if not json_str then
     json_str = response
   end
 
-  -- Clean up
-  json_str = json_str:gsub("^%s*", ""):gsub("%s*$", "")
+  -- Clean whitespace
+  json_str = json_str:gsub("^%s+", ""):gsub("%s+$", "")
 
   -- Try to parse
   local ok, result = pcall(vim.json.decode, json_str)
@@ -431,14 +429,14 @@ function M._parse_json_response(response)
     return result
   end
 
-  -- Last resort: try to fix common issues
-  -- Remove trailing commas before }
+  -- Try fixing trailing commas
   json_str = json_str:gsub(",%s*}", "}")
   ok, result = pcall(vim.json.decode, json_str)
   if ok and type(result) == "table" then
     return result
   end
 
+  debug_log.log("JSON parse failed. Extracted: " .. json_str:sub(1, 200))
   return nil
 end
 

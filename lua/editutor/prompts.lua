@@ -17,7 +17,7 @@ YOUR ROLE:
 Answer questions embedded in code. Questions are marked with [Q:id] blocks containing [PENDING:id] markers.
 
 RESPONSE FORMAT:
-Respond with ONLY a valid JSON object (no markdown fences, no extra text):
+Respond with ONLY a raw JSON object. NO markdown code fences (no ```). Just the JSON directly:
 {"q_1234567890": "Your answer here...", "q_9876543210": "Second answer..."}
 
 CRITICAL JSON RULES:
@@ -50,7 +50,7 @@ VAI TRO:
 Tra loi cac cau hoi trong code. Cau hoi duoc danh dau bang [Q:id] blocks chua [PENDING:id] markers.
 
 DINH DANG RESPONSE:
-Chi tra ve JSON object hop le (khong co markdown fences, khong co text thua):
+Chi tra ve JSON object THUAN (KHONG co markdown code fences, KHONG co ```). Chi JSON truc tiep:
 {"q_1234567890": "Cau tra loi...", "q_9876543210": "Cau tra loi thu hai..."}
 
 QUY TAC JSON QUAN TRONG:
@@ -139,16 +139,10 @@ function M.build_user_prompt(questions, context_formatted)
   end
   table.insert(prompt_parts, "")
 
-  -- Add code context (truncate if too long for speed)
+  -- Add code context
   if context_formatted and context_formatted ~= "" then
     table.insert(prompt_parts, "=== " .. l.context .. " ===")
-    -- Limit context to ~8000 chars for faster response
-    if #context_formatted > 8000 then
-      table.insert(prompt_parts, context_formatted:sub(1, 8000))
-      table.insert(prompt_parts, "\n... (truncated for speed)")
-    else
-      table.insert(prompt_parts, context_formatted)
-    end
+    table.insert(prompt_parts, context_formatted)
     table.insert(prompt_parts, "")
   end
 
