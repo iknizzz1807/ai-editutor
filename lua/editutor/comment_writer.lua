@@ -174,37 +174,64 @@ end
 ---@return string[] lines Formatted lines
 function M._format_response(response, indent)
   local lines = {}
-  local max_width = 120 -- Wide enough for most screens
+  local max_width = 120
+
+  -- First, extract and protect code blocks (```lang ... ```)
+  local protected = {}
+  local placeholder_count = 0
+  local processed = response:gsub("```(%w*)\n(.-)```", function(lang, code)
+    placeholder_count = placeholder_count + 1
+    local key = "___CODE_BLOCK_" .. placeholder_count .. "___"
+    protected[key] = { lang = lang, code = code }
+    return key
+  end)
 
   -- Split by double newlines (paragraphs)
-  local paragraphs = vim.split(response, "\n\n", { plain = true })
+  local paragraphs = vim.split(processed, "\n\n", { plain = true })
 
   for _, para in ipairs(paragraphs) do
     local trimmed = para:gsub("^%s+", ""):gsub("%s+$", "")
 
     if trimmed == "" then
-      -- Empty paragraph = blank line
       table.insert(lines, indent)
-    elseif trimmed:match("^%s%s") or trimmed:match("^\t") or trimmed:match("```") then
-      -- Code block - preserve line breaks
+
+    elseif trimmed:match("^___CODE_BLOCK_%d+___$") then
+      -- Restore code block
+      local block = protected[trimmed]
+      if block then
+        table.insert(lines, indent)
+        if block.lang and block.lang ~= "" then
+          table.insert(lines, indent .. "```" .. block.lang)
+        else
+          table.insert(lines, indent .. "```")
+        end
+        for code_line in block.code:gmatch("[^\n]*") do
+          table.insert(lines, indent .. code_line)
+        end
+        table.insert(lines, indent .. "```")
+        table.insert(lines, indent)
+      end
+
+    elseif trimmed:match("^%s%s") or trimmed:match("^\t") then
+      -- Indented code (no fence) - preserve
       for line in para:gmatch("[^\n]+") do
         table.insert(lines, indent .. line)
       end
+      table.insert(lines, indent)
+
     else
-      -- Regular paragraph - join all lines with space, then wrap
+      -- Regular paragraph - join and wrap
       local joined = trimmed:gsub("\n", " "):gsub("%s+", " ")
       local wrapped = M._wrap_text(joined, max_width - #indent)
       for _, wrapped_line in ipairs(wrapped) do
         table.insert(lines, indent .. wrapped_line)
       end
+      table.insert(lines, indent)
     end
-
-    -- Add blank line between paragraphs
-    table.insert(lines, indent)
   end
 
-  -- Remove trailing blank line
-  if #lines > 0 and lines[#lines] == indent then
+  -- Remove trailing blank lines
+  while #lines > 0 and lines[#lines] == indent do
     table.remove(lines)
   end
 
