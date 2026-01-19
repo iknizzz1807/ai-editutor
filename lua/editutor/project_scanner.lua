@@ -798,11 +798,11 @@ function M.scan_project(opts)
   local tree = M.build_tree_structure(root, files, folders)
 
   -- Calculate total tokens
+  -- Rough estimate: average 40 chars per line, 4 chars per token = 10 tokens per line
   local total_tokens = 0
   for _, file in ipairs(files) do
     if file.lines then
-      -- Rough estimate: average 40 chars per line
-      total_tokens = total_tokens + M.estimate_tokens(string.rep("x", file.lines * 40))
+      total_tokens = total_tokens + (file.lines * 10)
     end
   end
   total_tokens = total_tokens + M.estimate_tokens(tree)

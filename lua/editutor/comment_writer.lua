@@ -123,6 +123,15 @@ function M.replace_pending_with_response(id, response, bufnr)
     return false
   end
 
+  return M._replace_question_direct(question, response, bufnr)
+end
+
+---Replace a question block directly (without re-scanning buffer)
+---@param question table Question object from find_pending_questions
+---@param response string AI response text
+---@param bufnr number Buffer number
+---@return boolean success
+function M._replace_question_direct(question, response, bufnr)
   local style = M.get_style(bufnr)
   local indent = question.indent
 
@@ -256,6 +265,7 @@ function M.replace_pending_batch(responses, bufnr)
 
   -- Sort by block_start descending to replace from bottom to top
   -- This prevents line number shifts from affecting subsequent replacements
+  -- NOTE: We scan the buffer only ONCE here, then use question objects directly
   local questions = parser.find_pending_questions(bufnr)
   table.sort(questions, function(a, b)
     return a.block_start > b.block_start
@@ -264,7 +274,8 @@ function M.replace_pending_batch(responses, bufnr)
   for _, question in ipairs(questions) do
     local response = responses[question.id]
     if response then
-      local ok = M.replace_pending_with_response(question.id, response, bufnr)
+      -- Use _replace_question_direct to avoid re-scanning buffer for each question
+      local ok = M._replace_question_direct(question, response, bufnr)
       if ok then
         success_count = success_count + 1
       else
