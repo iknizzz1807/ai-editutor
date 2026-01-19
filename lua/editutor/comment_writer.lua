@@ -174,7 +174,7 @@ end
 ---@return string[] lines Formatted lines
 function M._format_response(response, indent)
 	local lines = {}
-	local max_width = 200
+	local max_width = 160
 
 	-- First, extract and protect code blocks (```lang ... ```)
 	local protected = {}
