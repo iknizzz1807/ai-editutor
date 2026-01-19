@@ -8,15 +8,14 @@ CONTENTS                                                    *editutor-contents*
     3. Installation .......................... |editutor-installation|
     4. Configuration ......................... |editutor-configuration|
     5. Usage ................................. |editutor-usage|
-    6. Response Format ....................... |editutor-response|
-    7. Float Window .......................... |editutor-float-window|
-    8. Visual Selection ...................... |editutor-visual|
-    9. Skip Answered ......................... |editutor-skip-answered|
-   10. Context Extraction .................... |editutor-context|
-   11. Knowledge Tracking .................... |editutor-knowledge|
-   12. Commands .............................. |editutor-commands|
-   13. Keymaps ............................... |editutor-keymaps|
-   14. API ................................... |editutor-api|
+    6. Question Blocks ....................... |editutor-question-blocks|
+    7. Visual Selection ...................... |editutor-visual|
+    8. Batch Processing ...................... |editutor-batch|
+    9. Context Extraction .................... |editutor-context|
+   10. Knowledge Tracking .................... |editutor-knowledge|
+   11. Commands .............................. |editutor-commands|
+   12. Keymaps ............................... |editutor-keymaps|
+   13. API ................................... |editutor-api|
 
 ==============================================================================
 1. INTRODUCTION                                         *editutor-introduction*
@@ -27,22 +26,16 @@ ai-editutor is a Neovim plugin for developers who learn by building.
 
 You're building something real. You have questions. Instead of breaking
 your flow to search Stack Overflow or switch to ChatGPT, you ask right
-here in your code: >
-    // What is closure?
-<
-Press <leader>ma. Get an answer. Keep building. Keep learning.
+here in your code.
 
-This is not about coding faster. It's about understanding what you write.
-Every question is a chance to level up.
+v3.0 - Question Blocks:
+  Explicit question blocks with `[Q:id]` and `[PENDING:id]` markers.
+  Unique timestamp-based IDs. Batch processing. Reliable parsing.
 
-v2.0 - No Prefix Needed:
-  Just write a comment naturally. The AI auto-detects your intent.
-
-Examples: >
-    // What is closure?                -> AI explains
-    // function to validate email      -> AI generates code
-    // Review this for security        -> AI reviews
-    // Why does this return nil?       -> AI debugs
+Workflow: >
+    1. Press <leader>mq to spawn a question block
+    2. Type your question
+    3. Press <leader>ma to get answer(s)
 <
 
 ==============================================================================
@@ -94,8 +87,8 @@ Default configuration: >lua
 
       -- Keymaps
       keymaps = {
-        ask = "<leader>ma",      -- Ask about comment near cursor
-        toggle = "<leader>mt",   -- Toggle float window
+        question = "<leader>mq",  -- Spawn a new question block
+        ask = "<leader>ma",       -- Process all pending questions
       },
     })
 <
@@ -105,111 +98,136 @@ Default configuration: >lua
 
 Basic Usage:
 
-1. Write a comment (no special prefix needed): >
-    // What does this function do?
-    // function to validate email
-    // Review this for security issues
-<
+1. Press <leader>mq to spawn a question block: >
+    /* [Q:q_1737200000000]
 
-2. Press <leader>ma (or your configured keymap)
-
-3. The response is inserted below as a comment with [AI] marker: >
-    /* [AI]
-    Your answer here...
+    [PENDING:q_1737200000000]
     */
 <
 
-4. Press <leader>mt to view/edit response in float window
-
-==============================================================================
-6. RESPONSE FORMAT                                        *editutor-response*
-
-All AI responses use the `[AI]` marker format: >
-    // What is closure?
-    /* [AI]
-    A closure is a function that "remembers" variables from its outer scope
-    even after that scope has finished executing.
-
-    Example:
-    function counter() {
-      let count = 0;
-      return () => ++count;
-    }
-
-    Best practice: Use for data privacy, callbacks, factory functions.
-    Watch out: Can cause memory leaks if holding large objects.
+2. Type your question (cursor is placed in input area): >
+    /* [Q:q_1737200000000]
+    What is closure and when should I use it?
+    [PENDING:q_1737200000000]
     */
 <
 
-The `[AI]` marker makes it easy to:
-  - Identify AI-generated content
-  - Search for AI responses in your codebase
-  - Skip already-answered questions
+3. Press <leader>ma to process all pending questions
+
+4. Answer replaces [PENDING:id]: >
+    /* [Q:q_1737200000000]
+    What is closure and when should I use it?
+
+    A closure is a function that captures variables from its surrounding scope.
+    When the inner function is returned, it maintains access to those variables
+    even after the outer function has finished executing.
+
+    Use closures for:
+    - Data privacy (private variables)
+    - Factory functions
+    - Callbacks and event handlers
+    */
+<
 
 ==============================================================================
-7. FLOAT WINDOW                                         *editutor-float-window*
+6. QUESTION BLOCKS                                   *editutor-question-blocks*
 
-Press <leader>mt to toggle the AI response in a floating window.
+Question blocks use explicit markers with unique IDs:
 
-Features:
-  - Markdown syntax highlighting
-  - Editable buffer - make changes directly
-  - Changes sync back to source file on save
+Format: >
+    /* [Q:q_<timestamp>]
+    Your question here
+    [PENDING:q_<timestamp>]
+    */
+<
 
-Keymaps in float window:
-  q          Close without saving
-  <Esc>      Close without saving
-  <C-s>      Save changes and close
-  :w         Save changes and close
-  :wq        Save changes and close
-  :q         Close without saving
+The `[Q:id]` marker identifies the question.
+The `[PENDING:id]` marker indicates the question needs an answer.
+
+After processing, `[PENDING:id]` is replaced with the AI response.
+
+ID Format:
+  - `q_<timestamp_ms>` (e.g., `q_1737200000000`)
+  - Unique per question, no conflicts across files
+  - Generated using `vim.loop.hrtime() / 1000000`
+
+Supported comment styles (40+ languages):
+  - Block comments: /* */, /** */, --[[ ]], {- -}, (* *)
+  - Line comments: //, #, --, ;, %, etc.
 
 ==============================================================================
-8. VISUAL SELECTION                                          *editutor-visual*
+7. VISUAL SELECTION                                          *editutor-visual*
 
 Select code and ask focused questions about it.
 
 Usage:
   1. Enter visual mode (v or V)
-  2. Select the code block you want to focus on
-  3. Write a comment about it (or have one in selection)
-  4. Press <leader>ma
+  2. Select the code block you want to ask about
+  3. Press <leader>mq
 
-The selected code is sent with priority focus in the prompt.
-
-==============================================================================
-9. SKIP ANSWERED                                       *editutor-skip-answered*
-
-Comments that already have `[AI]` responses below are automatically skipped.
-
-Example: >
-    function test() {
-      // What is closure?       <- SKIPPED (has [AI] response below)
-      /* [AI]
-      A closure is...
-      */
-
-      // How does async work?   <- FOUND (unanswered)
-      return 42;
+A question block is created with your selection quoted: >
+    /* [Q:q_1737200000000]
+    Regarding this code:
+    ```
+    function processData(items) {
+      return items.filter(x => x.active).map(x => x.value);
     }
+    ```
+
+    [PENDING:q_1737200000000]
+    */
 <
 
+Type your question after the code block, then press <leader>ma.
+
 ==============================================================================
-10. CONTEXT EXTRACTION                                      *editutor-context*
+8. BATCH PROCESSING                                          *editutor-batch*
+
+Multiple pending questions are processed in one LLM request.
+
+Example - two pending questions: >
+    /* [Q:q_1737200000000]
+    What is closure?
+    [PENDING:q_1737200000000]
+    */
+
+    function example() {
+      // ...code...
+    }
+
+    /* [Q:q_1737200001000]
+    How does async work?
+    [PENDING:q_1737200001000]
+    */
+<
+
+Press <leader>ma once - both questions are answered in a single request.
+
+Benefits:
+  - Efficient API usage
+  - Context is shared across questions
+  - Faster than processing one by one
+
+==============================================================================
+9. CONTEXT EXTRACTION                                       *editutor-context*
 
 ai-editutor automatically gathers context from your project:
 
 Small projects (<20K tokens):
-  - Sends entire codebase
+  - Sends entire codebase (FULL_PROJECT mode)
+  - Project tree structure included
 
 Large projects (>20K tokens):
-  - Current file (full)
-  - Import graph (files you import + files that import you)
-  - LSP definitions (deduplicated)
-  - Project structure tree
+  - ADAPTIVE mode:
+    - Current file (full)
+    - Import graph (files you import + files that import you)
+    - LSP definitions (deduplicated)
+    - Project structure tree
+
+Token budget is configurable via `context.token_budget`.
 
 ==============================================================================
-11. KNOWLEDGE TRACKING                                     *editutor-knowledge*
+10. KNOWLEDGE TRACKING                                     *editutor-knowledge*
 
 All Q&A pairs are automatically saved for future reference.
 
@@ -223,17 +241,18 @@ Storage Structure: >
 Each day gets its own file. Easy to manage, review, or delete.
 
 Commands:
-  :EditutorHistory        Show recent Q&A (last 7 days)
+  :EditutorHistory        Show recent Q&A (last 20 entries)
   :EditutorBrowse         List available dates
   :EditutorBrowse [date]  Show entries for specific date
   :EditutorExport [path]  Export to markdown
 
 ==============================================================================
-12. COMMANDS                                                *editutor-commands*
+11. COMMANDS                                                *editutor-commands*
 
 Core Commands:
-  :EditutorAsk            Ask about comment near cursor
-  :EditutorToggle         Toggle AI response in float window
+  :EditutorQuestion       Spawn a new question block
+  :EditutorAsk            Process all pending questions in current file
+  :EditutorPending        Show pending question count
 
 Knowledge Commands:
   :EditutorHistory        Show recent Q&A history
@@ -248,68 +267,61 @@ Language Commands:
 Other Commands:
   :EditutorClearCache     Clear context cache
   :EditutorLog            Open debug log
+  :EditutorClearLog       Clear debug log
   :checkhealth editutor   Check plugin health
 
 ==============================================================================
-13. KEYMAPS                                                  *editutor-keymaps*
+12. KEYMAPS                                                  *editutor-keymaps*
 
 Default keymaps (configurable):
 
   Normal mode:
-    <leader>ma    Ask about comment near cursor
-    <leader>mt    Toggle AI response in float window
+    <leader>mq    Spawn question block at cursor
+    <leader>ma    Process all pending questions
 
   Visual mode:
-    <leader>ma    Ask about selected code
+    <leader>mq    Spawn question block with selected code
 
 ==============================================================================
-14. API                                                          *editutor-api*
+13. API                                                          *editutor-api*
 
 Main API: >lua
     local editutor = require("editutor")
 
     editutor.setup(opts)
-    editutor.ask()              -- Normal mode ask
-    editutor.ask_visual()       -- Visual mode ask
-    editutor.toggle_float()     -- Toggle float window
-    editutor.version()          -- Returns version string
+    editutor.spawn_question()         -- Spawn question block (normal mode)
+    editutor.spawn_question_visual()  -- Spawn with visual selection
+    editutor.ask()                    -- Process all pending questions
+    editutor.show_pending()           -- Show pending count
+    editutor.version()                -- Returns version string ("3.0.0")
 <
 
 Parser API: >lua
     local parser = require("editutor.parser")
 
-    parser.find_question_near_cursor(bufnr)  -- Find comment near cursor
-    parser.is_ai_response_start(line, style) -- Check if line starts [AI] response
-    parser.find_ai_response_block(bufnr, line) -- Find AI response block
-    parser.get_visual_selection()            -- Get visual selection
+    parser.generate_id()                       -- Generate unique question ID
+    parser.find_pending_questions(bufnr)       -- Find all [PENDING:id] blocks
+    parser.find_question_by_id(id, bufnr)      -- Find specific question
+    parser.count_pending_questions(bufnr)      -- Count pending questions
+    parser.has_pending_questions(bufnr)        -- Check if any pending
+    parser.get_comment_style(bufnr)            -- Get comment style for buffer
 <
 
 Comment Writer API: >lua
     local comment_writer = require("editutor.comment_writer")
 
-    comment_writer.AI_MARKER                           -- "[AI]" constant
-    comment_writer.format_response(response, bufnr)    -- Format as comment
-    comment_writer.start_streaming(line, bufnr)        -- Start streaming
-    comment_writer.update_streaming(state, content)    -- Update streaming
-    comment_writer.finish_streaming(state)             -- Finish streaming
-    comment_writer.find_ai_response_block(bufnr, line) -- Find [AI] block
-<
-
-Float Window API: >lua
-    local float_window = require("editutor.float_window")
-
-    float_window.toggle(bufnr)    -- Toggle float window
-    float_window.open(bufnr)      -- Open float window
-    float_window.close(bufnr, save) -- Close, optionally save
-    float_window.is_open(bufnr)   -- Check if open
+    comment_writer.spawn_question_block(bufnr, selected_code)
+    comment_writer.replace_pending_with_response(id, response, bufnr)
+    comment_writer.replace_pending_batch(responses, bufnr)
 <
 
 Provider API: >lua
     local provider = require("editutor.provider")
 
     provider.query_async(system, user, callback)
-    provider.query_stream(system, user, on_chunk, on_done, opts)
-    provider.list_providers()
+    provider.check_provider()                  -- Check if provider is ready
+    provider.get_info()                        -- Get provider name and model
+    provider.list_providers()                  -- List available providers
 <
 
 ==============================================================================

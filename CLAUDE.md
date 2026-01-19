@@ -44,7 +44,7 @@ Watch out for memory leaks if closures hold references to large objects.
 - **Spawn question block** - `<leader>mq` creates a block with unique ID
 - **Visual selection support** - Select code, then `<leader>mq` to ask about it
 - **Batch processing** - Multiple `[PENDING]` questions answered in one request
-- **JSON response** - LLM returns structured responses, reliable parsing
+- **Marker-based response** - LLM uses `[ANSWER:id]...[/ANSWER:id]` markers, reliable parsing
 - **No streaming** - Wait for complete response (simpler, more reliable)
 
 ---
@@ -62,7 +62,7 @@ ai-editutor/
 │       ├── lsp_context.lua       # LSP-based context
 │       ├── import_graph.lua      # Import graph analysis
 │       ├── comment_writer.lua    # Spawn blocks, write responses
-│       ├── prompts.lua           # System prompt (JSON response format)
+│       ├── prompts.lua           # System prompt (marker-based response format)
 │       ├── provider.lua          # LLM API client
 │       ├── knowledge.lua         # Knowledge tracking (date-based JSON)
 │       ├── project_scanner.lua   # Project file scanning
@@ -111,8 +111,8 @@ ai-editutor/
 │ 2. If none found → notify user, stop                                   │
 │ 3. Extract context (full project < 20K OR adaptive)                    │
 │ 4. Build user prompt with all pending questions                        │
-│ 5. Send to LLM, expect JSON response                                   │
-│ 6. Parse JSON: { "q_123": "answer1", "q_456": "answer2" }             │
+│ 5. Send to LLM, expect marker-based response                           │
+│ 6. Parse markers: [ANSWER:q_123]...[/ANSWER:q_123]                     │
 │ 7. Replace each [PENDING:id] with corresponding answer                 │
 │ 8. Save to knowledge base                                              │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -165,15 +165,18 @@ function foo() {
                               └────────────────┘
 ```
 
-### JSON Response Format
+### Marker-based Response Format
 
-LLM responds with JSON mapping question IDs to answers:
+LLM responds with `[ANSWER:id]...[/ANSWER:id]` markers:
 
-```json
-{
-  "q_1737200000000": "A closure is a function that...",
-  "q_1737200001000": "Async/await allows you to write..."
-}
+```
+[ANSWER:q_1737200000000]
+A closure is a function that captures variables from its surrounding scope...
+[/ANSWER:q_1737200000000]
+
+[ANSWER:q_1737200001000]
+Async/await allows you to write asynchronous code that looks synchronous...
+[/ANSWER:q_1737200001000]
 ```
 
 ---
@@ -184,7 +187,7 @@ LLM responds with JSON mapping question IDs to answers:
 - Version: 3.0.0
 - Main functions: `spawn_question()`, `spawn_question_visual()`, `ask()`
 - Creates user commands and keymaps
-- Parses JSON response from LLM
+- Parses marker-based response from LLM (`[ANSWER:id]...[/ANSWER:id]`)
 
 ### parser.lua - Question Block Detection
 - `generate_id()` - Generate unique timestamp-based ID
@@ -200,8 +203,8 @@ LLM responds with JSON mapping question IDs to answers:
 - Handles 40+ languages
 
 ### prompts.lua - System Prompt
-- Instructs LLM to respond with JSON format
-- Auto-detects question vs code request
+- Instructs LLM to respond with `[ANSWER:id]...[/ANSWER:id]` markers
+- Provides teaching guidelines for comprehensive answers
 - Bilingual support (English, Vietnamese)
 
 ### context.lua - Context Extraction
@@ -355,7 +358,7 @@ require('editutor').setup({
 - New `[Q:id]` / `[PENDING:id]` block format
 - Timestamp-based unique IDs
 - Batch processing multiple questions
-- JSON response format from LLM
+- Marker-based response format (`[ANSWER:id]...[/ANSWER:id]`)
 - Removed streaming (simpler, more reliable)
 - Removed float window (no longer needed)
 - Visual selection support for code context
@@ -379,9 +382,9 @@ require('editutor').setup({
 -- Use <leader>mq to spawn a question block first
 ```
 
-### Issue: JSON parse error
+### Issue: Response parse error (missing [ANSWER:id] markers)
 ```lua
--- LLM may return malformed JSON
+-- LLM may return response without proper markers
 -- Check :EditutorLog for raw response
 -- Try again or simplify your question
 ```

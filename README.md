@@ -15,7 +15,11 @@ You could switch to ChatGPT. Open a browser. Lose your flow. Copy context back a
 Or you could just ask. Right here. Right now. In your code.
 
 ```javascript
-// What is closure?
+// Press <leader>mq to spawn a question block
+/* [Q:q_1737200000000]
+What is closure?
+[PENDING:q_1737200000000]
+*/
 ```
 
 Press `<leader>ma`. Get an answer. Keep building.
@@ -32,48 +36,64 @@ This is about the moments when you're building something and you think *"wait, I
 
 Every question you ask is a chance to level up. Every answer stays in your codebase as a note to your future self.
 
-## v2.0 - No Prefix Needed
+## v3.0 - Question Blocks
 
-Just write a comment. The AI figures out what you want.
-
-```javascript
-// What is closure?                    -> AI explains
-// function to validate email          -> AI generates code
-// Review this for security issues     -> AI reviews
-// Why does this return nil?           -> AI debugs
-```
-
-All responses use the `/* [AI] ... */` format - easy to identify and edit.
-
-### Example
+Explicit question blocks with unique IDs. Reliable parsing. Batch processing.
 
 ```javascript
-// What is a closure?
-/* [AI]
-A closure is a function that "remembers" variables from its outer scope
-even after that scope has finished executing.
+// 1. Press <leader>mq to spawn a question block
+/* [Q:q_1737200000000]
+What is closure and when should I use it?
+[PENDING:q_1737200000000]
+*/
 
-Example:
-function counter() {
-  let count = 0;
-  return () => ++count;
-}
-const inc = counter();
-inc(); // 1
-inc(); // 2
+// 2. Press <leader>ma to get answer
+/* [Q:q_1737200000000]
+What is closure and when should I use it?
 
-Best practice: Use for data privacy, callbacks, and factory functions.
-Watch out: Can cause memory leaks if holding references to large objects.
+A closure is a function that captures variables from its surrounding scope.
+When the inner function is returned, it maintains access to those variables
+even after the outer function has finished executing.
+
+Use closures for:
+- Data privacy (private variables)
+- Factory functions
+- Callbacks and event handlers
+
+Watch out for memory leaks if closures hold references to large objects.
 */
 ```
 
-### Float Window
+### Key Features
 
-Press `<leader>mt` to open the AI response in a floating window:
-- Syntax highlighting (markdown)
-- Editable - make changes directly
-- `<C-s>` or `:w` to save changes back to source file
-- `q` or `<Esc>` to close without saving
+- **Spawn question block** - `<leader>mq` creates a block with unique ID
+- **Visual selection support** - Select code, then `<leader>mq` to ask about it
+- **Batch processing** - Multiple `[PENDING]` questions answered in one request
+- **Reliable parsing** - Marker-based response format, no JSON issues
+
+### Visual Selection
+
+Select code, press `<leader>mq`:
+
+```javascript
+// Select this function, press <leader>mq:
+function processData(items) {
+  return items.filter(x => x.active).map(x => x.value);
+}
+
+// Question block created with your selection:
+/* [Q:q_1737200000000]
+Regarding this code:
+```
+function processData(items) {
+  return items.filter(x => x.active).map(x => x.value);
+}
+```
+
+Why use filter before map here?
+[PENDING:q_1737200000000]
+*/
+```
 
 ## Quick Start
 
@@ -98,54 +118,57 @@ Press `<leader>mt` to open the AI response in a floating window:
 export ANTHROPIC_API_KEY="your-key"
 ```
 
-**3. Write a comment in your code**
+**3. Spawn a question block**
+
+Press `<leader>mq` anywhere in your code. A question block appears:
 
 ```javascript
-// Why would I use Map instead of a plain object?
-```
+/* [Q:q_1737200000000]
 
-**4. Press `<leader>ma`**
-
-Answer appears as a comment. You keep coding. You keep learning.
-
-## Features
-
-### No Prefix Needed
-Just write natural comments. The AI auto-detects your intent:
-- Questions get explanations
-- Code requests get working code
-- Review requests get feedback
-
-### [AI] Marker
-All responses are marked with `[AI]` - easy to identify, search, and manage:
-```javascript
-/* [AI]
-This is an AI response...
+[PENDING:q_1737200000000]
 */
 ```
 
-### Float Window Toggle
-Press `<leader>mt` to view/edit responses in a floating window:
-- Markdown syntax highlighting
-- Editable buffer
-- Sync changes back to source file
+Type your question, exit insert mode.
+
+**4. Press `<leader>ma`**
+
+Answer replaces the `[PENDING]` marker. You keep coding. You keep learning.
+
+## Features
+
+### Question Blocks
+Explicit `[Q:id]` and `[PENDING:id]` markers:
+- Unique timestamp-based IDs (no conflicts)
+- Clear visual structure
+- Easy to search and manage
+
+### Batch Processing
+Multiple pending questions answered in one request:
+```javascript
+/* [Q:q_1737200000000]
+What is closure?
+[PENDING:q_1737200000000]
+*/
+
+/* [Q:q_1737200001000]
+How does async work?
+[PENDING:q_1737200001000]
+*/
+
+// Press <leader>ma once -> both answered
+```
 
 ### Context-Aware
 Your questions get answered with full project context:
 - Small projects (<20K tokens): Entire codebase included
-- Large projects: Current file + imports + related definitions
+- Large projects: Current file + imports + LSP definitions
 
 ### Visual Selection
-Select confusing code, ask about it:
-```
-1. Visual select a code block
-2. Add: // What does this do?
-3. <leader>ma
-```
-The AI focuses on your selection.
-
-### Skip Answered
-Comments that already have an `[AI]` response below are automatically skipped.
+Select confusing code, press `<leader>mq`:
+- Selected code is quoted in the question block
+- Type your question about the specific code
+- AI focuses on your selection
 
 ### Knowledge That Stays
 Every Q&A is saved by date. Review your learning history:
@@ -162,14 +185,14 @@ require("editutor").setup({
   provider = "claude",           -- claude, openai, deepseek, gemini, groq, ollama
   model = "claude-sonnet-4-20250514",
   language = "English",          -- or "Vietnamese"
-  
+
   context = {
     token_budget = 20000,
   },
-  
+
   keymaps = {
-    ask = "<leader>ma",          -- Ask about comment
-    toggle = "<leader>mt",       -- Toggle float window
+    question = "<leader>mq",     -- Spawn question block
+    ask = "<leader>ma",          -- Process pending questions
   },
 })
 ```
@@ -191,20 +214,22 @@ require("editutor").setup({
 
 | Command | What it does |
 |---------|-------------|
-| `:EditutorAsk` | Ask about comment near cursor |
-| `:EditutorToggle` | Toggle AI response in float window |
+| `:EditutorQuestion` | Spawn a new question block |
+| `:EditutorAsk` | Process all pending questions |
+| `:EditutorPending` | Show pending question count |
 | `:EditutorHistory` | Recent Q&A history |
 | `:EditutorBrowse` | Browse by date |
 | `:EditutorExport` | Export to markdown |
 | `:EditutorLang` | Switch language |
+| `:EditutorClearCache` | Clear context cache |
 
 ## Keymaps
 
 | Keymap | Mode | What it does |
 |--------|------|-------------|
-| `<leader>ma` | Normal | Ask about comment near cursor |
-| `<leader>ma` | Visual | Ask about selected code |
-| `<leader>mt` | Normal | Toggle AI response in float window |
+| `<leader>mq` | Normal | Spawn question block at cursor |
+| `<leader>mq` | Visual | Spawn question block with selected code |
+| `<leader>ma` | Normal | Process all pending questions |
 
 ---
 
