@@ -2,10 +2,12 @@
 -- LSP-based context extraction for ai-editutor
 -- Enhanced: scans ENTIRE current file for symbols, not just cursor position
 -- Deduplicates definitions to avoid sending same content multiple times
+-- v3.1: Uses semantic_chunking to extract only definitions, not full files
 
 local M = {}
 
 local project_scanner = require("editutor.project_scanner")
+local semantic_chunking = require("editutor.semantic_chunking")
 
 -- Patterns to exclude (library/vendor paths)
 M.exclude_patterns = {
@@ -158,6 +160,10 @@ function M.extract_all_identifiers(bufnr)
     query_string = "[(identifier) (type_identifier) (field_identifier)] @id"
   elseif lang == "rust" then
     query_string = "[(identifier) (type_identifier) (field_identifier)] @id"
+  elseif lang == "c" then
+    query_string = "[(identifier) (type_identifier) (field_identifier)] @id"
+  elseif lang == "cpp" then
+    query_string = "[(identifier) (type_identifier) (field_identifier) (namespace_identifier) (qualified_identifier)] @id"
   end
 
   local ok_query, query = pcall(vim.treesitter.query.parse, lang, query_string)
@@ -256,6 +262,70 @@ function M._is_builtin(name, lang)
         return true
       end
     end
+  elseif lang == "c" or lang == "cpp" then
+    local c_builtins = {
+      -- C standard library
+      "printf", "scanf", "malloc", "free", "calloc", "realloc",
+      "strlen", "strcpy", "strcat", "strcmp", "strncpy", "strncat",
+      "memcpy", "memset", "memmove", "memcmp",
+      "fopen", "fclose", "fread", "fwrite", "fprintf", "fscanf",
+      "exit", "abort", "atexit", "system", "getenv",
+      "sizeof", "NULL", "EOF", "stdin", "stdout", "stderr",
+      -- C++ standard library
+      "std", "cout", "cin", "endl", "cerr", "clog",
+      "string", "vector", "map", "set", "list", "deque", "queue", "stack",
+      "unique_ptr", "shared_ptr", "weak_ptr", "make_unique", "make_shared",
+      "move", "forward", "swap",
+      "begin", "end", "size", "empty", "push_back", "pop_back",
+      "iterator", "const_iterator",
+      "pair", "tuple", "optional", "variant", "any",
+      "thread", "mutex", "lock_guard", "unique_lock",
+      "async", "future", "promise",
+      "exception", "runtime_error", "logic_error",
+      "true", "false", "nullptr",
+    }
+    for _, builtin in ipairs(c_builtins) do
+      if name == builtin then
+        return true
+      end
+    end
+  elseif lang == "go" then
+    local go_builtins = {
+      "append", "cap", "close", "complex", "copy", "delete",
+      "imag", "len", "make", "new", "panic", "print", "println",
+      "real", "recover",
+      "bool", "byte", "complex64", "complex128", "error",
+      "float32", "float64", "int", "int8", "int16", "int32", "int64",
+      "rune", "string", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr",
+      "nil", "iota",
+      "fmt", "os", "io", "bufio", "strings", "strconv",
+      "context", "sync", "time", "net", "http",
+    }
+    for _, builtin in ipairs(go_builtins) do
+      if name == builtin then
+        return true
+      end
+    end
+  elseif lang == "rust" then
+    local rust_builtins = {
+      "println", "print", "eprintln", "eprint", "format", "panic",
+      "vec", "Vec", "String", "str", "Box", "Rc", "Arc", "Cell", "RefCell",
+      "Option", "Some", "None", "Result", "Ok", "Err",
+      "assert", "assert_eq", "assert_ne", "debug_assert",
+      "todo", "unimplemented", "unreachable",
+      "Clone", "Copy", "Debug", "Default", "Eq", "Hash", "Ord", "PartialEq", "PartialOrd",
+      "Drop", "Fn", "FnMut", "FnOnce", "From", "Into", "Iterator",
+      "Send", "Sync", "Sized", "Unpin",
+      "std", "self", "crate", "super",
+      "i8", "i16", "i32", "i64", "i128", "isize",
+      "u8", "u16", "u32", "u64", "u128", "usize",
+      "f32", "f64", "bool", "char",
+    }
+    for _, builtin in ipairs(rust_builtins) do
+      if name == builtin then
+        return true
+      end
+    end
   end
 
   return false
@@ -271,19 +341,21 @@ end
 
 ---Get external definitions for ALL identifiers in current file
 ---Deduplicates by file path (each external file included only once)
+---v3.1: Now extracts only the definition node using semantic_chunking, not the full file
 ---@param bufnr number Buffer number
 ---@param callback function Callback(definitions) where definitions is ExternalDefinition[]
----@param opts? table Options {max_files?: number, max_lines_per_file?: number}
+---@param opts? table Options {max_files?: number, extract_mode?: string}
 function M.get_all_external_definitions(bufnr, callback, opts)
   opts = opts or {}
   local max_files = opts.max_files or 50
-  local max_lines_per_file = opts.max_lines_per_file or 500
+  local extract_mode = opts.extract_mode or "definition" -- "definition" or "full"
 
   local current_file = vim.api.nvim_buf_get_name(bufnr)
   local identifiers = M.extract_all_identifiers(bufnr)
 
   local definitions = {}
   local seen_files = {} -- Dedup by filepath
+  local seen_definitions = {} -- Dedup by filepath:line to avoid duplicate definitions
   local pending = #identifiers
   local completed = 0
 
@@ -308,36 +380,40 @@ function M.get_all_external_definitions(bufnr, callback, opts)
 
       for _, loc in ipairs(locations) do
         local filepath = vim.uri_to_fname(loc.uri)
+        local def_line = loc.range and loc.range.start and loc.range.start.line or 0
+        local def_col = loc.range and loc.range.start and loc.range.start.character or 0
 
-        -- Skip if same file, already seen, or not project file
+        -- Create unique key for this definition location
+        local def_key = string.format("%s:%d", filepath, def_line)
+
+        -- Skip if same file, already seen definition, or not project file
         if filepath ~= current_file
-          and not seen_files[filepath]
+          and not seen_definitions[def_key]
           and M.is_project_file(filepath)
           and vim.tbl_count(seen_files) < max_files then
 
+          seen_definitions[def_key] = true
           seen_files[filepath] = true
 
-          -- Read full file content
-          local content, line_count = M.read_file(filepath)
+          -- Extract only the definition using semantic_chunking
+          local content, metadata = semantic_chunking.extract_definition_at(
+            filepath, def_line, def_col
+          )
 
-          if content and line_count then
-            local is_full = line_count <= max_lines_per_file
-
-            -- Truncate if too long
-            if not is_full then
-              local lines = vim.split(content, "\n")
-              lines = vim.list_slice(lines, 1, max_lines_per_file)
-              content = table.concat(lines, "\n") .. "\n... (truncated, " .. line_count .. " total lines)"
-            end
-
+          if content then
+            local tokens = project_scanner.estimate_tokens(content)
             table.insert(definitions, {
               name = ident.name,
               filepath = filepath,
               content = content,
-              start_line = 0,
-              end_line = is_full and (line_count - 1) or (max_lines_per_file - 1),
-              is_full_file = is_full,
-              line_count = line_count,
+              start_line = metadata.start_line or def_line,
+              end_line = metadata.end_line or def_line,
+              line = def_line,
+              col = def_col,
+              is_full_file = false, -- Always false now, we only extract definitions
+              extraction_mode = metadata.mode or "definition",
+              node_type = metadata.node_type,
+              tokens = tokens,
             })
           end
         end

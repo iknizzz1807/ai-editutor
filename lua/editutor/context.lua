@@ -1,5 +1,6 @@
 -- editutor/context.lua
--- Context extraction for ai-editutor v3.0
+-- Context extraction for ai-editutor v3.1
+-- Smart backtracking strategy for large projects
 -- Simplified: no question_line marking, just gather project context
 
 local M = {}
@@ -7,8 +8,8 @@ local M = {}
 local config = require("editutor.config")
 local lsp_context = require("editutor.lsp_context")
 local project_scanner = require("editutor.project_scanner")
-local import_graph = require("editutor.import_graph")
 local cache = require("editutor.cache")
+local context_strategy = require("editutor.context_strategy")
 
 -- =============================================================================
 -- Token Budget
@@ -143,223 +144,32 @@ function M.build_full_project_context(current_file)
 end
 
 -- =============================================================================
--- Adaptive Context (for large projects)
+-- Adaptive Context (for large projects) - v3.1 with smart backtracking
 -- =============================================================================
 
----Read file content with optional max lines
----@param filepath string
----@param max_lines? number
----@return string|nil content
----@return number line_count
----@return boolean is_truncated
-local function read_file_content(filepath, max_lines)
-  local ok, lines = pcall(vim.fn.readfile, filepath)
-  if not ok or not lines then
-    return nil, 0, false
-  end
-
-  local line_count = #lines
-  local is_truncated = false
-
-  if max_lines and line_count > max_lines then
-    lines = vim.list_slice(lines, 1, max_lines)
-    is_truncated = true
-  end
-
-  return table.concat(lines, "\n"), line_count, is_truncated
-end
-
----Build adaptive context for large projects (simplified)
+---Build adaptive context for large projects using smart backtracking strategy
 ---@param current_file string Path to current file
 ---@param callback function Callback(formatted_context, metadata)
 function M.build_adaptive_context(current_file, callback)
-  local project_root = project_scanner.get_project_root(current_file)
-  local root_name = vim.fn.fnamemodify(project_root, ":t")
   local budget = M.get_token_budget()
 
-  local function get_display_path(filepath)
-    if filepath:sub(1, #project_root) == project_root then
-      return root_name .. "/" .. filepath:sub(#project_root + 2)
-    end
-    return root_name .. "/" .. vim.fn.fnamemodify(filepath, ":t")
-  end
+  context_strategy.build_context_with_strategy(current_file, function(context, metadata)
+    -- Add budget info to metadata
+    metadata.budget = budget
 
-  local display_current = get_display_path(current_file)
-
-  -- Get project tree (cached)
-  local scan_result = cache.get_project(project_root, function()
-    return project_scanner.scan_project({ root = project_root })
-  end)
-
-  -- Track included files for deduplication
-  local included_files = {}
-  included_files[current_file] = true
-
-  -- 1. Current file (always include, full content)
-  local current_content, current_lines = read_file_content(current_file)
-  if not current_content then
-    local buf_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-    current_content = table.concat(buf_lines, "\n")
-    current_lines = #buf_lines
-  end
-
-  local ext = current_file:match("%.([^.]+)$") or ""
-  local language = project_scanner.get_language_for_ext(ext)
-
-  local parts = {}
-  local files_metadata = {}
-
-  -- Current file (contains the questions)
-  table.insert(parts, "=== CURRENT FILE (contains questions) ===")
-  table.insert(parts, string.format("// File: %s", display_current))
-  table.insert(parts, "```" .. language)
-  table.insert(parts, current_content)
-  table.insert(parts, "```")
-  table.insert(parts, "")
-
-  table.insert(files_metadata, {
-    path = display_current,
-    lines = current_lines,
-    source = "current",
-    tokens = project_scanner.estimate_tokens(current_content),
-  })
-
-  -- 2. Import graph files
-  local graph = import_graph.get_import_graph(current_file, project_root)
-
-  if #graph.all > 0 then
-    table.insert(parts, string.format("=== RELATED FILES (import graph: %d files) ===", #graph.all))
-    table.insert(parts, "")
-
-    for _, filepath in ipairs(graph.all) do
-      included_files[filepath] = true
-
-      local content, line_count, is_truncated = read_file_content(filepath, 1000)
-      if content then
-        local file_ext = filepath:match("%.([^.]+)$") or ""
-        local file_lang = project_scanner.get_language_for_ext(file_ext)
-        local file_display = get_display_path(filepath)
-
-        local relationship = "imported"
-        for _, out_path in ipairs(graph.outgoing) do
-          if out_path == filepath then
-            relationship = "imported by current"
-            break
-          end
-        end
-        for _, in_path in ipairs(graph.incoming) do
-          if in_path == filepath then
-            relationship = "imports current"
-            break
-          end
-        end
-
-        local status = is_truncated and string.format("truncated, %d total", line_count) or "full"
-        table.insert(parts, string.format("// File: %s (%s, %s)", file_display, relationship, status))
-        table.insert(parts, "```" .. file_lang)
-        table.insert(parts, content)
-        table.insert(parts, "```")
-        table.insert(parts, "")
-
-        table.insert(files_metadata, {
-          path = file_display,
-          lines = line_count,
-          source = "import_graph",
-          relationship = relationship,
-          tokens = project_scanner.estimate_tokens(content),
-        })
-      end
-    end
-  end
-
-  -- 3. LSP definitions (deduped)
-  lsp_context.get_context(function(ctx)
-    local lsp_files_added = 0
-
-    if ctx.external and #ctx.external > 0 then
-      local lsp_parts = {}
-
-      for _, def in ipairs(ctx.external) do
-        if not included_files[def.filepath] then
-          included_files[def.filepath] = true
-          lsp_files_added = lsp_files_added + 1
-
-          local file_ext = def.filepath:match("%.([^.]+)$") or ""
-          local file_lang = project_scanner.get_language_for_ext(file_ext)
-          local file_display = get_display_path(def.filepath)
-
-          local status = def.is_full_file and "full" or "truncated"
-          table.insert(lsp_parts, string.format("// File: %s (LSP definition, %s)", file_display, status))
-          table.insert(lsp_parts, "```" .. file_lang)
-          table.insert(lsp_parts, def.content)
-          table.insert(lsp_parts, "```")
-          table.insert(lsp_parts, "")
-
-          table.insert(files_metadata, {
-            path = file_display,
-            lines = def.line_count,
-            source = "lsp",
-            tokens = project_scanner.estimate_tokens(def.content),
-          })
-        end
-      end
-
-      if lsp_files_added > 0 then
-        table.insert(parts, string.format("=== LSP DEFINITIONS (%d files) ===", lsp_files_added))
-        table.insert(parts, "")
-        for _, part in ipairs(lsp_parts) do
-          table.insert(parts, part)
-        end
-      end
-    end
-
-    -- 4. Project tree
-    table.insert(parts, "=== PROJECT STRUCTURE ===")
-    table.insert(parts, "```")
-    table.insert(parts, scan_result.tree_structure)
-    table.insert(parts, "```")
-
-    local formatted = table.concat(parts, "\n")
-    local total_tokens = project_scanner.estimate_tokens(formatted)
-
-    -- Check budget
-    if total_tokens > budget then
-      local error_metadata = {
+    if context then
+      callback(context, metadata)
+    else
+      -- Fallback: should never happen with new strategy, but just in case
+      callback(nil, {
         mode = "adaptive",
-        error = "budget_exceeded",
-        total_tokens = total_tokens,
+        error = "strategy_failed",
         budget = budget,
-        current_file = display_current,
-        import_graph_files = #graph.all,
-        lsp_files = lsp_files_added,
-      }
-      callback(nil, error_metadata)
-      return
+        details = metadata,
+      })
     end
-
-    local metadata = {
-      mode = "adaptive",
-      current_file = display_current,
-      current_lines = current_lines,
-      project_root = project_root,
-      import_graph = {
-        outgoing = #graph.outgoing,
-        incoming = #graph.incoming,
-        total = #graph.all,
-      },
-      lsp_files = lsp_files_added,
-      files_included = files_metadata,
-      tree_structure_lines = #vim.split(scan_result.tree_structure, "\n"),
-      total_tokens = total_tokens,
-      budget = budget,
-      within_budget = true,
-      has_lsp = ctx.has_lsp,
-    }
-
-    callback(formatted, metadata)
   end, {
-    max_external_files = 30,
-    max_lines_per_file = 300,
+    budget = budget,
   })
 end
 
@@ -399,6 +209,21 @@ end
 
 function M.estimate_tokens(text)
   return project_scanner.estimate_tokens(text)
+end
+
+---Get available strategy levels (for debugging/display)
+---@return table[]
+function M.get_strategy_levels()
+  return context_strategy.get_levels()
+end
+
+---Estimate which strategy level would be used
+---@param current_file? string
+---@return string level_name
+---@return table estimation
+function M.estimate_strategy_level(current_file)
+  current_file = current_file or vim.api.nvim_buf_get_name(0)
+  return context_strategy.estimate_level(current_file, M.get_token_budget())
 end
 
 return M
