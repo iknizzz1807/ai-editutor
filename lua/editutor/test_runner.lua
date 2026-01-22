@@ -357,36 +357,41 @@ local function run_test_case(tc, callback)
           local context_path = string.format("%s/%s_L%d-%d.txt",
             context_dir, safe_file, tc.lines[1], tc.lines[2])
 
-          local f = io.open(context_path, "w")
-          if f then
-            log(string.format("    Context file opened: %s", context_path), "DEBUG")
-            f:write("=== TEST CASE ===\n")
-            f:write(string.format("Repo: %s\n", tc.repo))
-            f:write(string.format("File: %s\n", tc.file))
-            f:write(string.format("Lines: %d-%d\n", tc.lines[1], tc.lines[2]))
-            f:write(string.format("Language: %s\n", tc.lang))
-            f:write(string.format("Pattern: %s\n", tc.pattern))
-            f:write(string.format("Question: %s\n", tc.question))
-            f:write("\n=== METADATA ===\n")
-            f:write(string.format("Mode: %s\n", result.context.mode or "unknown"))
-            f:write(string.format("Tokens: %d\n", result.context.total_tokens))
-            f:write(string.format("Files: %d\n", result.context.files_included))
-            f:write(string.format("LSP: %s\n", result.lsp.available and "yes" or "no"))
-            f:write(string.format("LSP Clients: %s\n", table.concat(result.lsp.clients, ", ")))
-            f:write(string.format("Library Info Items: %d\n", result.library_info.items))
-            f:write(string.format("Extraction Time: %dms\n", result.context.extraction_time_ms))
-            if #result.errors > 0 then
-              f:write("\n=== ERRORS ===\n")
-              for _, err in ipairs(result.errors) do
-                f:write("- " .. err .. "\n")
+          local write_ok, write_err = pcall(function()
+            local f = io.open(context_path, "w")
+            if f then
+              log(string.format("    Context file opened: %s", context_path), "DEBUG")
+              f:write("=== TEST CASE ===\n")
+              f:write(string.format("Repo: %s\n", tc.repo))
+              f:write(string.format("File: %s\n", tc.file))
+              f:write(string.format("Lines: %d-%d\n", tc.lines[1], tc.lines[2]))
+              f:write(string.format("Language: %s\n", tc.lang))
+              f:write(string.format("Pattern: %s\n", tc.pattern))
+              f:write(string.format("Question: %s\n", tc.question))
+              f:write("\n=== METADATA ===\n")
+              f:write(string.format("Mode: %s\n", result.context.mode or "unknown"))
+              f:write(string.format("Tokens: %d\n", result.context.total_tokens))
+              f:write(string.format("Files: %d\n", result.context.files_included))
+              f:write(string.format("LSP: %s\n", result.lsp.available and "yes" or "no"))
+              f:write(string.format("LSP Clients: %s\n", table.concat(result.lsp.clients, ", ")))
+              f:write(string.format("Library Info Items: %d\n", result.library_info.items))
+              f:write(string.format("Extraction Time: %dms\n", result.context.extraction_time_ms))
+              if #result.errors > 0 then
+                f:write("\n=== ERRORS ===\n")
+                for _, err in ipairs(result.errors) do
+                  f:write("- " .. err .. "\n")
+                end
               end
+              f:write("\n=== CONTEXT ===\n")
+              f:write(context_text or "(empty)")
+              f:close()
+              log("    Context file written and closed", "DEBUG")
+            else
+              log("    Failed to open context file", "ERROR")
             end
-            f:write("\n=== CONTEXT ===\n")
-            f:write(context_text or "(empty)")
-            f:close()
-            log("    Context file written and closed", "DEBUG")
-          else
-            log("    Failed to open context file", "ERROR")
+          end)
+          if not write_ok then
+            log(string.format("    Context file write error: %s", tostring(write_err)), "ERROR")
           end
         end
       else
