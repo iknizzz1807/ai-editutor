@@ -86,20 +86,24 @@ end
 function M.extract_identifiers_in_range(bufnr, start_line, end_line)
   local identifiers = {}
   local seen = {}
+  local debug_log = require("editutor.debug_log")
 
   -- Get parser
   local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
   if not ok or not parser then
+    debug_log.log("[LSP_LIB] Tree-sitter parser not available", "DEBUG")
     return identifiers
   end
 
   local tree = parser:parse()[1]
   if not tree then
+    debug_log.log("[LSP_LIB] Tree-sitter parse failed", "DEBUG")
     return identifiers
   end
 
   local root = tree:root()
   local lang = parser:lang()
+  debug_log.log(string.format("[LSP_LIB] Language: %s", lang), "DEBUG")
 
   -- Query for identifiers
   local query_string = "(identifier) @id"
@@ -119,6 +123,7 @@ function M.extract_identifiers_in_range(bufnr, start_line, end_line)
 
   local ok_query, query = pcall(vim.treesitter.query.parse, lang, query_string)
   if not ok_query or not query then
+    debug_log.log(string.format("[LSP_LIB] Query parse failed for %s: %s", lang, query_string), "DEBUG")
     return identifiers
   end
 
@@ -409,11 +414,17 @@ function M.extract_library_info(bufnr, question_start_line, question_end_line, q
   local scan_start = math.max(0, question_start_line - M.config.scan_radius)
   local scan_end = math.min(total_lines - 1, question_end_line + M.config.scan_radius)
 
+  -- Debug logging
+  local debug_log = require("editutor.debug_log")
+  debug_log.log(string.format("[LSP_LIB] Scan range: %d-%d (total: %d lines)", scan_start, scan_end, total_lines), "DEBUG")
+
   -- Extract identifiers from code around question
   local code_identifiers = M.extract_identifiers_in_range(bufnr, scan_start, scan_end)
+  debug_log.log(string.format("[LSP_LIB] Code identifiers found: %d", #code_identifiers), "DEBUG")
 
   -- Parse question text for mentioned identifiers
   local question_identifiers = M.parse_question_for_identifiers(question_text)
+  debug_log.log(string.format("[LSP_LIB] Question identifiers found: %d", #question_identifiers), "DEBUG")
 
   -- Combine and deduplicate
   local all_identifiers = {}
@@ -452,7 +463,10 @@ function M.extract_library_info(bufnr, question_start_line, question_end_line, q
     all_identifiers = vim.list_slice(all_identifiers, 1, M.config.max_identifiers)
   end
 
+  debug_log.log(string.format("[LSP_LIB] Total identifiers to process: %d", #all_identifiers), "DEBUG")
+
   if #all_identifiers == 0 then
+    debug_log.log("[LSP_LIB] No identifiers found, returning early", "DEBUG")
     if not callback_called then
       callback_called = true
       callback(result)
@@ -463,9 +477,14 @@ function M.extract_library_info(bufnr, question_start_line, question_end_line, q
   -- Process each identifier
   local pending = #all_identifiers
   local completed = 0
+  local skipped_no_pos = 0
+  local skipped_not_lib = 0
+  local lib_found = 0
 
   local function check_complete()
     if completed >= pending and not callback_called then
+      debug_log.log(string.format("[LSP_LIB] Complete: skipped_no_pos=%d, skipped_not_lib=%d, lib_found=%d",
+        skipped_no_pos, skipped_not_lib, lib_found), "DEBUG")
       callback_called = true
       callback(result)
     end
@@ -476,6 +495,7 @@ function M.extract_library_info(bufnr, question_start_line, question_end_line, q
 
     -- Skip if no position (from question text only, not found in code)
     if not ident.line then
+      skipped_no_pos = skipped_no_pos + 1
       completed = completed + 1
       check_complete()
       goto continue
@@ -486,6 +506,8 @@ function M.extract_library_info(bufnr, question_start_line, question_end_line, q
       if callback_called then return end
 
       if not is_library then
+        skipped_not_lib = skipped_not_lib + 1
+        debug_log.log(string.format("[LSP_LIB] %s: not library (path=%s)", ident.name, tostring(def_path)), "DEBUG")
         -- Not a library, skip
         completed = completed + 1
         check_complete()
@@ -493,6 +515,9 @@ function M.extract_library_info(bufnr, question_start_line, question_end_line, q
       end
 
       -- It's a library! Fetch hover info
+      lib_found = lib_found + 1
+      debug_log.log(string.format("[LSP_LIB] %s: IS library (path=%s)", ident.name, tostring(def_path)), "DEBUG")
+
       M.get_hover(bufnr, ident.line, ident.col, function(hover_text, hover_err)
         if callback_called then return end
 
@@ -505,6 +530,7 @@ function M.extract_library_info(bufnr, question_start_line, question_end_line, q
 
         if hover_text then
           local tokens = estimate_tokens(hover_text)
+          debug_log.log(string.format("[LSP_LIB] %s: hover found (%d tokens)", ident.name, tokens), "DEBUG")
 
           -- Check token budget
           if result.total_tokens + tokens <= M.config.max_tokens then
@@ -512,7 +538,10 @@ function M.extract_library_info(bufnr, question_start_line, question_end_line, q
             table.insert(result.items, info)
           end
         elseif hover_err then
+          debug_log.log(string.format("[LSP_LIB] %s: hover error: %s", ident.name, hover_err), "DEBUG")
           table.insert(result.errors, string.format("%s: %s", ident.name, hover_err))
+        else
+          debug_log.log(string.format("[LSP_LIB] %s: no hover info", ident.name), "DEBUG")
         end
 
         completed = completed + 1
