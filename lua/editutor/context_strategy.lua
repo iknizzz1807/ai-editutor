@@ -15,7 +15,7 @@ local cache = require("editutor.cache")
 -- Configuration
 -- =============================================================================
 
-M.DEFAULT_BUDGET = 20000
+M.DEFAULT_BUDGET = 25000
 
 -- Backtracking levels - from maximum context to minimal
 -- Each level reduces context until it fits budget

@@ -18,7 +18,9 @@ local M = {}
 ---@field ask string Process all pending questions
 
 ---@class EditutorContextConfig
----@field token_budget number Max tokens for context (default 20000)
+---@field token_budget number Max tokens for context (default 25000)
+---@field library_info_budget number Max tokens for library API info (default 2000)
+---@field library_scan_radius number Lines before/after question to scan (default 50)
 
 ---@class EditutorProvider
 ---@field name string Provider name
@@ -40,7 +42,9 @@ M.defaults = {
 
   -- Context extraction
   context = {
-    token_budget = 20000, -- 20k tokens max for context
+    token_budget = 25000, -- 25k tokens max for total context
+    library_info_budget = 2000, -- 2k tokens max for library API info
+    library_scan_radius = 50, -- Lines before/after question to scan for library usage
   },
 
   -- Keymaps

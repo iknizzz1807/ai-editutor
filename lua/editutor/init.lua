@@ -259,7 +259,7 @@ function M.ask()
   -- Start loading at the first pending question's position
   loading.start(string.format(M._msg("processing"), #questions), bufnr, loading_line)
 
-  -- Extract context
+  -- Extract context (includes library API info extraction in parallel)
   context.extract(function(full_context, metadata)
     if not full_context then
       loading.stop()
@@ -270,12 +270,17 @@ function M.ask()
       return
     end
 
-    debug_log.log("Context mode: " .. metadata.mode .. ", tokens: " .. metadata.total_tokens)
+    -- Log context and library info
+    debug_log.log("Context mode: " .. metadata.mode .. ", tokens: " .. (metadata.total_tokens or 0))
+    if metadata.library_info and metadata.library_info.items then
+      debug_log.log("Library info: " .. metadata.library_info.items .. " items, " .. (metadata.library_info.tokens or 0) .. " tokens")
+    end
 
     loading.update(loading.states.connecting)
     M._process_questions(questions, filepath, bufnr, full_context, metadata)
   end, {
     current_file = filepath,
+    questions = questions, -- Pass questions for library info extraction
   })
 end
 

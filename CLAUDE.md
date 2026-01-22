@@ -60,7 +60,8 @@ ai-editutor/
 │       ├── parser.lua            # Question block detection
 │       ├── context.lua           # Context extraction (full/adaptive)
 │       ├── context_strategy.lua  # Smart backtracking for token budget
-│       ├── lsp_context.lua       # LSP-based context
+│       ├── lsp_context.lua       # LSP-based context (definitions/references)
+│       ├── lsp_library.lua       # Library API info via LSP hover
 │       ├── import_graph.lua      # Import graph analysis
 │       ├── semantic_chunking.lua # Tree-sitter based content extraction
 │       ├── relevance_scorer.lua  # File relevance scoring
@@ -71,7 +72,7 @@ ai-editutor/
 │       ├── project_scanner.lua   # Project file scanning
 │       ├── cache.lua             # In-memory cache with TTL
 │       ├── loading.lua           # Loading indicator
-│       ├── debug_log.lua         # Debug logging
+│       ├── debug_log.lua         # Debug logging (with rotation)
 │       └── health.lua            # :checkhealth editutor
 ├── plugin/
 │   └── editutor.lua              # Lazy loading entry
@@ -112,7 +113,8 @@ ai-editutor/
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ 1. Scan current file for [PENDING:*] markers                           │
 │ 2. If none found → notify user, stop                                   │
-│ 3. Extract context (full project < 20K OR adaptive)                    │
+│ 3. Extract context (full project < 25K OR adaptive) [parallel]         │
+│    + Extract library API info via LSP hover        [parallel]          │
 │ 4. Build user prompt with all pending questions                        │
 │ 5. Send to LLM, expect marker-based response                           │
 │ 6. Parse markers: [ANSWER:q_123]...[/ANSWER:q_123]                     │
@@ -154,7 +156,7 @@ function foo() {
                          │
            ┌─────────────┴─────────────┐
            │                           │
-    <= 20K tokens               > 20K tokens
+    <= 25K tokens               > 25K tokens
            │                           │
            ▼                           ▼
     FULL_PROJECT                   ADAPTIVE
@@ -166,6 +168,59 @@ function foo() {
                               │ 3. LSP defs    │
                               │ 4. Project tree│
                               └────────────────┘
+                                      │
+                    ┌─────────────────┴─────────────────┐
+                    │        PARALLEL EXTRACTION        │
+                    ├───────────────────────────────────┤
+                    │  Code Context    │  Library Info  │
+                    │  (up to 25K)     │  (up to 2K)    │
+                    │                  │                │
+                    │  Project files,  │  LSP hover for │
+                    │  imports, tree   │  library APIs  │
+                    └──────────────────┴────────────────┘
+```
+
+### Library API Info (LSP)
+
+Automatically fetches hover documentation for library/framework code around questions:
+
+1. **Scan range**: ±50 lines around each question block
+2. **Identifier extraction**: Tree-sitter finds identifiers in scan range
+3. **Library detection**: Uses `textDocument/definition` to check if outside project
+4. **Hover fetch**: Gets `textDocument/hover` for library identifiers only
+5. **Token budget**: Hard cap of 2000 tokens (separate from main context)
+
+```
+Question at line 100
+        │
+        ▼
+┌───────────────────────────────────────┐
+│ Scan lines 50-150                     │
+│ Extract identifiers via Tree-sitter  │
+│ e.g., pd.DataFrame, requests.get     │
+└───────────────────────────────────────┘
+        │
+        ▼
+┌───────────────────────────────────────┐
+│ For each identifier:                  │
+│ 1. Get definition location (LSP)     │
+│ 2. Is it in node_modules, site-      │
+│    packages, vendor, etc.?           │
+│ 3. If yes → fetch hover info         │
+└───────────────────────────────────────┘
+        │
+        ▼
+┌───────────────────────────────────────┐
+│ === LIBRARY API INFO ===              │
+│                                       │
+│ [pd.DataFrame]                        │
+│ DataFrame(data, index, columns, ...)  │
+│ Two-dimensional, size-mutable...      │
+│                                       │
+│ [requests.get]                        │
+│ get(url, params=None, **kwargs)       │
+│ Sends a GET request...                │
+└───────────────────────────────────────┘
 ```
 
 ### Marker-based Response Format
@@ -211,9 +266,18 @@ Async/await allows you to write asynchronous code that looks synchronous...
 - Bilingual support (English, Vietnamese)
 
 ### context.lua - Context Extraction
-- `extract()` - Main entry, auto-selects mode
-- `build_full_project_context()` - For small projects
-- `build_adaptive_context()` - For large projects
+- `extract()` - Main entry, auto-selects mode, runs parallel extractions
+- `build_full_project_context()` - For small projects (< 25K tokens)
+- `build_adaptive_context()` - For large projects (smart backtracking)
+- `extract_library_info()` - Extracts library API info via LSP (parallel)
+
+### lsp_library.lua - Library API Info
+- `extract_library_info()` - Main entry, scans around question blocks
+- `get_hover()` - Fetch hover documentation via LSP
+- `get_definition_location()` - Check if identifier is from library
+- `is_library_path()` - Detect library paths (node_modules, site-packages, etc.)
+- `extract_identifiers_in_range()` - Tree-sitter identifier extraction
+- `format_for_prompt()` - Format library info for LLM context
 
 ---
 
@@ -338,7 +402,9 @@ require('editutor').setup({
     ask = "<leader>ma",      -- Process pending questions
   },
   context = {
-    token_budget = 20000,    -- Max tokens for context
+    token_budget = 25000,       -- Max tokens for code context (default: 25000)
+    library_info_budget = 2000, -- Max tokens for library API info (default: 2000)
+    library_scan_radius = 50,   -- Lines ±N around question to scan (default: 50)
   },
 })
 ```
@@ -357,12 +423,15 @@ require('editutor').setup({
 
 ## Version History
 
-### v3.1.0 - Smart Context (Current)
+### v3.1.0 - Smart Context + Library Info (Current)
+- **Library API info via LSP**: Auto-fetch hover docs for library code around questions
 - Smart backtracking strategy for token budget management
 - Semantic chunking using Tree-sitter (extracts exports, types, signatures)
 - File relevance scoring for context prioritization
+- Parallel extraction (code context + library info)
+- Token budget increased to 25K (code) + 2K (library info)
 - Improved line-comment language support (Python, Shell, etc.)
-- Performance optimizations (caching, smarter invalidation)
+- Performance optimizations (import index, smarter cache invalidation)
 - Log rotation to prevent unbounded log growth
 
 ### v3.0.0 - Question Blocks
