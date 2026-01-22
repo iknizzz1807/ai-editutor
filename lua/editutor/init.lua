@@ -288,7 +288,7 @@ end
 function M._process_questions(questions, filepath, bufnr, full_context, metadata)
   -- Build prompts
   local system_prompt = prompts.get_system_prompt()
-  local user_prompt = prompts.build_user_prompt(questions, full_context)
+  local user_prompt = prompts.build_user_prompt(questions, full_context, { filepath = filepath })
 
   -- Log context size for debugging
   local prompt_size = #system_prompt + #user_prompt

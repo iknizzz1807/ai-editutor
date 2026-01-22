@@ -121,21 +121,27 @@ function M.get_system_prompt()
 end
 
 ---Build the user prompt with pending questions
----@param questions table[] List of pending questions {id, question}
+---@param questions table[] List of pending questions {id, question, block_start?, block_end?, filepath?}
 ---@param context_formatted string Formatted code context
+---@param opts? table Options {filepath?: string}
 ---@return string prompt
-function M.build_user_prompt(questions, context_formatted)
+function M.build_user_prompt(questions, context_formatted, opts)
+  opts = opts or {}
   local lang = get_lang_key()
   local labels = {
     en = {
       context = "CODE CONTEXT",
       questions = "QUESTIONS TO ANSWER",
       instruction = "Answer each question using [ANSWER:id]...[/ANSWER:id] markers.",
+      location = "Location",
+      line = "line",
     },
     vi = {
       context = "NGU CANH CODE",
       questions = "CAU HOI CAN TRA LOI",
       instruction = "Tra loi moi cau hoi bang markers [ANSWER:id]...[/ANSWER:id].",
+      location = "Vi tri",
+      line = "dong",
     },
   }
   local l = labels[lang] or labels.en
@@ -146,7 +152,28 @@ function M.build_user_prompt(questions, context_formatted)
   table.insert(prompt_parts, "=== " .. l.questions .. " ===")
   table.insert(prompt_parts, "")
   for _, q in ipairs(questions) do
+    -- Include question ID and text
     table.insert(prompt_parts, string.format("[%s]: %s", q.id, q.question))
+
+    -- Include location info if available
+    if q.block_start or q.filepath then
+      local location_parts = {}
+      if q.filepath or opts.filepath then
+        local filepath = q.filepath or opts.filepath
+        -- Get relative filename for cleaner display
+        local filename = vim.fn.fnamemodify(filepath, ":t")
+        table.insert(location_parts, filename)
+      end
+      if q.block_start then
+        table.insert(location_parts, l.line .. " " .. q.block_start)
+        if q.block_end and q.block_end ~= q.block_start then
+          location_parts[#location_parts] = l.line .. " " .. q.block_start .. "-" .. q.block_end
+        end
+      end
+      if #location_parts > 0 then
+        table.insert(prompt_parts, string.format("(%s: %s)", l.location, table.concat(location_parts, ", ")))
+      end
+    end
     table.insert(prompt_parts, "")
   end
 
