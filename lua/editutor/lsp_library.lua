@@ -250,8 +250,24 @@ function M.get_definition_location(bufnr, line, col, callback)
   }
 
   local project_root = project_scanner.get_project_root()
+  local callback_called = false
+
+  -- Timeout handler
+  local timer = vim.defer_fn(function()
+    if not callback_called then
+      callback_called = true
+      callback(nil, false)
+    end
+  end, M.config.timeout_ms)
 
   vim.lsp.buf_request(bufnr, "textDocument/definition", params, function(err, result)
+    if callback_called then return end
+    callback_called = true
+
+    if timer then
+      pcall(vim.fn.timer_stop, timer)
+    end
+
     if err or not result then
       callback(nil, false)
       return
@@ -366,9 +382,24 @@ function M.extract_library_info(bufnr, question_start_line, question_end_line, q
     errors = {},
   }
 
+  local callback_called = false
+  local overall_timeout_ms = 15000 -- 15 second overall timeout
+
+  -- Overall timeout handler
+  vim.defer_fn(function()
+    if not callback_called then
+      callback_called = true
+      table.insert(result.errors, "Library info extraction timeout")
+      callback(result)
+    end
+  end, overall_timeout_ms)
+
   if not M.is_lsp_available() then
-    table.insert(result.errors, "LSP not available")
-    callback(result)
+    if not callback_called then
+      callback_called = true
+      table.insert(result.errors, "LSP not available")
+      callback(result)
+    end
     return
   end
 
@@ -422,7 +453,10 @@ function M.extract_library_info(bufnr, question_start_line, question_end_line, q
   end
 
   if #all_identifiers == 0 then
-    callback(result)
+    if not callback_called then
+      callback_called = true
+      callback(result)
+    end
     return
   end
 
@@ -430,29 +464,38 @@ function M.extract_library_info(bufnr, question_start_line, question_end_line, q
   local pending = #all_identifiers
   local completed = 0
 
+  local function check_complete()
+    if completed >= pending and not callback_called then
+      callback_called = true
+      callback(result)
+    end
+  end
+
   for _, ident in ipairs(all_identifiers) do
+    if callback_called then return end
+
     -- Skip if no position (from question text only, not found in code)
     if not ident.line then
       completed = completed + 1
-      if completed >= pending then
-        callback(result)
-      end
+      check_complete()
       goto continue
     end
 
     -- First check if it's a library
     M.get_definition_location(bufnr, ident.line, ident.col, function(def_path, is_library)
+      if callback_called then return end
+
       if not is_library then
         -- Not a library, skip
         completed = completed + 1
-        if completed >= pending then
-          callback(result)
-        end
+        check_complete()
         return
       end
 
       -- It's a library! Fetch hover info
       M.get_hover(bufnr, ident.line, ident.col, function(hover_text, hover_err)
+        if callback_called then return end
+
         local info = {
           identifier = ident.name,
           hover = hover_text,
@@ -473,9 +516,7 @@ function M.extract_library_info(bufnr, question_start_line, question_end_line, q
         end
 
         completed = completed + 1
-        if completed >= pending then
-          callback(result)
-        end
+        check_complete()
       end)
     end)
 
@@ -483,9 +524,7 @@ function M.extract_library_info(bufnr, question_start_line, question_end_line, q
   end
 
   -- Handle case where all identifiers were skipped
-  if completed >= pending then
-    callback(result)
-  end
+  check_complete()
 end
 
 -- =============================================================================

@@ -253,13 +253,46 @@ local function run_test_case(tc, callback)
       filepath = result.file_path,
     }
 
-    -- Extract context with error handling
+    -- Extract context with error handling and timeout
     local context_module = require("editutor.context")
     local start_time = vim.loop.now()
+    local extraction_done = false
+    local extraction_timeout = 30000  -- 30 seconds timeout
 
-    context_module.extract(function(context_text, metadata)
+    -- Timeout handler
+    vim.defer_fn(function()
+      if not extraction_done then
+        extraction_done = true
+        result.status = "failed"
+        result.errors[#result.errors + 1] = "Context extraction timeout after " .. extraction_timeout .. "ms"
+        log("    [TIMEOUT] Context extraction timed out", "ERROR")
+
+        -- Close buffer
+        pcall(function()
+          vim.cmd("bdelete!")
+        end)
+
+        callback(result)
+      end
+    end, extraction_timeout)
+
+    log("    Starting context extraction...", "DEBUG")
+    log(string.format("    File path: %s", result.file_path), "DEBUG")
+    log(string.format("    Question ID: %s", mock_question.id), "DEBUG")
+
+    local extract_ok, extract_err = pcall(function()
+      log("    Calling context_module.extract()...", "DEBUG")
+      context_module.extract(function(context_text, metadata)
+        log("    Context extraction callback received", "DEBUG")
+        if extraction_done then
+          return  -- Already timed out
+        end
+        extraction_done = true
       local elapsed = vim.loop.now() - start_time
       result.context.extraction_time_ms = elapsed
+
+      log(string.format("    Context text length: %d", context_text and #context_text or 0), "DEBUG")
+      log(string.format("    Metadata mode: %s", metadata and metadata.mode or "nil"), "DEBUG")
 
       if metadata then
         result.context.mode = metadata.mode
@@ -372,11 +405,27 @@ local function run_test_case(tc, callback)
         vim.cmd("bdelete!")
       end)
 
-      callback(result)
-    end, {
-      current_file = result.file_path,
-      questions = {mock_question},
-    })
+        callback(result)
+      end, {
+        current_file = result.file_path,
+        questions = {mock_question},
+      })
+    end)
+
+    if not extract_ok then
+      if not extraction_done then
+        extraction_done = true
+        result.status = "failed"
+        result.errors[#result.errors + 1] = "Context extraction error: " .. tostring(extract_err)
+        log("    [ERROR] " .. tostring(extract_err), "ERROR")
+
+        pcall(function()
+          vim.cmd("bdelete!")
+        end)
+
+        callback(result)
+      end
+    end
   end)
 end
 

@@ -220,22 +220,41 @@ local function get_lsp_definitions(bufnr, callback, opts)
   local pending = #identifiers
   local completed = 0
   local max_files = opts.max_files or 30
+  local callback_called = false
+  local timeout_ms = opts.timeout or 10000 -- 10 second timeout for LSP definitions
 
   if pending == 0 then
     callback({})
     return
   end
 
+  -- Timeout handler to prevent hanging forever
+  vim.defer_fn(function()
+    if not callback_called then
+      callback_called = true
+      callback(definitions) -- Return whatever we have so far
+    end
+  end, timeout_ms)
+
   for _, ident in ipairs(identifiers) do
+    if callback_called then
+      return -- Already timed out
+    end
+
     if vim.tbl_count(seen_files) >= max_files then
       completed = completed + 1
-      if completed >= pending then
+      if completed >= pending and not callback_called then
+        callback_called = true
         callback(definitions)
       end
       goto continue
     end
 
     lsp_context.get_definition(bufnr, ident.line, ident.col, function(locations)
+      if callback_called then
+        return -- Already timed out or completed
+      end
+
       completed = completed + 1
 
       for _, loc in ipairs(locations) do
@@ -270,7 +289,8 @@ local function get_lsp_definitions(bufnr, callback, opts)
         end
       end
 
-      if completed >= pending then
+      if completed >= pending and not callback_called then
+        callback_called = true
         callback(definitions)
       end
     end)
@@ -537,17 +557,58 @@ end
 ---Build context with smart backtracking strategy
 ---@param current_file string
 ---@param callback function Callback(context, metadata)
----@param opts? table {budget?: number}
+---@param opts? table {budget?: number, timeout?: number}
 function M.build_context_with_strategy(current_file, callback, opts)
   opts = opts or {}
   local budget = opts.budget or config.options.context and config.options.context.token_budget or M.DEFAULT_BUDGET
+  local timeout_ms = opts.timeout or 25000 -- 25 second overall timeout
 
   local project_root = project_scanner.get_project_root(current_file)
   local level_index = 1
   local attempts = {}
+  local callback_called = false
+
+  -- Overall timeout handler
+  vim.defer_fn(function()
+    if not callback_called then
+      callback_called = true
+      -- Return whatever we have, or minimal context
+      if #attempts > 0 then
+        local best = attempts[#attempts]
+        callback(best.context, {
+          mode = "adaptive",
+          strategy = {
+            level_used = best.level,
+            levels_tried = #attempts,
+            timeout = true,
+          },
+          token_usage = {
+            budget = budget,
+            total = best.tokens,
+            within_budget = best.tokens <= budget,
+          },
+          files_included = best.metadata and best.metadata.files or {},
+          warning = "strategy_timeout_after_" .. timeout_ms .. "ms",
+        })
+      else
+        -- No attempts completed, return empty with error
+        callback("", {
+          mode = "adaptive",
+          error = "strategy_timeout_no_attempts",
+          warning = "Context extraction timed out with no results",
+        })
+      end
+    end
+  end, timeout_ms)
 
   local function try_level()
+    if callback_called then
+      return -- Already timed out
+    end
+
     if level_index > #M.LEVELS then
+      if callback_called then return end
+      callback_called = true
       -- All levels exhausted, return the best attempt (minimal level)
       local best = attempts[#attempts]
       callback(best.context, {
@@ -571,6 +632,8 @@ function M.build_context_with_strategy(current_file, callback, opts)
     local level = M.LEVELS[level_index]
 
     build_context_for_level(current_file, project_root, level, budget, function(context, tokens, metadata)
+      if callback_called then return end
+
       table.insert(attempts, {
         level = level.name,
         tokens = tokens,
@@ -579,6 +642,8 @@ function M.build_context_with_strategy(current_file, callback, opts)
       })
 
       if tokens <= budget then
+        if callback_called then return end
+        callback_called = true
         -- Success! This level fits
         callback(context, {
           mode = "adaptive",

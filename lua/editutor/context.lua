@@ -247,12 +247,13 @@ end
 ---Extract context based on project size
 ---Also extracts library API info if questions are provided
 ---@param callback function Callback(formatted_context, metadata)
----@param opts? table {current_file?: string, questions?: table[]}
+---@param opts? table {current_file?: string, questions?: table[], timeout?: number}
 function M.extract(callback, opts)
   opts = opts or {}
   local current_file = opts.current_file or vim.api.nvim_buf_get_name(0)
   local questions = opts.questions or {}
   local bufnr = vim.api.nvim_get_current_buf()
+  local overall_timeout = opts.timeout or 45000 -- 45 second overall timeout
 
   local project_root = project_scanner.get_project_root(current_file)
   local mode_info = M.detect_mode(project_root)
@@ -263,12 +264,29 @@ function M.extract(callback, opts)
   local library_info = nil
   local library_metadata = nil
   local pending = 2 -- Two parallel tasks
+  local callback_called = false
+
+  -- Overall timeout handler
+  vim.defer_fn(function()
+    if not callback_called then
+      callback_called = true
+      local final_context = code_context or ""
+      local final_metadata = code_metadata or { mode = mode_info.mode }
+      final_metadata.timeout = true
+      final_metadata.warning = "Context extraction timeout after " .. overall_timeout .. "ms"
+      callback(final_context, final_metadata)
+    end
+  end, overall_timeout)
 
   local function check_complete()
+    if callback_called then return end
+
     pending = pending - 1
     if pending > 0 then
       return
     end
+
+    callback_called = true
 
     -- Combine code context and library info
     local final_context = code_context or ""
@@ -294,6 +312,7 @@ function M.extract(callback, opts)
     check_complete()
   else
     M.build_adaptive_context(current_file, function(formatted, metadata)
+      if callback_called then return end
       code_context = formatted
       code_metadata = metadata
       check_complete()
@@ -303,6 +322,7 @@ function M.extract(callback, opts)
   -- Task 2: Extract library info (parallel)
   if #questions > 0 then
     M.extract_library_info(bufnr, questions, function(info_text, info_metadata)
+      if callback_called then return end
       library_info = info_text
       library_metadata = info_metadata
       check_complete()
