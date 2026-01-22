@@ -295,6 +295,7 @@ local function run_test_case(tc, callback)
       log(string.format("    Metadata mode: %s", metadata and metadata.mode or "nil"), "DEBUG")
 
       if metadata then
+        log("    Processing metadata...", "DEBUG")
         result.context.mode = metadata.mode
         result.context.total_tokens = metadata.total_tokens or 0
         result.context.files_included = metadata.files_included or 0
@@ -327,13 +328,18 @@ local function run_test_case(tc, callback)
             result.errors[#result.errors + 1] = "Library info: " .. tostring(metadata.library_info.error)
           end
         end
+        log("    Metadata processed", "DEBUG")
       else
         result.errors[#result.errors + 1] = "Context extraction returned nil metadata"
+        log("    No metadata received", "DEBUG")
       end
 
       if not context_text or #context_text == 0 then
         result.errors[#result.errors + 1] = "Context extraction returned empty context"
+        log("    Empty context", "DEBUG")
       end
+
+      log("    Saving context...", "DEBUG")
 
       -- Save context preview
       if context_text and #context_text > 0 then
@@ -343,6 +349,7 @@ local function run_test_case(tc, callback)
 
         -- Save full context if enabled
         if M.config.save_contexts then
+          log("    Writing context file...", "DEBUG")
           local context_dir = M.config.results_dir .. "/contexts/" .. tc.repo
           vim.fn.mkdir(context_dir, "p")
 
@@ -352,6 +359,7 @@ local function run_test_case(tc, callback)
 
           local f = io.open(context_path, "w")
           if f then
+            log(string.format("    Context file opened: %s", context_path), "DEBUG")
             f:write("=== TEST CASE ===\n")
             f:write(string.format("Repo: %s\n", tc.repo))
             f:write(string.format("File: %s\n", tc.file))
@@ -376,9 +384,16 @@ local function run_test_case(tc, callback)
             f:write("\n=== CONTEXT ===\n")
             f:write(context_text or "(empty)")
             f:close()
+            log("    Context file written and closed", "DEBUG")
+          else
+            log("    Failed to open context file", "ERROR")
           end
         end
+      else
+        log("    Skipping context save (empty context)", "DEBUG")
       end
+
+      log("    Determining final status...", "DEBUG")
 
       -- Determine final status based on errors
       local critical_errors = 0
@@ -400,11 +415,14 @@ local function run_test_case(tc, callback)
         result.status = "passed"
       end
 
+      log(string.format("    Test case complete, status: %s", result.status), "DEBUG")
+
       -- Close buffer
       pcall(function()
         vim.cmd("bdelete!")
       end)
 
+      log("    Calling test callback...", "DEBUG")
         callback(result)
       end, {
         current_file = result.file_path,
