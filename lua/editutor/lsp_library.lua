@@ -78,6 +78,102 @@ local function estimate_tokens(text)
   return math.ceil(#text / 4)
 end
 
+---Check if hover text looks like library/std documentation
+---@param hover_text string
+---@param lang string|nil Language name (e.g., "rust", "go", "python")
+---@return boolean
+local function looks_like_library_hover(hover_text, lang)
+  if not hover_text or hover_text == "" then
+    return false
+  end
+
+  -- Common patterns across languages suggesting library/API docs
+  local common_patterns = {
+    "^pub ", -- Rust public items
+    "^func ", -- Go functions
+    "^type ", -- Go types
+    "^package ", -- Go package docs
+    "^class ", -- Python/TS classes
+    "^def ", -- Python functions
+    "^interface ", -- TS/Go interfaces
+    "^struct ", -- Go/Rust structs
+    "^enum ", -- Rust/TS enums
+    "^trait ", -- Rust traits
+    "^const ", -- Constants
+    "^var ", -- Variables
+    "%(method%)", -- Method indicators
+    "%(function%)", -- Function indicators
+  }
+
+  -- Language-specific patterns
+  local lang_patterns = {
+    rust = {
+      "std::", "core::", "alloc::", "tokio::", "serde::", "async%-std::",
+      "pub fn", "pub struct", "pub enum", "pub trait", "pub type", "pub mod",
+      "impl%s", "extern crate", "#%[derive",
+    },
+    go = {
+      "^func %(%w+ %*?%w+%)", -- Method receiver
+      "^func %w+%(", -- Function
+      "package %w+", -- Package reference
+      "fmt%.", "io%.", "os%.", "net%.", "http%.", "context%.", "sync%.",
+      "encoding%.", "strings%.", "bytes%.", "time%.", "errors%.",
+    },
+    python = {
+      "^def ", "^class ", "^async def ",
+      "-> ", "Args:", "Returns:", "Raises:", "Parameters:",
+      "numpy%.", "pandas%.", "torch%.", "tensorflow%.",
+      "from typing", "Optional%[", "List%[", "Dict%[", "Tuple%[",
+    },
+    typescript = {
+      "^interface ", "^type ", "^class ", "^function ", "^const ", "^enum ",
+      "^export ", "^declare ", "^namespace ",
+      ": %w+%[%]", ": Promise<", ": Observable<",
+    },
+    javascript = {
+      "^function ", "^class ", "^const ", "^let ", "^var ",
+      "Promise%.", "Array%.", "Object%.", "String%.",
+    },
+    c = {
+      "^typedef ", "^struct ", "^enum ", "^union ",
+      "#include", "size_t", "void%s*%*", "int%s+%w+%(",
+    },
+    cpp = {
+      "^template", "^class ", "^struct ", "^namespace ",
+      "std::", "boost::", "virtual ", "override",
+    },
+  }
+
+  -- Check common patterns
+  for _, pattern in ipairs(common_patterns) do
+    if hover_text:match(pattern) then
+      return true
+    end
+  end
+
+  -- Check language-specific patterns
+  if lang and lang_patterns[lang] then
+    for _, pattern in ipairs(lang_patterns[lang]) do
+      if hover_text:match(pattern) then
+        return true
+      end
+    end
+  end
+
+  -- Fallback: check all language patterns if lang not specified
+  if not lang then
+    for _, patterns in pairs(lang_patterns) do
+      for _, pattern in ipairs(patterns) do
+        if hover_text:match(pattern) then
+          return true
+        end
+      end
+    end
+  end
+
+  return false
+end
+
 ---Extract identifiers from lines using tree-sitter
 ---@param bufnr number
 ---@param start_line number 0-indexed
@@ -265,6 +361,8 @@ function M.get_definition_location(bufnr, line, col, callback)
     end
   end)
 
+  local debug_log = require("editutor.debug_log")
+
   vim.lsp.buf_request(bufnr, "textDocument/definition", params, function(err, result)
     if callback_called then return end
     callback_called = true
@@ -273,25 +371,46 @@ function M.get_definition_location(bufnr, line, col, callback)
       pcall(vim.fn.timer_stop, timer)
     end
 
-    if err or not result then
+    if err then
+      debug_log.log(string.format("[LSP_LIB] Definition error: %s", vim.inspect(err)), "DEBUG")
       callback(nil, false)
       return
     end
 
+    if not result then
+      debug_log.log("[LSP_LIB] Definition result is nil", "DEBUG")
+      callback(nil, false)
+      return
+    end
+
+    -- Log raw result for debugging
+    debug_log.log(string.format("[LSP_LIB] Definition raw result: %s", vim.inspect(result)), "DEBUG")
+
     -- Get first definition location
+    -- Handle various LSP response formats:
+    -- 1. Location: { uri, range }
+    -- 2. LocationLink: { targetUri, targetRange, targetSelectionRange }
+    -- 3. Array of Location or LocationLink
     local uri
     if result.uri then
       uri = result.uri
     elseif result.targetUri then
       uri = result.targetUri
     elseif type(result) == "table" and #result > 0 then
-      uri = result[1].uri or result[1].targetUri
+      local first = result[1]
+      if first then
+        uri = first.uri or first.targetUri
+        debug_log.log(string.format("[LSP_LIB] First result item: %s", vim.inspect(first)), "DEBUG")
+      end
     end
 
     if not uri then
+      debug_log.log("[LSP_LIB] Could not extract URI from result", "DEBUG")
       callback(nil, false)
       return
     end
+
+    debug_log.log(string.format("[LSP_LIB] Extracted URI: %s", uri), "DEBUG")
 
     local filepath = vim.uri_to_fname(uri)
     local is_library = M.is_library_path(filepath, project_root)
@@ -505,48 +624,94 @@ function M.extract_library_info(bufnr, question_start_line, question_end_line, q
     M.get_definition_location(bufnr, ident.line, ident.col, function(def_path, is_library)
       if callback_called then return end
 
-      if not is_library then
+      -- Helper function to process hover info
+      local function process_hover()
+        M.get_hover(bufnr, ident.line, ident.col, function(hover_text, hover_err)
+          if callback_called then return end
+
+          local info = {
+            identifier = ident.name,
+            hover = hover_text,
+            source = hover_text and "hover" or nil,
+            error = hover_err,
+          }
+
+          if hover_text then
+            local tokens = estimate_tokens(hover_text)
+            debug_log.log(string.format("[LSP_LIB] %s: hover found (%d tokens)", ident.name, tokens), "DEBUG")
+
+            -- Check token budget
+            if result.total_tokens + tokens <= M.config.max_tokens then
+              result.total_tokens = result.total_tokens + tokens
+              table.insert(result.items, info)
+            end
+          elseif hover_err then
+            debug_log.log(string.format("[LSP_LIB] %s: hover error: %s", ident.name, hover_err), "DEBUG")
+            table.insert(result.errors, string.format("%s: %s", ident.name, hover_err))
+          else
+            debug_log.log(string.format("[LSP_LIB] %s: no hover info", ident.name), "DEBUG")
+          end
+
+          completed = completed + 1
+          check_complete()
+        end)
+      end
+
+      if is_library then
+        -- Confirmed library, fetch hover info
+        lib_found = lib_found + 1
+        debug_log.log(string.format("[LSP_LIB] %s: IS library (path=%s)", ident.name, tostring(def_path)), "DEBUG")
+        process_hover()
+      elseif def_path == nil then
+        -- Definition path is nil - could be std lib without rust-src, or external crate
+        -- Try hover anyway and check if it looks like library code
+        debug_log.log(string.format("[LSP_LIB] %s: no def path, trying hover fallback", ident.name), "DEBUG")
+
+        -- Get current buffer language for pattern matching
+        local ok_parser, parser = pcall(vim.treesitter.get_parser, bufnr)
+        local lang = ok_parser and parser and parser:lang() or nil
+
+        M.get_hover(bufnr, ident.line, ident.col, function(hover_text, hover_err)
+          if callback_called then return end
+
+          if hover_text then
+            -- Check if hover text suggests this is a library/std type
+            local is_std_or_lib = looks_like_library_hover(hover_text, lang)
+
+            if is_std_or_lib then
+              lib_found = lib_found + 1
+              debug_log.log(string.format("[LSP_LIB] %s: detected as lib via hover content (lang=%s)", ident.name, tostring(lang)), "DEBUG")
+
+              local tokens = estimate_tokens(hover_text)
+              debug_log.log(string.format("[LSP_LIB] %s: hover found (%d tokens)", ident.name, tokens), "DEBUG")
+
+              if result.total_tokens + tokens <= M.config.max_tokens then
+                result.total_tokens = result.total_tokens + tokens
+                table.insert(result.items, {
+                  identifier = ident.name,
+                  hover = hover_text,
+                  source = "hover",
+                })
+              end
+            else
+              skipped_not_lib = skipped_not_lib + 1
+              debug_log.log(string.format("[LSP_LIB] %s: hover doesn't look like lib (hover=%s...)", ident.name, hover_text:sub(1, 50)), "DEBUG")
+            end
+          else
+            skipped_not_lib = skipped_not_lib + 1
+            debug_log.log(string.format("[LSP_LIB] %s: no def path and no hover", ident.name), "DEBUG")
+          end
+
+          completed = completed + 1
+          check_complete()
+        end)
+      else
         skipped_not_lib = skipped_not_lib + 1
         debug_log.log(string.format("[LSP_LIB] %s: not library (path=%s)", ident.name, tostring(def_path)), "DEBUG")
         -- Not a library, skip
         completed = completed + 1
         check_complete()
-        return
       end
-
-      -- It's a library! Fetch hover info
-      lib_found = lib_found + 1
-      debug_log.log(string.format("[LSP_LIB] %s: IS library (path=%s)", ident.name, tostring(def_path)), "DEBUG")
-
-      M.get_hover(bufnr, ident.line, ident.col, function(hover_text, hover_err)
-        if callback_called then return end
-
-        local info = {
-          identifier = ident.name,
-          hover = hover_text,
-          source = hover_text and "hover" or nil,
-          error = hover_err,
-        }
-
-        if hover_text then
-          local tokens = estimate_tokens(hover_text)
-          debug_log.log(string.format("[LSP_LIB] %s: hover found (%d tokens)", ident.name, tokens), "DEBUG")
-
-          -- Check token budget
-          if result.total_tokens + tokens <= M.config.max_tokens then
-            result.total_tokens = result.total_tokens + tokens
-            table.insert(result.items, info)
-          end
-        elseif hover_err then
-          debug_log.log(string.format("[LSP_LIB] %s: hover error: %s", ident.name, hover_err), "DEBUG")
-          table.insert(result.errors, string.format("%s: %s", ident.name, hover_err))
-        else
-          debug_log.log(string.format("[LSP_LIB] %s: no hover info", ident.name), "DEBUG")
-        end
-
-        completed = completed + 1
-        check_complete()
-      end)
     end)
 
     ::continue::
