@@ -294,24 +294,32 @@ function M.resolve_import(import_path, source_file, project_root, lang)
   end
 
   local source_dir = vim.fn.fnamemodify(source_file, ":h")
+  local resolved = nil
 
   -- Language-specific resolution
   if lang == "javascript" or lang == "typescript" then
-    return M._resolve_js_import(import_path, source_dir, project_root, lang)
+    resolved = M._resolve_js_import(import_path, source_dir, project_root, lang)
   elseif lang == "python" then
-    return M._resolve_python_import(import_path, source_dir, project_root)
+    resolved = M._resolve_python_import(import_path, source_dir, project_root)
   elseif lang == "lua" then
-    return M._resolve_lua_import(import_path, source_dir, project_root)
+    resolved = M._resolve_lua_import(import_path, source_dir, project_root)
   elseif lang == "go" then
-    return M._resolve_go_import(import_path, source_dir, project_root)
+    resolved = M._resolve_go_import(import_path, source_dir, project_root)
   elseif lang == "rust" then
-    return M._resolve_rust_import(import_path, source_dir, project_root)
+    resolved = M._resolve_rust_import(import_path, source_dir, project_root)
   elseif lang == "c" or lang == "cpp" then
-    return M._resolve_c_import(import_path, source_dir, project_root)
+    resolved = M._resolve_c_import(import_path, source_dir, project_root)
   else
     -- Generic: try relative resolution
-    return M._resolve_generic_import(import_path, source_dir, project_root)
+    resolved = M._resolve_generic_import(import_path, source_dir, project_root)
   end
+
+  -- Normalize resolved path to remove ./ and // artifacts
+  if resolved then
+    resolved = vim.fn.simplify(resolved)
+  end
+
+  return resolved
 end
 
 ---Try multiple file extensions
@@ -541,7 +549,8 @@ local function build_import_index(project_root, scan_result)
 
   for _, file in ipairs(scan_result.files) do
     if file.type == "source" then
-      local full_path = project_root .. "/" .. file.path
+      -- Normalize path to remove ./ and // artifacts
+      local full_path = vim.fn.simplify(project_root .. "/" .. file.path)
       local file_lang = M.get_language(full_path)
 
       if file_lang then

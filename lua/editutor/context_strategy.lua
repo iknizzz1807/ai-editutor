@@ -111,7 +111,14 @@ end
 local function get_display_path(filepath, project_root)
   local root_name = vim.fn.fnamemodify(project_root, ":t")
   if filepath:sub(1, #project_root) == project_root then
-    return root_name .. "/" .. filepath:sub(#project_root + 2)
+    local relative = filepath:sub(#project_root + 2)
+    -- Normalize path: remove leading slash, double slashes, and ./ segments
+    relative = relative
+      :gsub("^/", "")      -- Remove leading slash
+      :gsub("//+", "/")    -- Collapse double slashes
+      :gsub("^%./", "")    -- Remove leading ./
+      :gsub("/%./", "/")   -- Remove /./ in middle
+    return root_name .. "/" .. relative
   end
   return root_name .. "/" .. vim.fn.fnamemodify(filepath, ":t")
 end
