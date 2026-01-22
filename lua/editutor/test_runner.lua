@@ -231,6 +231,12 @@ local function run_test_case(tc, callback)
     result.lsp.available = lsp_ready
     result.lsp.timeout = (lsp_err == "timeout")
 
+    if lsp_err == "timeout" then
+      result.errors[#result.errors + 1] = "LSP timeout after " .. M.config.lsp_timeout .. "ms"
+    elseif not lsp_ready then
+      result.errors[#result.errors + 1] = "LSP not available for this file type"
+    end
+
     if clients then
       for _, client in ipairs(clients) do
         table.insert(result.lsp.clients, client.name)
@@ -247,7 +253,7 @@ local function run_test_case(tc, callback)
       filepath = result.file_path,
     }
 
-    -- Extract context
+    -- Extract context with error handling
     local context_module = require("editutor.context")
     local start_time = vim.loop.now()
 
@@ -261,10 +267,39 @@ local function run_test_case(tc, callback)
         result.context.files_included = metadata.files_included or 0
         result.context.strategy_level = metadata.strategy_level
 
+        -- Log metadata errors
+        if metadata.error then
+          result.errors[#result.errors + 1] = "Context error: " .. tostring(metadata.error)
+        end
+        if metadata.details and metadata.details.error then
+          result.errors[#result.errors + 1] = "Strategy error: " .. tostring(metadata.details.error)
+        end
+
         if metadata.library_info then
           result.library_info.items = metadata.library_info.items or 0
           result.library_info.tokens = metadata.library_info.tokens or 0
+
+          -- Log library info errors
+          if metadata.library_info.errors then
+            local lib_errors = metadata.library_info.errors
+            if type(lib_errors) == "table" then
+              for _, lib_err in ipairs(lib_errors) do
+                result.errors[#result.errors + 1] = "Library info: " .. tostring(lib_err)
+              end
+            elseif type(lib_errors) == "number" and lib_errors > 0 then
+              result.errors[#result.errors + 1] = "Library info: " .. lib_errors .. " errors occurred"
+            end
+          end
+          if metadata.library_info.error then
+            result.errors[#result.errors + 1] = "Library info: " .. tostring(metadata.library_info.error)
+          end
         end
+      else
+        result.errors[#result.errors + 1] = "Context extraction returned nil metadata"
+      end
+
+      if not context_text or #context_text == 0 then
+        result.errors[#result.errors + 1] = "Context extraction returned empty context"
       end
 
       -- Save context preview
@@ -299,14 +334,38 @@ local function run_test_case(tc, callback)
             f:write(string.format("LSP Clients: %s\n", table.concat(result.lsp.clients, ", ")))
             f:write(string.format("Library Info Items: %d\n", result.library_info.items))
             f:write(string.format("Extraction Time: %dms\n", result.context.extraction_time_ms))
+            if #result.errors > 0 then
+              f:write("\n=== ERRORS ===\n")
+              for _, err in ipairs(result.errors) do
+                f:write("- " .. err .. "\n")
+              end
+            end
             f:write("\n=== CONTEXT ===\n")
-            f:write(context_text)
+            f:write(context_text or "(empty)")
             f:close()
           end
         end
       end
 
-      result.status = "passed"
+      -- Determine final status based on errors
+      local critical_errors = 0
+      for _, err in ipairs(result.errors) do
+        -- Count critical errors (not warnings like "LSP not available")
+        if err:match("Context error") or
+           err:match("Strategy error") or
+           err:match("nil metadata") or
+           err:match("empty context") then
+          critical_errors = critical_errors + 1
+        end
+      end
+
+      if critical_errors > 0 then
+        result.status = "failed"
+      elseif #result.errors > 0 then
+        result.status = "passed"  -- Passed with warnings
+      else
+        result.status = "passed"
+      end
 
       -- Close buffer
       pcall(function()
