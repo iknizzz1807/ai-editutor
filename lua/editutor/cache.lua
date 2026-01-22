@@ -20,6 +20,36 @@ M._autocmd_group = nil
 ---@field expires number Expiration timestamp
 ---@field tags string[] Tags for bulk invalidation
 
+-- Source file extensions that should trigger cache invalidation
+M.SOURCE_EXTENSIONS = {
+  "js", "jsx", "ts", "tsx", "mjs", "cjs",
+  "py", "pyw",
+  "lua",
+  "go",
+  "rs",
+  "c", "h", "cpp", "cc", "hpp",
+  "java", "kt",
+  "rb",
+  "php",
+  "swift",
+  "ex", "exs",
+}
+
+---Check if file is a source file that should invalidate cache
+---@param filepath string
+---@return boolean
+local function is_source_file(filepath)
+  local ext = filepath:match("%.([^.]+)$")
+  if not ext then return false end
+  ext = ext:lower()
+  for _, source_ext in ipairs(M.SOURCE_EXTENSIONS) do
+    if ext == source_ext then
+      return true
+    end
+  end
+  return false
+end
+
 ---Initialize cache and setup autocmds
 function M.setup()
   if M._autocmd_group then
@@ -33,8 +63,18 @@ function M.setup()
     group = M._autocmd_group,
     callback = function(ev)
       M.invalidate_by_tag("file:" .. ev.file)
-      -- Also invalidate project cache when any file changes
-      M.invalidate_by_tag("project")
+
+      -- Only invalidate project cache when a SOURCE file changes
+      -- This prevents unnecessary re-scans when editing non-code files
+      if is_source_file(ev.file) then
+        M.invalidate_by_tag("project")
+
+        -- Also invalidate import index
+        local ok, import_graph = pcall(require, "editutor.import_graph")
+        if ok and import_graph.invalidate_index then
+          import_graph.invalidate_index()
+        end
+      end
     end,
   })
 

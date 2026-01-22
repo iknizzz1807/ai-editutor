@@ -120,8 +120,11 @@ function M.save(entry)
 
   entry.timestamp = entry.timestamp or os.time()
 
-  -- Generate ID: YYYY-MM-DD-NNNN
-  entry.id = string.format("%s-%04d", today, #entries + 1)
+  -- Generate ID: YYYY-MM-DD-TIMESTAMP_MS to avoid collisions
+  -- Using high-resolution timer ensures uniqueness even with rapid saves
+  local hrtime = vim.loop.hrtime()
+  local ms = math.floor(hrtime / 1000000) % 1000000 -- Last 6 digits of ms
+  entry.id = string.format("%s-%06d", today, ms)
 
   -- Ensure tags is a table
   if type(entry.tags) == "string" then

@@ -508,8 +508,80 @@ function M.get_outgoing_imports(filepath, project_root)
   return resolved
 end
 
+-- =============================================================================
+-- Import Index (for fast incoming lookups)
+-- =============================================================================
+
+-- Cached import index: maps resolved filepath -> list of files that import it
+M._import_index = nil
+M._import_index_root = nil
+
+---Build import index for entire project (done once, cached)
+---@param project_root string
+---@param scan_result table
+---@return table<string, string[]> Index mapping filepath -> importers
+local function build_import_index(project_root, scan_result)
+  local index = {}
+
+  for _, file in ipairs(scan_result.files) do
+    if file.type == "source" then
+      local full_path = project_root .. "/" .. file.path
+      local file_lang = M.get_language(full_path)
+
+      if file_lang then
+        local imports = M.extract_imports_from_file(full_path)
+
+        for _, import_path in ipairs(imports) do
+          local resolved = M.resolve_import(import_path, full_path, project_root, file_lang)
+          if resolved then
+            if not index[resolved] then
+              index[resolved] = {}
+            end
+            -- Avoid duplicates
+            local found = false
+            for _, existing in ipairs(index[resolved]) do
+              if existing == full_path then
+                found = true
+                break
+              end
+            end
+            if not found then
+              table.insert(index[resolved], full_path)
+            end
+          end
+        end
+      end
+    end
+  end
+
+  return index
+end
+
+---Get or build import index
+---@param project_root string
+---@param scan_result table
+---@return table<string, string[]>
+local function get_import_index(project_root, scan_result)
+  -- Check if we have a valid cached index
+  if M._import_index and M._import_index_root == project_root then
+    return M._import_index
+  end
+
+  -- Build new index
+  M._import_index = build_import_index(project_root, scan_result)
+  M._import_index_root = project_root
+
+  return M._import_index
+end
+
+---Invalidate import index (call when files change)
+function M.invalidate_index()
+  M._import_index = nil
+  M._import_index_root = nil
+end
+
 ---Get files that import current file (incoming edges)
----Scans project to find files that import the given file
+---Uses cached import index for fast O(1) lookup instead of scanning all files
 ---@param filepath string Current file path
 ---@param project_root string Project root
 ---@param scan_result? table Cached project scan result
@@ -523,50 +595,19 @@ function M.get_incoming_imports(filepath, project_root, scan_result)
     return project_scanner.scan_project({ root = project_root })
   end)
 
-  local incoming = {}
-  local current_basename = vim.fn.fnamemodify(filepath, ":t:r") -- filename without extension
+  -- Use indexed lookup (O(1) instead of O(n) file reads)
+  local index = get_import_index(project_root, scan_result)
+  local incoming = index[filepath] or {}
 
-  for _, file in ipairs(scan_result.files) do
-    if file.type == "source" then
-      local full_path = project_root .. "/" .. file.path
-
-      -- Skip self
-      if full_path == filepath then
-        goto continue
-      end
-
-      -- Only check files of compatible languages
-      local file_lang = M.get_language(full_path)
-      if not file_lang then
-        goto continue
-      end
-
-      -- Quick check: does file content mention current file's name?
-      local ok, lines = pcall(vim.fn.readfile, full_path)
-      if not ok then goto continue end
-
-      local content = table.concat(lines, "\n")
-
-      -- Quick heuristic: check if file mentions current file's basename
-      if not content:match(current_basename) then
-        goto continue
-      end
-
-      -- Detailed check: parse imports and resolve
-      local imports = M.extract_imports(content, file_lang)
-      for _, import_path in ipairs(imports) do
-        local resolved = M.resolve_import(import_path, full_path, project_root, file_lang)
-        if resolved == filepath then
-          table.insert(incoming, full_path)
-          break
-        end
-      end
-
-      ::continue::
+  -- Filter out self (shouldn't happen but safety check)
+  local result = {}
+  for _, importer in ipairs(incoming) do
+    if importer ~= filepath then
+      table.insert(result, importer)
     end
   end
 
-  return incoming
+  return result
 end
 
 ---Get full import graph for a file (depth=1 in both directions)

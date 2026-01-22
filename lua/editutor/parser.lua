@@ -102,12 +102,19 @@ end
 
 ---Find all pending questions in current buffer
 ---Simple approach: find [PENDING:id], then find matching [Q:id]
+---Supports both block comments (/* */) and line comments (# // --)
 ---@param bufnr? number Buffer number
 ---@return PendingQuestion[] questions List of pending questions
 function M.find_pending_questions(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local style = M.get_comment_style(bufnr)
+
+  -- For languages without block comments (Python, Shell, etc.), use line comment parser
+  if not style.block and style.line then
+    return M._find_pending_line_comments(lines, style)
+  end
+
   local questions = {}
 
   -- First pass: find all [PENDING:id] markers

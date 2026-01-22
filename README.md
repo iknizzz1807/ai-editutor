@@ -4,95 +4,124 @@
 
 A Neovim plugin for developers who learn by building.
 
-## Why
+## The Problem
 
-You're building something real. Not a tutorial. Not a toy project. Something you actually care about.
+You're deep in your codebase. You hit a function you don't fully understand. You want to know:
 
-And you have questions. Small ones, big ones, weird ones. *"What's a closure again?" "Why is this nil?" "How do I handle this edge case?"*
+- *"What exactly does this function do?"*
+- *"Is there a library that handles this better?"*
+- *"What's the best practice for error handling here?"*
+- *"Why is this returning nil?"*
 
-You could switch to ChatGPT. Open a browser. Lose your flow. Copy context back and forth. Or scroll through Stack Overflow answers from 2015.
+You could open ChatGPT. Copy your code. Paste it. Explain your project structure. Copy more context. Paste again. Get a generic answer that doesn't fit your codebase.
 
-Or you could just ask. Right here. Right now. In your code.
+**Or you could just ask. Right here. In your code. With full context.**
 
-```javascript
-// Press <leader>mq to spawn a question block
-/* [Q:q_1737200000000]
-What is closure?
-[PENDING:q_1737200000000]
-*/
+## The Solution
+
+```python
+# You're looking at this function, confused:
+def process_user_data(data, config):
+    normalized = {k.lower(): v for k, v in data.items() if v is not None}
+    return {**config.get("defaults", {}), **normalized}
+
+# Press <leader>mq, type your question:
+# [Q:q_1737200000000]
+# What does this function do? Is the order of merging correct?
+# What happens if config doesn't have "defaults" key?
+# [PENDING:q_1737200000000]
 ```
 
-Press `<leader>ma`. Get an answer. Keep building.
+Press `<leader>ma`. AI sees your code, your imports, your project structure. Answers with full context:
 
-**That's it.** No context switching. No copy-pasting. No breaking flow.
-
-## The Philosophy
-
-This is not a code generator. This is not about shipping faster.
-
-This is about the moments when you're building something and you think *"wait, I should probably understand this better"* - and then you actually do, instead of just moving on.
-
-**Learn while you build. Understand while you ship.**
-
-Every question you ask is a chance to level up. Every answer stays in your codebase as a note to your future self.
-
-## v3.0 - Question Blocks
-
-Explicit question blocks with unique IDs. Reliable parsing. Batch processing.
-
-```javascript
-// 1. Press <leader>mq to spawn a question block
-/* [Q:q_1737200000000]
-What is closure and when should I use it?
-[PENDING:q_1737200000000]
-*/
-
-// 2. Press <leader>ma to get answer
-/* [Q:q_1737200000000]
-What is closure and when should I use it?
-
-A closure is a function that captures variables from its surrounding scope.
-When the inner function is returned, it maintains access to those variables
-even after the outer function has finished executing.
-
-Use closures for:
-- Data privacy (private variables)
-- Factory functions
-- Callbacks and event handlers
-
-Watch out for memory leaks if closures hold references to large objects.
-*/
+```python
+# [Q:q_1737200000000]
+# What does this function do? Is the order of merging correct?
+# What happens if config doesn't have "defaults" key?
+#
+# This function:
+# 1. Filters out None values and lowercases keys from input data
+# 2. Merges with defaults from config (defaults first, then normalized overrides)
+#
+# The merge order is correct - user data overwrites defaults.
+#
+# If "defaults" key missing: config.get("defaults", {}) returns empty dict,
+# so it just returns normalized data. Safe, no KeyError.
+#
+# Consider adding type hints for clarity:
+# def process_user_data(data: dict[str, Any], config: dict) -> dict:
 ```
 
-### Key Features
+**Read it. Understand it. Delete the block. Keep coding.**
 
-- **Spawn question block** - `<leader>mq` creates a block with unique ID
-- **Visual selection support** - Select code, then `<leader>mq` to ask about it
-- **Batch processing** - Multiple `[PENDING]` questions answered in one request
-- **Reliable parsing** - Marker-based response format, no JSON issues
+## Why This Works
 
-### Visual Selection
+### Context is Everything
 
-Select code, press `<leader>mq`:
+ChatGPT doesn't know your codebase. You have to explain everything.
+
+ai-editutor **automatically gathers context**:
+- Full current file
+- Files you import (and files that import you)
+- Type definitions via LSP
+- Project structure
+
+When you ask "is this the right approach?", AI actually sees what approach you're using.
+
+### Stay in Flow
+
+No browser tabs. No copy-paste. No context switching.
+
+```
+Ask → Read → Understand → Delete → Keep building
+```
+
+The question block is temporary. It's a learning moment, not permanent documentation.
+
+### Real Questions, Real Answers
+
+Not "explain closures". But:
 
 ```javascript
-// Select this function, press <leader>mq:
-function processData(items) {
-  return items.filter(x => x.active).map(x => x.value);
+/* [Q:q_...]
+This useEffect runs on every render. How do I make it run only once?
+And should I use useCallback for the handleSubmit inside?
+[PENDING:q_...]
+*/
+useEffect(() => {
+  fetchUserData();
+}, []);
+
+const handleSubmit = () => {
+  // ...
+};
+```
+
+```go
+/* [Q:q_...]
+Is there a stdlib function that does this? Or should I use a library?
+What's idiomatic Go for this pattern?
+[PENDING:q_...]
+*/
+func contains(slice []string, item string) bool {
+    for _, v := range slice {
+        if v == item {
+            return true
+        }
+    }
+    return false
 }
-
-// Question block created with your selection:
-/* [Q:q_1737200000000]
-Regarding this code:
-```
-function processData(items) {
-  return items.filter(x => x.active).map(x => x.value);
-}
 ```
 
-Why use filter before map here?
-[PENDING:q_1737200000000]
+```rust
+/* [Q:q_...]
+When should I use &str vs String here?
+This function is called frequently, does it matter for performance?
+[PENDING:q_...]
 */
+fn process_name(name: String) -> String {
+    name.trim().to_lowercase()
+}
 ```
 
 ## Quick Start
@@ -106,7 +135,7 @@ Why use filter before map here?
   dependencies = { "nvim-lua/plenary.nvim" },
   config = function()
     require("editutor").setup({
-      provider = "claude",  -- or openai, deepseek, gemini, ollama
+      provider = "deepseek",  -- or claude, openai, gemini, ollama
     })
   end,
 }
@@ -115,124 +144,133 @@ Why use filter before map here?
 **2. Set your API key**
 
 ```bash
-export ANTHROPIC_API_KEY="your-key"
+export DEEPSEEK_API_KEY="your-key"
+# or ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.
 ```
 
-**3. Spawn a question block**
+**3. Ask a question**
 
-Press `<leader>mq` anywhere in your code. A question block appears:
+1. Navigate to code you want to understand
+2. Press `<leader>mq` - question block appears
+3. Type your question
+4. Press `<Esc>`, then `<leader>ma`
+5. Read the answer, delete the block, keep building
 
-```javascript
+## Visual Selection
+
+Select confusing code first, then press `<leader>mq`:
+
+```typescript
+// Select these lines, press <leader>mq:
+const result = data
+  .filter(x => x.status === 'active')
+  .reduce((acc, item) => ({
+    ...acc,
+    [item.id]: item.value * multiplier
+  }), {});
+
+// Question block created with your selection quoted:
 /* [Q:q_1737200000000]
+Regarding this code:
+```
+const result = data
+  .filter(x => x.status === 'active')
+  .reduce((acc, item) => ({
+    ...acc,
+    [item.id]: item.value * multiplier
+  }), {});
+```
 
+Can this be simplified? Is reduce the right choice here?
+What if data is empty?
 [PENDING:q_1737200000000]
 */
 ```
 
-Type your question, exit insert mode.
+## Batch Questions
 
-**4. Press `<leader>ma`**
+Multiple questions? Ask them all, process once:
 
-Answer replaces the `[PENDING]` marker. You keep coding. You keep learning.
+```python
+# [Q:q_1737200000000]
+# What does this decorator do?
+# [PENDING:q_1737200000000]
 
-## Features
+@lru_cache(maxsize=128)
+def expensive_calculation(n):
+    # ...
 
-### Question Blocks
-Explicit `[Q:id]` and `[PENDING:id]` markers:
-- Unique timestamp-based IDs (no conflicts)
-- Clear visual structure
-- Easy to search and manage
-
-### Batch Processing
-Multiple pending questions answered in one request:
-```javascript
-/* [Q:q_1737200000000]
-What is closure?
-[PENDING:q_1737200000000]
-*/
-
-/* [Q:q_1737200001000]
-How does async work?
-[PENDING:q_1737200001000]
-*/
-
-// Press <leader>ma once -> both answered
+# [Q:q_1737200001000]
+# Should I use lru_cache or functools.cache here?
+# [PENDING:q_1737200001000]
 ```
 
-### Context-Aware
-Your questions get answered with full project context:
-- Small projects (<20K tokens): Entire codebase included
-- Large projects: Current file + imports + LSP definitions
-
-### Visual Selection
-Select confusing code, press `<leader>mq`:
-- Selected code is quoted in the question block
-- Type your question about the specific code
-- AI focuses on your selection
-
-### Knowledge That Stays
-Every Q&A is saved by date. Review your learning history:
-```vim
-:EditutorHistory           " Recent Q&A
-:EditutorBrowse            " Browse by date
-:EditutorExport            " Export to markdown
-```
+Press `<leader>ma` once. Both answered.
 
 ## Configuration
 
 ```lua
 require("editutor").setup({
-  provider = "claude",           -- claude, openai, deepseek, gemini, groq, ollama
-  model = "claude-sonnet-4-20250514",
-  language = "English",          -- or "Vietnamese"
+  provider = "deepseek",
+  model = "deepseek-chat",
+  language = "Vietnamese",  -- or "English"
+
+  keymaps = {
+    question = "<leader>mq",
+    ask = "<leader>ma",
+  },
 
   context = {
     token_budget = 20000,
-  },
-
-  keymaps = {
-    question = "<leader>mq",     -- Spawn question block
-    ask = "<leader>ma",          -- Process pending questions
   },
 })
 ```
 
 ## Providers
 
-| Provider | Environment Variable |
-|----------|---------------------|
-| Claude | `ANTHROPIC_API_KEY` |
-| OpenAI | `OPENAI_API_KEY` |
-| Gemini | `GEMINI_API_KEY` |
-| DeepSeek | `DEEPSEEK_API_KEY` |
-| Groq | `GROQ_API_KEY` |
-| Together | `TOGETHER_API_KEY` |
-| OpenRouter | `OPENROUTER_API_KEY` |
-| Ollama | Local, no key needed |
+| Provider | Environment Variable | Notes |
+|----------|---------------------|-------|
+| DeepSeek | `DEEPSEEK_API_KEY` | Cheap, good for code |
+| Claude | `ANTHROPIC_API_KEY` | Best quality |
+| OpenAI | `OPENAI_API_KEY` | GPT-4o |
+| Gemini | `GEMINI_API_KEY` | Google |
+| Groq | `GROQ_API_KEY` | Fast inference |
+| Ollama | - | Local, free |
 
 ## Commands
 
-| Command | What it does |
+| Command | Description |
 |---------|-------------|
-| `:EditutorQuestion` | Spawn a new question block |
-| `:EditutorAsk` | Process all pending questions |
-| `:EditutorPending` | Show pending question count |
-| `:EditutorHistory` | Recent Q&A history |
+| `:EditutorQuestion` | Spawn question block |
+| `:EditutorAsk` | Process pending questions |
+| `:EditutorPending` | Count pending questions |
+| `:EditutorHistory` | View Q&A history |
 | `:EditutorBrowse` | Browse by date |
 | `:EditutorExport` | Export to markdown |
 | `:EditutorLang` | Switch language |
-| `:EditutorClearCache` | Clear context cache |
 
-## Keymaps
+## Knowledge Tracking
 
-| Keymap | Mode | What it does |
-|--------|------|-------------|
-| `<leader>mq` | Normal | Spawn question block at cursor |
-| `<leader>mq` | Visual | Spawn question block with selected code |
-| `<leader>ma` | Normal | Process all pending questions |
+Every Q&A is saved. Review what you've learned:
+
+```vim
+:EditutorHistory    " Recent questions
+:EditutorBrowse     " Browse by date
+:EditutorExport     " Export to markdown for notes
+```
+
+Your learning history, searchable and exportable.
 
 ---
 
-**Stop context-switching. Start understanding.**
+## Philosophy
 
-The best way to learn programming is to build things. This plugin makes sure you actually learn while you build.
+This is not a code generator. This is not about shipping faster.
+
+This is for the moments when you think *"I should understand this better"* - and then you actually do.
+
+**Learn while you build. Understand while you ship.**
+
+---
+
+**Stop copy-pasting to ChatGPT. Start asking in context.**

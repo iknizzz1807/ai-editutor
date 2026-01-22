@@ -62,7 +62,6 @@ function M.spawn_question_block(bufnr, selected_code)
 
 		-- Placeholder for user's question
 		table.insert(block_lines, indent .. "")
-		local question_line = cursor_line + #block_lines -- Line where user types
 
 		-- PENDING marker and close
 		table.insert(block_lines, indent .. "[PENDING:" .. id .. "]")
@@ -84,7 +83,6 @@ function M.spawn_question_block(bufnr, selected_code)
 
 		-- Placeholder for user's question
 		table.insert(block_lines, indent .. prefix .. "")
-		local question_line = cursor_line + #block_lines
 
 		-- PENDING marker
 		table.insert(block_lines, indent .. prefix .. "[PENDING:" .. id .. "]")

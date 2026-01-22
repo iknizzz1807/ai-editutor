@@ -16,7 +16,7 @@ local loading = require("editutor.loading")
 local debug_log = require("editutor.debug_log")
 
 M._name = "Editutor"
-M._version = "3.0.0"
+M._version = "3.1.0"
 M._setup_called = false
 
 -- =============================================================================
@@ -167,7 +167,9 @@ function M._setup_keymaps()
 
     -- Visual mode: spawn with selected code
     vim.keymap.set("v", keymaps.question, function()
-      vim.cmd("normal! ")
+      -- Exit visual mode cleanly using escape key code
+      local esc = vim.api.nvim_replace_termcodes("<Esc>", true, false, true)
+      vim.api.nvim_feedkeys(esc, "nx", false)
       vim.schedule(function()
         M.spawn_question_visual()
       end)

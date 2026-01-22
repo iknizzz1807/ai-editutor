@@ -12,7 +12,7 @@ For developers building real projects who want to understand their code, not jus
 
 **Not** about coding faster. **About** learning while you build.
 
-### v3.0.0 - Question Blocks
+### v3.1.0 - Question Blocks + Smart Context
 
 **Key Change:** Explicit question blocks with `[Q:id]` and `[PENDING:id]` markers.
 
@@ -55,18 +55,21 @@ Watch out for memory leaks if closures hold references to large objects.
 ai-editutor/
 ├── lua/
 │   └── editutor/
-│       ├── init.lua              # Plugin entry point (v3.0.0)
+│       ├── init.lua              # Plugin entry point (v3.1.0)
 │       ├── config.lua            # Configuration management
 │       ├── parser.lua            # Question block detection
 │       ├── context.lua           # Context extraction (full/adaptive)
+│       ├── context_strategy.lua  # Smart backtracking for token budget
 │       ├── lsp_context.lua       # LSP-based context
 │       ├── import_graph.lua      # Import graph analysis
+│       ├── semantic_chunking.lua # Tree-sitter based content extraction
+│       ├── relevance_scorer.lua  # File relevance scoring
 │       ├── comment_writer.lua    # Spawn blocks, write responses
 │       ├── prompts.lua           # System prompt (marker-based response format)
 │       ├── provider.lua          # LLM API client
 │       ├── knowledge.lua         # Knowledge tracking (date-based JSON)
 │       ├── project_scanner.lua   # Project file scanning
-│       ├── cache.lua             # LRU cache with TTL
+│       ├── cache.lua             # In-memory cache with TTL
 │       ├── loading.lua           # Loading indicator
 │       ├── debug_log.lua         # Debug logging
 │       └── health.lua            # :checkhealth editutor
@@ -354,7 +357,15 @@ require('editutor').setup({
 
 ## Version History
 
-### v3.0.0 - Question Blocks (Current)
+### v3.1.0 - Smart Context (Current)
+- Smart backtracking strategy for token budget management
+- Semantic chunking using Tree-sitter (extracts exports, types, signatures)
+- File relevance scoring for context prioritization
+- Improved line-comment language support (Python, Shell, etc.)
+- Performance optimizations (caching, smarter invalidation)
+- Log rotation to prevent unbounded log growth
+
+### v3.0.0 - Question Blocks
 - New `[Q:id]` / `[PENDING:id]` block format
 - Timestamp-based unique IDs
 - Batch processing multiple questions

@@ -10,11 +10,46 @@ local project_scanner = require("editutor.project_scanner")
 -- Error log (global, not per-project)
 M.ERROR_LOG = vim.fn.stdpath("data") .. "/editutor_errors.log"
 
+-- Log rotation settings
+M.MAX_LOG_SIZE = 1024 * 1024 -- 1MB max log size
+M.MAX_ERROR_LOG_SIZE = 512 * 1024 -- 512KB max error log size
+M.MAX_BACKUP_COUNT = 2 -- Keep up to 2 backup files
+
 ---Get log file path
 ---@return string
 function M.get_log_path()
   local project_root = project_scanner.get_project_root()
   return project_root .. "/.editutor.log"
+end
+
+---Rotate log file if it exceeds max size
+---@param log_path string Path to log file
+---@param max_size number Maximum size in bytes
+local function rotate_log_if_needed(log_path, max_size)
+  local stat = vim.loop.fs_stat(log_path)
+  if not stat or stat.size < max_size then
+    return -- No rotation needed
+  end
+
+  -- Rotate existing backups: .log.2 -> delete, .log.1 -> .log.2, .log -> .log.1
+  for i = M.MAX_BACKUP_COUNT, 1, -1 do
+    local old_backup = log_path .. "." .. i
+    if i == M.MAX_BACKUP_COUNT then
+      -- Delete oldest backup
+      if vim.fn.filereadable(old_backup) == 1 then
+        vim.fn.delete(old_backup)
+      end
+    else
+      -- Rename to next number
+      local new_backup = log_path .. "." .. (i + 1)
+      if vim.fn.filereadable(old_backup) == 1 then
+        vim.fn.rename(old_backup, new_backup)
+      end
+    end
+  end
+
+  -- Move current log to .log.1
+  vim.fn.rename(log_path, log_path .. ".1")
 end
 
 ---Ensure .editutor.log is in .gitignore
@@ -65,6 +100,10 @@ function M.log_request(request)
   M.ensure_gitignore()
 
   local log_path = M.get_log_path()
+
+  -- Rotate log if needed
+  rotate_log_if_needed(log_path, M.MAX_LOG_SIZE)
+
   local lines = {}
 
   -- Header
@@ -240,8 +279,11 @@ end
 ---@param error_msg string Error message
 ---@param context? table Additional context
 function M.log_error(source, error_msg, context)
+  -- Rotate error log if needed
+  rotate_log_if_needed(M.ERROR_LOG, M.MAX_ERROR_LOG_SIZE)
+
   local lines = {}
-  
+
   table.insert(lines, separator())
   table.insert(lines, string.format("[%s] ERROR in %s", timestamp(), source))
   table.insert(lines, separator("-"))

@@ -156,14 +156,40 @@ local function matches_patterns(filepath, patterns)
   return false
 end
 
+-- Line count cache to avoid reading files multiple times
+local line_count_cache = {}
+local line_count_cache_time = {}
+local LINE_COUNT_CACHE_TTL = 60 -- Cache for 60 seconds
+
+---Clear line count cache (called when files change)
+function M.clear_line_count_cache()
+  line_count_cache = {}
+  line_count_cache_time = {}
+end
+
 ---Get line count for a file (cached)
 ---@param filepath string
 ---@return number
 local function get_line_count(filepath)
+  local now = os.time()
+
+  -- Check cache
+  if line_count_cache[filepath] and line_count_cache_time[filepath] then
+    if now - line_count_cache_time[filepath] < LINE_COUNT_CACHE_TTL then
+      return line_count_cache[filepath]
+    end
+  end
+
+  -- Read file
   local ok, lines = pcall(vim.fn.readfile, filepath)
   if not ok or not lines then
     return 0
   end
+
+  -- Cache result
+  line_count_cache[filepath] = #lines
+  line_count_cache_time[filepath] = now
+
   return #lines
 end
 
