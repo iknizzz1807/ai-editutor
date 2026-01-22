@@ -28,10 +28,13 @@ local function get_import_patterns()
     },
     typescript = "javascript",
 
-    -- Python
+    -- Python (removed ^ anchor - gmatch doesn't work with ^ for multiline)
     python = {
-      "^%s*import%s+([%w_%.]+)",
-      "^%s*from%s+([%w_%.]+)%s+import",
+      "\nimport%s+([%w_%.]+)",
+      "\nfrom%s+([%w_%.]+)%s+import",
+      -- Also match at start of file
+      "^import%s+([%w_%.]+)",
+      "^from%s+([%w_%.]+)%s+import",
     },
 
     -- Lua
@@ -220,7 +223,8 @@ function M.is_library_import(import_path, lang)
     "assert", "async_hooks", "perf_hooks", "worker_threads",
   }
 
-  -- Python standard library (common ones)
+  -- Python standard library only (don't include external packages
+  -- because we might be working IN those projects)
   local python_stdlib = {
     "os", "sys", "re", "json", "math", "random", "datetime", "time",
     "collections", "itertools", "functools", "operator", "typing",
@@ -229,6 +233,18 @@ function M.is_library_import(import_path, lang)
     "http", "urllib", "socket", "email", "html", "xml",
     "logging", "unittest", "argparse", "configparser",
     "dataclasses", "enum", "abc", "copy", "pprint",
+    "contextlib", "inspect", "traceback", "warnings", "weakref",
+    "hashlib", "hmac", "secrets", "base64", "binascii",
+    "struct", "codecs", "unicodedata", "locale",
+    "calendar", "zoneinfo", "heapq", "bisect", "array",
+    "types", "textwrap", "difflib", "string",
+    "builtins", "importlib", "pkgutil", "zipimport",
+    "dis", "ast", "symtable", "token", "tokenize",
+    "pdb", "profile", "cProfile", "timeit",
+    "numbers", "decimal", "fractions", "cmath",
+    "statistics", "csv", "sqlite3", "dbm", "gzip",
+    "bz2", "lzma", "tarfile", "zipfile",
+    "signal", "mmap", "ctypes", "platform",
   }
 
   if lang == "javascript" or lang == "typescript" then
