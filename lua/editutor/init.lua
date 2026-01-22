@@ -150,6 +150,47 @@ function M._create_commands()
     debug_log.clear()
     vim.notify("[ai-editutor] Debug log cleared", vim.log.levels.INFO)
   end, { desc = "Clear debug log" })
+
+  -- Test runner commands
+  vim.api.nvim_create_user_command("EditutorTestRun", function(opts)
+    local test_runner = require("editutor.test_runner")
+    local args = vim.split(opts.args or "", " ")
+    local cmd = args[1] or ""
+
+    if cmd == "quick" then
+      test_runner.quick_test()
+    elseif cmd == "lang" and args[2] then
+      test_runner.test_lang(args[2])
+    elseif cmd == "repo" and args[2] then
+      test_runner.test_repo(args[2])
+    elseif cmd == "pattern" and args[2] then
+      test_runner.test_pattern(args[2])
+    elseif cmd == "stats" then
+      test_runner.show_stats()
+    elseif cmd == "validate" then
+      test_runner.validate_cases()
+    elseif cmd == "" then
+      test_runner.run()
+    else
+      test_runner.run({ limit = tonumber(cmd) or 10 })
+    end
+  end, {
+    nargs = "*",
+    complete = function()
+      return {
+        "quick", "stats", "validate",
+        "lang typescript", "lang python", "lang rust", "lang go", "lang lua", "lang zig", "lang c", "lang cpp",
+        "repo zod", "repo fastapi", "repo axum", "repo gin", "repo lazy.nvim",
+        "pattern async_handling", "pattern error_handling", "pattern metaprogramming",
+      }
+    end,
+    desc = "Run automated tests",
+  })
+
+  vim.api.nvim_create_user_command("EditutorTestResults", function()
+    local test_runner = require("editutor.test_runner")
+    test_runner.view_results()
+  end, { desc = "View test results" })
 end
 
 -- =============================================================================
