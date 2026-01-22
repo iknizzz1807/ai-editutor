@@ -297,7 +297,9 @@ local function run_test_case(tc, callback)
       if metadata then
         log("    Processing metadata...", "DEBUG")
         result.context.mode = metadata.mode
-        result.context.total_tokens = metadata.total_tokens or metadata.token_usage and metadata.token_usage.total or 0
+        result.context.total_tokens = metadata.total_tokens
+          or (metadata.token_usage and metadata.token_usage.total)
+          or 0
         -- files_included can be a table or number depending on context mode
         local files = metadata.files_included or metadata.files or 0
         if type(files) == "table" then
