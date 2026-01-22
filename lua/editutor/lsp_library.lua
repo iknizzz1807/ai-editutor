@@ -188,12 +188,12 @@ function M.get_hover(bufnr, line, col, callback)
 
   local request_sent = false
 
-  -- Set timeout
-  local timer = vim.defer_fn(function()
+  -- Set timeout using vim.fn.timer_start (compatible with vim.fn.timer_stop)
+  local timer = vim.fn.timer_start(M.config.timeout_ms, function()
     if not request_sent then
       callback(nil, "timeout")
     end
-  end, M.config.timeout_ms)
+  end)
 
   vim.lsp.buf_request(bufnr, "textDocument/hover", params, function(err, result)
     request_sent = true
@@ -252,13 +252,13 @@ function M.get_definition_location(bufnr, line, col, callback)
   local project_root = project_scanner.get_project_root()
   local callback_called = false
 
-  -- Timeout handler
-  local timer = vim.defer_fn(function()
+  -- Timeout handler using vim.fn.timer_start (compatible with vim.fn.timer_stop)
+  local timer = vim.fn.timer_start(M.config.timeout_ms, function()
     if not callback_called then
       callback_called = true
       callback(nil, false)
     end
-  end, M.config.timeout_ms)
+  end)
 
   vim.lsp.buf_request(bufnr, "textDocument/definition", params, function(err, result)
     if callback_called then return end
@@ -309,9 +309,9 @@ function M.get_completion_items(bufnr, line, col, callback)
     },
   }
 
-  local timer = vim.defer_fn(function()
+  local timer = vim.fn.timer_start(M.config.timeout_ms, function()
     callback(nil)
-  end, M.config.timeout_ms)
+  end)
 
   vim.lsp.buf_request(bufnr, "textDocument/completion", params, function(err, result)
     if timer then
