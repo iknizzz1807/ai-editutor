@@ -1,10 +1,12 @@
 -- editutor/lsp_library.lua
 -- Fetch library API info via LSP (hover, completion)
 -- For enriching context with exact signatures and available methods
+-- v3.2: Uses async abstraction for cleaner parallel execution
 
 local M = {}
 
 local project_scanner = require("editutor.project_scanner")
+local async = require("editutor.async")
 
 -- =============================================================================
 -- Configuration
@@ -276,203 +278,76 @@ end
 -- LSP Request Functions
 -- =============================================================================
 
----Get hover info for a position
+---Get hover info for a position (async version)
+---Must be called from within an async context
+---@param bufnr number
+---@param line number 0-indexed
+---@param col number 0-indexed
+---@param timeout_ms? number Optional timeout (default: config.timeout_ms)
+---@return string|nil hover_text, string|nil error
+function M.get_hover_async(bufnr, line, col, timeout_ms)
+  timeout_ms = timeout_ms or M.config.timeout_ms
+  local hover_text = async.lsp_hover(bufnr, line, col, timeout_ms)
+  return hover_text, nil
+end
+
+---Get hover info for a position (callback version)
 ---@param bufnr number
 ---@param line number 0-indexed
 ---@param col number 0-indexed
 ---@param callback function(hover_text: string|nil, error: string|nil)
 function M.get_hover(bufnr, line, col, callback)
-  local params = {
-    textDocument = vim.lsp.util.make_text_document_params(bufnr),
-    position = { line = line, character = col },
-  }
-
-  local request_sent = false
-
-  -- Set timeout using vim.fn.timer_start (compatible with vim.fn.timer_stop)
-  local timer = vim.fn.timer_start(M.config.timeout_ms, function()
-    if not request_sent then
-      callback(nil, "timeout")
-    end
-  end)
-
-  vim.lsp.buf_request(bufnr, "textDocument/hover", params, function(err, result)
-    request_sent = true
-    if timer then
-      pcall(vim.fn.timer_stop, timer)
-    end
-
-    if err then
-      callback(nil, tostring(err))
-      return
-    end
-
-    if not result or not result.contents then
-      callback(nil, nil) -- No error, just no info
-      return
-    end
-
-    -- Extract text from hover result
-    local hover_text
-    if type(result.contents) == "string" then
-      hover_text = result.contents
-    elseif type(result.contents) == "table" then
-      if result.contents.value then
-        hover_text = result.contents.value
-      elseif result.contents.kind then
-        hover_text = result.contents.value or ""
-      else
-        -- Array of contents
-        local parts = {}
-        for _, content in ipairs(result.contents) do
-          if type(content) == "string" then
-            table.insert(parts, content)
-          elseif content.value then
-            table.insert(parts, content.value)
-          end
-        end
-        hover_text = table.concat(parts, "\n")
-      end
-    end
-
-    callback(hover_text, nil)
+  async.run(function()
+    local hover_text, err = M.get_hover_async(bufnr, line, col)
+    async.scheduler()
+    callback(hover_text, err)
   end)
 end
 
----Get definition location to check if it's a library
+---Get definition location to check if it's a library (async version)
+---Must be called from within an async context
+---@param bufnr number
+---@param line number 0-indexed
+---@param col number 0-indexed
+---@param timeout_ms? number Optional timeout (default: config.timeout_ms)
+---@return string|nil filepath, boolean is_library
+function M.get_definition_location_async(bufnr, line, col, timeout_ms)
+  timeout_ms = timeout_ms or M.config.timeout_ms
+  local debug_log = require("editutor.debug_log")
+  local project_root = project_scanner.get_project_root()
+
+  local locations = async.lsp_definition(bufnr, line, col, timeout_ms)
+
+  if not locations or #locations == 0 then
+    debug_log.log("[LSP_LIB] Definition result is nil or empty", "DEBUG")
+    return nil, false
+  end
+
+  -- Get first location
+  local first = locations[1]
+  if not first or not first.uri then
+    debug_log.log("[LSP_LIB] Could not extract URI from result", "DEBUG")
+    return nil, false
+  end
+
+  debug_log.log(string.format("[LSP_LIB] Extracted URI: %s", first.uri), "DEBUG")
+
+  local filepath = vim.uri_to_fname(first.uri)
+  local is_library = M.is_library_path(filepath, project_root)
+
+  return filepath, is_library
+end
+
+---Get definition location to check if it's a library (callback version)
 ---@param bufnr number
 ---@param line number 0-indexed
 ---@param col number 0-indexed
 ---@param callback function(filepath: string|nil, is_library: boolean)
 function M.get_definition_location(bufnr, line, col, callback)
-  local params = {
-    textDocument = vim.lsp.util.make_text_document_params(bufnr),
-    position = { line = line, character = col },
-  }
-
-  local project_root = project_scanner.get_project_root()
-  local callback_called = false
-
-  -- Timeout handler using vim.fn.timer_start (compatible with vim.fn.timer_stop)
-  local timer = vim.fn.timer_start(M.config.timeout_ms, function()
-    if not callback_called then
-      callback_called = true
-      callback(nil, false)
-    end
-  end)
-
-  local debug_log = require("editutor.debug_log")
-
-  vim.lsp.buf_request(bufnr, "textDocument/definition", params, function(err, result)
-    if callback_called then return end
-    callback_called = true
-
-    if timer then
-      pcall(vim.fn.timer_stop, timer)
-    end
-
-    if err then
-      debug_log.log(string.format("[LSP_LIB] Definition error: %s", vim.inspect(err)), "DEBUG")
-      callback(nil, false)
-      return
-    end
-
-    if not result then
-      debug_log.log("[LSP_LIB] Definition result is nil", "DEBUG")
-      callback(nil, false)
-      return
-    end
-
-    -- Log raw result for debugging
-    debug_log.log(string.format("[LSP_LIB] Definition raw result: %s", vim.inspect(result)), "DEBUG")
-
-    -- Get first definition location
-    -- Handle various LSP response formats:
-    -- 1. Location: { uri, range }
-    -- 2. LocationLink: { targetUri, targetRange, targetSelectionRange }
-    -- 3. Array of Location or LocationLink
-    local uri
-    if result.uri then
-      uri = result.uri
-    elseif result.targetUri then
-      uri = result.targetUri
-    elseif type(result) == "table" and #result > 0 then
-      local first = result[1]
-      if first then
-        uri = first.uri or first.targetUri
-        debug_log.log(string.format("[LSP_LIB] First result item: %s", vim.inspect(first)), "DEBUG")
-      end
-    end
-
-    if not uri then
-      debug_log.log("[LSP_LIB] Could not extract URI from result", "DEBUG")
-      callback(nil, false)
-      return
-    end
-
-    debug_log.log(string.format("[LSP_LIB] Extracted URI: %s", uri), "DEBUG")
-
-    local filepath = vim.uri_to_fname(uri)
-    local is_library = M.is_library_path(filepath, project_root)
-
+  async.run(function()
+    local filepath, is_library = M.get_definition_location_async(bufnr, line, col)
+    async.scheduler()
     callback(filepath, is_library)
-  end)
-end
-
----Get completion items at position (for listing available methods)
----@param bufnr number
----@param line number 0-indexed
----@param col number 0-indexed
----@param callback function(items: table[]|nil)
-function M.get_completion_items(bufnr, line, col, callback)
-  local params = {
-    textDocument = vim.lsp.util.make_text_document_params(bufnr),
-    position = { line = line, character = col },
-    context = {
-      triggerKind = 1, -- Invoked
-    },
-  }
-
-  local timer = vim.fn.timer_start(M.config.timeout_ms, function()
-    callback(nil)
-  end)
-
-  vim.lsp.buf_request(bufnr, "textDocument/completion", params, function(err, result)
-    if timer then
-      pcall(vim.fn.timer_stop, timer)
-    end
-
-    if err or not result then
-      callback(nil)
-      return
-    end
-
-    local items = result.items or result
-    if not items or #items == 0 then
-      callback(nil)
-      return
-    end
-
-    -- Extract method info
-    local methods = {}
-    for i, item in ipairs(items) do
-      if i > M.config.max_methods_per_type then
-        break
-      end
-
-      local kind = item.kind
-      -- Filter to functions/methods (kind 2=Method, 3=Function, 6=Variable)
-      if kind == 2 or kind == 3 or kind == 6 then
-        table.insert(methods, {
-          name = item.label,
-          detail = item.detail or "",
-          documentation = item.documentation and
-              (type(item.documentation) == "string" and item.documentation or item.documentation.value) or nil,
-        })
-      end
-    end
-
-    callback(methods)
   end)
 end
 
@@ -499,61 +374,108 @@ end
 ---@param question_end_line number 0-indexed line where question block ends
 ---@param question_text string The question text (to parse for mentioned identifiers)
 ---@param callback function(result: LibraryInfoResult)
-function M.extract_library_info(bufnr, question_start_line, question_end_line, question_text, callback)
+---Process a single identifier to extract library info (async helper)
+---@param bufnr number
+---@param ident table {name, line, col}
+---@param lang string|nil Language for pattern matching
+---@return table|nil info Library info or nil if not a library
+local function process_identifier_async(bufnr, ident, lang)
+  local debug_log = require("editutor.debug_log")
+
+  -- Skip if no position
+  if not ident.line then
+    return nil
+  end
+
+  -- Get definition location
+  local def_path, is_library = M.get_definition_location_async(bufnr, ident.line, ident.col)
+
+  if is_library then
+    -- Confirmed library, fetch hover info
+    debug_log.log(string.format("[LSP_LIB] %s: IS library (path=%s)", ident.name, tostring(def_path)), "DEBUG")
+    local hover_text = M.get_hover_async(bufnr, ident.line, ident.col)
+
+    if hover_text then
+      local tokens = estimate_tokens(hover_text)
+      debug_log.log(string.format("[LSP_LIB] %s: hover found (%d tokens)", ident.name, tokens), "DEBUG")
+      return {
+        identifier = ident.name,
+        hover = hover_text,
+        source = "hover",
+        tokens = tokens,
+      }
+    end
+  elseif def_path == nil then
+    -- No definition path - try hover fallback
+    debug_log.log(string.format("[LSP_LIB] %s: no def path, trying hover fallback", ident.name), "DEBUG")
+    local hover_text = M.get_hover_async(bufnr, ident.line, ident.col)
+
+    if hover_text then
+      local is_std_or_lib = looks_like_library_hover(hover_text, lang)
+      if is_std_or_lib then
+        debug_log.log(string.format("[LSP_LIB] %s: detected as lib via hover content", ident.name), "DEBUG")
+        local tokens = estimate_tokens(hover_text)
+        return {
+          identifier = ident.name,
+          hover = hover_text,
+          source = "hover",
+          tokens = tokens,
+        }
+      else
+        debug_log.log(string.format("[LSP_LIB] %s: hover doesn't look like lib", ident.name), "DEBUG")
+      end
+    end
+  else
+    debug_log.log(string.format("[LSP_LIB] %s: not library (path=%s)", ident.name, tostring(def_path)), "DEBUG")
+  end
+
+  return nil
+end
+
+---Extract library info for identifiers (async version)
+---Must be called from within an async context
+---@param bufnr number Buffer number
+---@param question_start_line number 0-indexed
+---@param question_end_line number 0-indexed
+---@param question_text string
+---@param opts? table {timeout_ms?: number}
+---@return LibraryInfoResult
+function M.extract_library_info_async(bufnr, question_start_line, question_end_line, question_text, opts)
+  opts = opts or {}
+  local timeout_ms = opts.timeout_ms or 15000
+  local debug_log = require("editutor.debug_log")
+
   local result = {
     items = {},
     total_tokens = 0,
     errors = {},
   }
 
-  local callback_called = false
-  local overall_timeout_ms = 15000 -- 15 second overall timeout
-
-  -- Overall timeout handler
-  vim.defer_fn(function()
-    if not callback_called then
-      callback_called = true
-      table.insert(result.errors, "Library info extraction timeout")
-      callback(result)
-    end
-  end, overall_timeout_ms)
-
   if not M.is_lsp_available() then
-    if not callback_called then
-      callback_called = true
-      table.insert(result.errors, "LSP not available")
-      callback(result)
-    end
-    return
+    table.insert(result.errors, "LSP not available")
+    return result
   end
 
   local total_lines = vim.api.nvim_buf_line_count(bufnr)
-
-  -- Calculate scan range (±50 lines around question block)
   local scan_start = math.max(0, question_start_line - M.config.scan_radius)
   local scan_end = math.min(total_lines - 1, question_end_line + M.config.scan_radius)
 
-  -- Debug logging
-  local debug_log = require("editutor.debug_log")
   debug_log.log(string.format("[LSP_LIB] Scan range: %d-%d (total: %d lines)", scan_start, scan_end, total_lines), "DEBUG")
 
-  -- Extract identifiers from code around question
+  -- Extract identifiers
   local code_identifiers = M.extract_identifiers_in_range(bufnr, scan_start, scan_end)
-  debug_log.log(string.format("[LSP_LIB] Code identifiers found: %d", #code_identifiers), "DEBUG")
-
-  -- Parse question text for mentioned identifiers
   local question_identifiers = M.parse_question_for_identifiers(question_text)
-  debug_log.log(string.format("[LSP_LIB] Question identifiers found: %d", #question_identifiers), "DEBUG")
+
+  debug_log.log(string.format("[LSP_LIB] Code identifiers: %d, Question identifiers: %d",
+    #code_identifiers, #question_identifiers), "DEBUG")
 
   -- Combine and deduplicate
   local all_identifiers = {}
   local seen = {}
 
-  -- Prioritize identifiers mentioned in question
   for _, name in ipairs(question_identifiers) do
     if not seen[name] then
       seen[name] = true
-      -- Find position in code if possible
       local found = false
       for _, ident in ipairs(code_identifiers) do
         if ident.name:match(name) or name:match(ident.name) then
@@ -563,13 +485,11 @@ function M.extract_library_info(bufnr, question_start_line, question_end_line, q
         end
       end
       if not found then
-        -- Add without position (will skip LSP lookup)
         table.insert(all_identifiers, { name = name, line = nil, col = nil, from_question = true })
       end
     end
   end
 
-  -- Add code identifiers
   for _, ident in ipairs(code_identifiers) do
     if not seen[ident.name] and #all_identifiers < M.config.max_identifiers then
       seen[ident.name] = true
@@ -577,7 +497,6 @@ function M.extract_library_info(bufnr, question_start_line, question_end_line, q
     end
   end
 
-  -- Limit total identifiers
   if #all_identifiers > M.config.max_identifiers then
     all_identifiers = vim.list_slice(all_identifiers, 1, M.config.max_identifiers)
   end
@@ -585,145 +504,61 @@ function M.extract_library_info(bufnr, question_start_line, question_end_line, q
   debug_log.log(string.format("[LSP_LIB] Total identifiers to process: %d", #all_identifiers), "DEBUG")
 
   if #all_identifiers == 0 then
-    debug_log.log("[LSP_LIB] No identifiers found, returning early", "DEBUG")
-    if not callback_called then
-      callback_called = true
-      callback(result)
-    end
-    return
+    return result
   end
 
-  -- Process each identifier
-  local pending = #all_identifiers
-  local completed = 0
-  local skipped_no_pos = 0
-  local skipped_not_lib = 0
-  local lib_found = 0
+  -- Get language for pattern matching
+  local ok_parser, parser = pcall(vim.treesitter.get_parser, bufnr)
+  local lang = ok_parser and parser and parser:lang() or nil
 
-  local function check_complete()
-    -- Use vim.schedule to ensure atomic check-and-set on callback_called
-    -- This prevents race condition when multiple async LSP callbacks complete simultaneously
-    vim.schedule(function()
-      if callback_called then return end
-      if completed < pending then return end
-
-      callback_called = true
-      debug_log.log(string.format("[LSP_LIB] Complete: skipped_no_pos=%d, skipped_not_lib=%d, lib_found=%d",
-        skipped_no_pos, skipped_not_lib, lib_found), "DEBUG")
-      callback(result)
-    end)
-  end
-
+  -- Create tasks for parallel execution
+  local tasks = {}
   for _, ident in ipairs(all_identifiers) do
-    if callback_called then return end
-
-    -- Skip if no position (from question text only, not found in code)
-    if not ident.line then
-      skipped_no_pos = skipped_no_pos + 1
-      completed = completed + 1
-      check_complete()
-      goto continue
-    end
-
-    -- First check if it's a library
-    M.get_definition_location(bufnr, ident.line, ident.col, function(def_path, is_library)
-      if callback_called then return end
-
-      -- Helper function to process hover info
-      local function process_hover()
-        M.get_hover(bufnr, ident.line, ident.col, function(hover_text, hover_err)
-          if callback_called then return end
-
-          local info = {
-            identifier = ident.name,
-            hover = hover_text,
-            source = hover_text and "hover" or nil,
-            error = hover_err,
-          }
-
-          if hover_text then
-            local tokens = estimate_tokens(hover_text)
-            debug_log.log(string.format("[LSP_LIB] %s: hover found (%d tokens)", ident.name, tokens), "DEBUG")
-
-            -- Check token budget
-            if result.total_tokens + tokens <= M.config.max_tokens then
-              result.total_tokens = result.total_tokens + tokens
-              table.insert(result.items, info)
-            end
-          elseif hover_err then
-            debug_log.log(string.format("[LSP_LIB] %s: hover error: %s", ident.name, hover_err), "DEBUG")
-            table.insert(result.errors, string.format("%s: %s", ident.name, hover_err))
-          else
-            debug_log.log(string.format("[LSP_LIB] %s: no hover info", ident.name), "DEBUG")
-          end
-
-          completed = completed + 1
-          check_complete()
-        end)
-      end
-
-      if is_library then
-        -- Confirmed library, fetch hover info
-        lib_found = lib_found + 1
-        debug_log.log(string.format("[LSP_LIB] %s: IS library (path=%s)", ident.name, tostring(def_path)), "DEBUG")
-        process_hover()
-      elseif def_path == nil then
-        -- Definition path is nil - could be std lib without rust-src, or external crate
-        -- Try hover anyway and check if it looks like library code
-        debug_log.log(string.format("[LSP_LIB] %s: no def path, trying hover fallback", ident.name), "DEBUG")
-
-        -- Get current buffer language for pattern matching
-        local ok_parser, parser = pcall(vim.treesitter.get_parser, bufnr)
-        local lang = ok_parser and parser and parser:lang() or nil
-
-        M.get_hover(bufnr, ident.line, ident.col, function(hover_text, hover_err)
-          if callback_called then return end
-
-          if hover_text then
-            -- Check if hover text suggests this is a library/std type
-            local is_std_or_lib = looks_like_library_hover(hover_text, lang)
-
-            if is_std_or_lib then
-              lib_found = lib_found + 1
-              debug_log.log(string.format("[LSP_LIB] %s: detected as lib via hover content (lang=%s)", ident.name, tostring(lang)), "DEBUG")
-
-              local tokens = estimate_tokens(hover_text)
-              debug_log.log(string.format("[LSP_LIB] %s: hover found (%d tokens)", ident.name, tokens), "DEBUG")
-
-              if result.total_tokens + tokens <= M.config.max_tokens then
-                result.total_tokens = result.total_tokens + tokens
-                table.insert(result.items, {
-                  identifier = ident.name,
-                  hover = hover_text,
-                  source = "hover",
-                })
-              end
-            else
-              skipped_not_lib = skipped_not_lib + 1
-              debug_log.log(string.format("[LSP_LIB] %s: hover doesn't look like lib (hover=%s...)", ident.name, hover_text:sub(1, 50)), "DEBUG")
-            end
-          else
-            skipped_not_lib = skipped_not_lib + 1
-            debug_log.log(string.format("[LSP_LIB] %s: no def path and no hover", ident.name), "DEBUG")
-          end
-
-          completed = completed + 1
-          check_complete()
-        end)
-      else
-        skipped_not_lib = skipped_not_lib + 1
-        debug_log.log(string.format("[LSP_LIB] %s: not library (path=%s)", ident.name, tostring(def_path)), "DEBUG")
-        -- Not a library, skip
-        completed = completed + 1
-        check_complete()
-      end
+    table.insert(tasks, function()
+      return process_identifier_async(bufnr, ident, lang)
     end)
-
-    ::continue::
   end
 
-  -- Handle case where all identifiers were skipped
-  check_complete()
+  -- Execute in parallel with timeout
+  local results, meta = async.parallel_limited(tasks, {
+    max_concurrent = 5,
+    timeout_ms = timeout_ms,
+  })
+
+  if meta.timed_out then
+    table.insert(result.errors, "Library info extraction timeout")
+  end
+
+  -- Collect results respecting token budget
+  local lib_found = 0
+  for _, info in pairs(results) do
+    if info and info.hover then
+      lib_found = lib_found + 1
+      if result.total_tokens + info.tokens <= M.config.max_tokens then
+        result.total_tokens = result.total_tokens + info.tokens
+        table.insert(result.items, info)
+      end
+    end
+  end
+
+  debug_log.log(string.format("[LSP_LIB] Complete: lib_found=%d, items=%d, tokens=%d",
+    lib_found, #result.items, result.total_tokens), "DEBUG")
+
+  return result
+end
+
+---Extract library info for identifiers (callback version)
+---@param bufnr number Buffer number
+---@param question_start_line number 0-indexed line where question block starts
+---@param question_end_line number 0-indexed line where question block ends
+---@param question_text string The question text (to parse for mentioned identifiers)
+---@param callback function(result: LibraryInfoResult)
+function M.extract_library_info(bufnr, question_start_line, question_end_line, question_text, callback)
+  async.run(function()
+    local result = M.extract_library_info_async(bufnr, question_start_line, question_end_line, question_text)
+    async.scheduler()
+    callback(result)
+  end)
 end
 
 -- =============================================================================

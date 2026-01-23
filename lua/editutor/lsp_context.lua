@@ -3,11 +3,13 @@
 -- Enhanced: scans ENTIRE current file for symbols, not just cursor position
 -- Deduplicates definitions to avoid sending same content multiple times
 -- v3.1: Uses semantic_chunking to extract only definitions, not full files
+-- v3.2: Uses async abstraction for cleaner parallel execution
 
 local M = {}
 
 local project_scanner = require("editutor.project_scanner")
 local semantic_chunking = require("editutor.semantic_chunking")
+local async = require("editutor.async")
 
 -- Patterns to exclude (library/vendor paths)
 M.exclude_patterns = {
@@ -78,47 +80,27 @@ function M.read_file(filepath)
   return table.concat(lines, "\n"), #lines
 end
 
----Get definition location for a symbol at position using LSP
+---Get definition location for a symbol at position using LSP (async version)
+---Must be called from within an async context (async.run)
+---@param bufnr number Buffer number
+---@param line number 0-indexed line
+---@param col number 0-indexed column
+---@param timeout_ms? number Optional timeout (default: 5000ms)
+---@return table[] locations List of {uri, range}
+function M.get_definition_async(bufnr, line, col, timeout_ms)
+  return async.lsp_definition(bufnr, line, col, timeout_ms)
+end
+
+---Get definition location for a symbol at position using LSP (callback version)
 ---@param bufnr number Buffer number
 ---@param line number 0-indexed line
 ---@param col number 0-indexed column
 ---@param callback function Callback(locations) where locations is a list of {uri, range}
 function M.get_definition(bufnr, line, col, callback)
-  local params = {
-    textDocument = vim.lsp.util.make_text_document_params(bufnr),
-    position = { line = line, character = col },
-  }
-
-  vim.lsp.buf_request(bufnr, "textDocument/definition", params, function(err, result)
-    if err or not result then
-      callback({})
-      return
-    end
-
-    -- Normalize result (can be Location, Location[], or LocationLink[])
-    local locations = {}
-    if result.uri then
-      -- Single Location
-      table.insert(locations, result)
-    elseif result.targetUri then
-      -- Single LocationLink
-      table.insert(locations, {
-        uri = result.targetUri,
-        range = result.targetSelectionRange or result.targetRange,
-      })
-    elseif type(result) == "table" then
-      for _, loc in ipairs(result) do
-        if loc.uri then
-          table.insert(locations, loc)
-        elseif loc.targetUri then
-          table.insert(locations, {
-            uri = loc.targetUri,
-            range = loc.targetSelectionRange or loc.targetRange,
-          })
-        end
-      end
-    end
-
+  -- Use async internally for consistency
+  async.run(function()
+    local locations = M.get_definition_async(bufnr, line, col)
+    async.scheduler()
     callback(locations)
   end)
 end
@@ -339,46 +321,57 @@ end
 ---@field end_line number End line (0-indexed)
 ---@field is_full_file boolean Whether content is full file
 
----Get external definitions for ALL identifiers in current file
+---Get external definitions for ALL identifiers in current file (async version)
 ---Deduplicates by file path (each external file included only once)
----v3.1: Now extracts only the definition node using semantic_chunking, not the full file
+---v3.2: Uses async.parallel_limited for cleaner parallel execution
+---Must be called from within an async context
 ---@param bufnr number Buffer number
----@param callback function Callback(definitions) where definitions is ExternalDefinition[]
----@param opts? table Options {max_files?: number, extract_mode?: string}
-function M.get_all_external_definitions(bufnr, callback, opts)
+---@param opts? table Options {max_files?: number, timeout_ms?: number}
+---@return ExternalDefinition[] definitions
+function M.get_all_external_definitions_async(bufnr, opts)
   opts = opts or {}
   local max_files = opts.max_files or 50
-  local extract_mode = opts.extract_mode or "definition" -- "definition" or "full"
+  local timeout_ms = opts.timeout_ms or 15000
 
   local current_file = vim.api.nvim_buf_get_name(bufnr)
   local identifiers = M.extract_all_identifiers(bufnr)
 
+  if #identifiers == 0 then
+    return {}
+  end
+
   local definitions = {}
   local seen_files = {} -- Dedup by filepath
   local seen_definitions = {} -- Dedup by filepath:line to avoid duplicate definitions
-  local pending = #identifiers
-  local completed = 0
 
-  if pending == 0 then
-    callback({})
-    return
+  -- Create tasks for each identifier (up to a reasonable limit to avoid too many LSP requests)
+  local tasks = {}
+  local task_idents = {}
+  for i, ident in ipairs(identifiers) do
+    if i > 200 then break end -- Limit to prevent too many requests
+    table.insert(tasks, function()
+      return M.get_definition_async(bufnr, ident.line, ident.col, 3000)
+    end)
+    table.insert(task_idents, ident)
   end
 
-  -- Process identifiers but limit total external files
-  for _, ident in ipairs(identifiers) do
-    -- Stop if we have enough files
+  -- Execute in parallel with limited concurrency
+  local results, meta = async.parallel_limited(tasks, {
+    max_concurrent = 10,
+    timeout_ms = timeout_ms,
+  })
+
+  -- Process results and deduplicate
+  for i, locations in pairs(results) do
     if vim.tbl_count(seen_files) >= max_files then
-      completed = completed + 1
-      if completed >= pending then
-        callback(definitions)
-      end
-      goto continue
+      break
     end
 
-    M.get_definition(bufnr, ident.line, ident.col, function(locations)
-      completed = completed + 1
-
+    local ident = task_idents[i]
+    if locations and type(locations) == "table" then
       for _, loc in ipairs(locations) do
+        if not loc.uri then goto continue_loc end
+
         local filepath = vim.uri_to_fname(loc.uri)
         local def_line = loc.range and loc.range.start and loc.range.start.line or 0
         local def_col = loc.range and loc.range.start and loc.range.start.character or 0
@@ -396,7 +389,7 @@ function M.get_all_external_definitions(bufnr, callback, opts)
           seen_files[filepath] = true
 
           -- Extract only the definition using semantic_chunking
-          local content, metadata = semantic_chunking.extract_definition_at(
+          local content, chunk_meta = semantic_chunking.extract_definition_at(
             filepath, def_line, def_col
           )
 
@@ -406,27 +399,37 @@ function M.get_all_external_definitions(bufnr, callback, opts)
               name = ident.name,
               filepath = filepath,
               content = content,
-              start_line = metadata.start_line or def_line,
-              end_line = metadata.end_line or def_line,
+              start_line = chunk_meta.start_line or def_line,
+              end_line = chunk_meta.end_line or def_line,
               line = def_line,
               col = def_col,
-              is_full_file = false, -- Always false now, we only extract definitions
-              extraction_mode = metadata.mode or "definition",
-              node_type = metadata.node_type,
+              is_full_file = false,
+              extraction_mode = chunk_meta.mode or "definition",
+              node_type = chunk_meta.node_type,
               tokens = tokens,
             })
           end
         end
-      end
 
-      -- All done
-      if completed >= pending then
-        callback(definitions)
+        ::continue_loc::
       end
-    end)
-
-    ::continue::
+    end
   end
+
+  return definitions
+end
+
+---Get external definitions for ALL identifiers in current file (callback version)
+---Deduplicates by file path (each external file included only once)
+---@param bufnr number Buffer number
+---@param callback function Callback(definitions) where definitions is ExternalDefinition[]
+---@param opts? table Options {max_files?: number, timeout_ms?: number}
+function M.get_all_external_definitions(bufnr, callback, opts)
+  async.run(function()
+    local definitions = M.get_all_external_definitions_async(bufnr, opts)
+    async.scheduler()
+    callback(definitions)
+  end)
 end
 
 ---Get full LSP context for current buffer

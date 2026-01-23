@@ -1,7 +1,8 @@
 -- editutor/context.lua
--- Context extraction for ai-editutor v3.1
+-- Context extraction for ai-editutor v3.2
 -- Smart backtracking strategy for large projects
 -- Includes library API info extraction via LSP
+-- v3.2: Uses async abstraction for cleaner parallel execution
 
 local M = {}
 
@@ -10,6 +11,7 @@ local lsp_context = require("editutor.lsp_context")
 local project_scanner = require("editutor.project_scanner")
 local cache = require("editutor.cache")
 local context_strategy = require("editutor.context_strategy")
+local async = require("editutor.async")
 
 -- =============================================================================
 -- Token Budget
@@ -160,85 +162,107 @@ end
 -- Adaptive Context (for large projects) - v3.1 with smart backtracking
 -- =============================================================================
 
+---Build adaptive context for large projects (async version)
+---Must be called from within an async context
+---@param current_file string Path to current file
+---@param opts? table {question_lines?: {min: number, max: number}}
+---@return string|nil context, table metadata
+function M.build_adaptive_context_async(current_file, opts)
+  opts = opts or {}
+  local budget = M.get_token_budget()
+
+  -- Wrap the callback-based function
+  local context, metadata = async.await(function(cb)
+    context_strategy.build_context_with_strategy(current_file, function(ctx, meta)
+      cb(ctx, meta)
+    end, {
+      budget = budget,
+      question_lines = opts.question_lines,
+    })
+  end)
+
+  -- Add budget info to metadata
+  metadata = metadata or {}
+  metadata.budget = budget
+
+  if context then
+    return context, metadata
+  else
+    return nil, {
+      mode = "adaptive",
+      error = "strategy_failed",
+      budget = budget,
+      details = metadata,
+    }
+  end
+end
+
 ---Build adaptive context for large projects using smart backtracking strategy
 ---@param current_file string Path to current file
 ---@param callback function Callback(formatted_context, metadata)
 ---@param opts? table {question_lines?: {min: number, max: number}}
 function M.build_adaptive_context(current_file, callback, opts)
-  opts = opts or {}
-  local budget = M.get_token_budget()
-
-  context_strategy.build_context_with_strategy(current_file, function(context, metadata)
-    -- Add budget info to metadata
-    metadata.budget = budget
-
-    if context then
-      callback(context, metadata)
-    else
-      -- Fallback: should never happen with new strategy, but just in case
-      callback(nil, {
-        mode = "adaptive",
-        error = "strategy_failed",
-        budget = budget,
-        details = metadata,
-      })
-    end
-  end, {
-    budget = budget,
-    question_lines = opts.question_lines,
-  })
+  async.run(function()
+    local context, metadata = M.build_adaptive_context_async(current_file, opts)
+    async.scheduler()
+    callback(context, metadata)
+  end)
 end
 
 -- =============================================================================
 -- Library Info Extraction
 -- =============================================================================
 
----Extract library API info for identifiers around question
+---Extract library API info for identifiers (async version)
+---Must be called from within an async context
 ---@param bufnr number
 ---@param questions table[] List of pending questions with block_start, block_end
----@param callback function Callback(library_info_text, metadata)
-function M.extract_library_info(bufnr, questions, callback)
-  -- Lazy load to avoid circular dependency
+---@return string formatted_text, table metadata
+function M.extract_library_info_async(bufnr, questions)
   local ok, lsp_library = pcall(require, "editutor.lsp_library")
   if not ok then
-    callback("", { error = "lsp_library module not found" })
-    return
+    return "", { error = "lsp_library module not found" }
   end
 
   -- Configure budget
   lsp_library.config.max_tokens = M.get_library_info_budget()
   lsp_library.config.scan_radius = M.get_library_scan_radius()
 
-  -- Find question range (use first and last question to define scan area)
+  -- Find question range
   local min_line = math.huge
   local max_line = 0
   local all_question_text = {}
 
   for _, q in ipairs(questions) do
     if q.block_start then
-      min_line = math.min(min_line, q.block_start - 1) -- Convert to 0-indexed
+      min_line = math.min(min_line, q.block_start - 1)
     end
     if q.block_end then
-      max_line = math.max(max_line, q.block_end - 1) -- Convert to 0-indexed
+      max_line = math.max(max_line, q.block_end - 1)
     end
     if q.question then
       table.insert(all_question_text, q.question)
     end
   end
 
-  -- Handle case where no valid lines found
-  if min_line == math.huge then
-    min_line = 0
-  end
-  if max_line == 0 then
-    max_line = vim.api.nvim_buf_line_count(bufnr) - 1
-  end
+  if min_line == math.huge then min_line = 0 end
+  if max_line == 0 then max_line = vim.api.nvim_buf_line_count(bufnr) - 1 end
 
   local combined_question_text = table.concat(all_question_text, "\n")
 
-  -- Extract library info
-  lsp_library.extract_library_info(bufnr, min_line, max_line, combined_question_text, function(result)
-    local formatted, metadata = lsp_library.format_for_prompt(result)
+  -- Use async version directly
+  local result = lsp_library.extract_library_info_async(bufnr, min_line, max_line, combined_question_text)
+  return lsp_library.format_for_prompt(result)
+end
+
+---Extract library API info for identifiers around question
+---@param bufnr number
+---@param questions table[] List of pending questions with block_start, block_end
+---@param callback function Callback(library_info_text, metadata)
+function M.extract_library_info(bufnr, questions, callback)
+  async.run(function()
+    local formatted, metadata = M.extract_library_info_async(bufnr, questions)
+    async.scheduler()
     callback(formatted, metadata)
   end)
 end
@@ -247,76 +271,19 @@ end
 -- Main Entry Point
 -- =============================================================================
 
----Extract context based on project size
----Also extracts library API info if questions are provided
----@param callback function Callback(formatted_context, metadata)
+---Extract context based on project size (async version)
+---Must be called from within an async context
 ---@param opts? table {current_file?: string, questions?: table[], timeout?: number}
-function M.extract(callback, opts)
+---@return string formatted_context, table metadata
+function M.extract_async(opts)
   opts = opts or {}
   local current_file = opts.current_file or vim.api.nvim_buf_get_name(0)
   local questions = opts.questions or {}
   local bufnr = vim.api.nvim_get_current_buf()
-  local overall_timeout = opts.timeout or 45000 -- 45 second overall timeout
+  local overall_timeout = opts.timeout or 45000
 
   local project_root = project_scanner.get_project_root(current_file)
   local mode_info = M.detect_mode(project_root)
-
-  -- Track parallel extractions
-  local code_context = nil
-  local code_metadata = nil
-  local library_info = nil
-  local library_metadata = nil
-  local pending = 2 -- Two parallel tasks
-  local callback_called = false
-
-  -- Overall timeout handler
-  vim.defer_fn(function()
-    if not callback_called then
-      callback_called = true
-      local final_context = code_context or ""
-      local final_metadata = code_metadata or { mode = mode_info.mode }
-      final_metadata.timeout = true
-      final_metadata.warning = "Context extraction timeout after " .. overall_timeout .. "ms"
-      callback(final_context, final_metadata)
-    end
-  end, overall_timeout)
-
-  local function check_complete()
-    -- Use vim.schedule to ensure atomic check-and-set on callback_called
-    -- This prevents race condition when both tasks complete simultaneously
-    vim.schedule(function()
-      if callback_called then return end
-
-      pending = pending - 1
-      if pending > 0 then
-        return
-      end
-
-      callback_called = true
-
-      -- Combine code context and library info
-      local final_context = code_context or ""
-      if library_info and library_info ~= "" then
-        final_context = final_context .. "\n\n" .. library_info
-      end
-
-      -- Merge metadata
-      local final_metadata = code_metadata or {}
-      final_metadata.library_info = library_metadata or {}
-
-      -- Fix: Get total_tokens from token_usage if not set directly
-      local code_tokens = final_metadata.total_tokens
-        or (final_metadata.token_usage and final_metadata.token_usage.total)
-        or 0
-      final_metadata.total_tokens = code_tokens
-
-      if library_metadata and library_metadata.tokens then
-        final_metadata.total_tokens = final_metadata.total_tokens + library_metadata.tokens
-      end
-
-      callback(final_context, final_metadata)
-    end)
-  end
 
   -- Compute question line range for truncation if needed
   local question_lines = nil
@@ -332,35 +299,87 @@ function M.extract(callback, opts)
     end
   end
 
+  -- Build parallel tasks
+  local tasks = {}
+
   -- Task 1: Extract code context
-  if mode_info.mode == "full_project" then
-    local formatted, metadata = M.build_full_project_context(current_file)
-    code_context = formatted
-    code_metadata = metadata
-    check_complete()
+  table.insert(tasks, function()
+    if mode_info.mode == "full_project" then
+      return { M.build_full_project_context(current_file) }
+    else
+      local ctx, meta = M.build_adaptive_context_async(current_file, { question_lines = question_lines })
+      return { ctx, meta }
+    end
+  end)
+
+  -- Task 2: Extract library info
+  table.insert(tasks, function()
+    if #questions > 0 then
+      local info, meta = M.extract_library_info_async(bufnr, questions)
+      return { info, meta }
+    else
+      return { "", { skipped = "no_questions" } }
+    end
+  end)
+
+  -- Execute in parallel with timeout
+  local results, timed_out = async.with_timeout(function()
+    return async.all(tasks)
+  end, overall_timeout, {})
+
+  -- Extract results
+  local code_context, code_metadata
+  local library_info, library_metadata
+
+  if timed_out then
+    code_context = ""
+    code_metadata = { mode = mode_info.mode, timeout = true, warning = "Context extraction timeout" }
+    library_info = ""
+    library_metadata = {}
   else
-    M.build_adaptive_context(current_file, function(formatted, metadata)
-      if callback_called then return end
-      code_context = formatted
-      code_metadata = metadata
-      check_complete()
-    end, { question_lines = question_lines })
+    -- Results from async.all are wrapped: {{result1, result2}, {result1, result2}}
+    local code_result = results[1] and results[1][1] or {}
+    local lib_result = results[2] and results[2][1] or {}
+
+    code_context = code_result[1] or ""
+    code_metadata = code_result[2] or { mode = mode_info.mode }
+    library_info = lib_result[1] or ""
+    library_metadata = lib_result[2] or {}
   end
 
-  -- Task 2: Extract library info (parallel)
-  if #questions > 0 then
-    M.extract_library_info(bufnr, questions, function(info_text, info_metadata)
-      if callback_called then return end
-      library_info = info_text
-      library_metadata = info_metadata
-      check_complete()
-    end)
-  else
-    -- No questions, skip library info
-    library_info = ""
-    library_metadata = { skipped = "no_questions" }
-    check_complete()
+  -- Combine code context and library info
+  local final_context = code_context or ""
+  if library_info and library_info ~= "" then
+    final_context = final_context .. "\n\n" .. library_info
   end
+
+  -- Merge metadata
+  local final_metadata = code_metadata or {}
+  final_metadata.library_info = library_metadata or {}
+
+  -- Fix: Get total_tokens from token_usage if not set directly
+  local code_tokens = final_metadata.total_tokens
+    or (final_metadata.token_usage and final_metadata.token_usage.total)
+    or 0
+  final_metadata.total_tokens = code_tokens
+
+  if library_metadata and library_metadata.tokens then
+    final_metadata.total_tokens = final_metadata.total_tokens + library_metadata.tokens
+  end
+
+  return final_context, final_metadata
+end
+
+---Extract context based on project size
+---Also extracts library API info if questions are provided
+---@param callback function Callback(formatted_context, metadata)
+---@param opts? table {current_file?: string, questions?: table[], timeout?: number}
+function M.extract(callback, opts)
+  async.run(function()
+    local context, metadata = M.extract_async(opts)
+    async.scheduler()
+    callback(context, metadata)
+  end)
 end
 
 -- =============================================================================

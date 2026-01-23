@@ -1,6 +1,7 @@
 -- editutor/context_strategy.lua
 -- Smart backtracking strategy for fitting context into token budget
 -- Never fails - always returns best possible context within budget
+-- v3.2: Uses async abstraction for cleaner parallel execution
 
 local M = {}
 
@@ -10,6 +11,7 @@ local import_graph = require("editutor.import_graph")
 local semantic_chunking = require("editutor.semantic_chunking")
 local relevance_scorer = require("editutor.relevance_scorer")
 local cache = require("editutor.cache")
+local async = require("editutor.async")
 
 -- =============================================================================
 -- Configuration
@@ -207,80 +209,76 @@ end
 -- LSP Definitions (using new semantic extraction)
 -- =============================================================================
 
----Get LSP definitions with definition-only extraction
+---Get LSP definitions with definition-only extraction (async version)
+---Must be called from within an async context
 ---@param bufnr number
----@param callback function
----@param opts table
-local function get_lsp_definitions(bufnr, callback, opts)
+---@param opts table {max_files?: number, timeout?: number}
+---@return table[] definitions
+local function get_lsp_definitions_async(bufnr, opts)
   local lsp_context = require("editutor.lsp_context")
+  opts = opts or {}
+  local max_files = opts.max_files or 30
+  local timeout_ms = opts.timeout or 10000
 
   if not lsp_context.is_available() then
-    callback({})
-    return
+    return {}
   end
 
   local current_file = vim.api.nvim_buf_get_name(bufnr)
   local identifiers = lsp_context.extract_all_identifiers(bufnr)
 
-  local definitions = {}
-  local seen_files = {}
-  local pending = #identifiers
-  local completed = 0
-  local max_files = opts.max_files or 30
-  local callback_called = false
-  local timeout_ms = opts.timeout or 10000 -- 10 second timeout for LSP definitions
-
-  if pending == 0 then
-    callback({})
-    return
+  if #identifiers == 0 then
+    return {}
   end
 
-  -- Timeout handler to prevent hanging forever
-  vim.defer_fn(function()
-    if not callback_called then
-      callback_called = true
-      callback(definitions) -- Return whatever we have so far
-    end
-  end, timeout_ms)
+  local definitions = {}
+  local seen_files = {}
 
+  -- Limit identifiers to prevent too many requests
+  if #identifiers > 100 then
+    identifiers = vim.list_slice(identifiers, 1, 100)
+  end
+
+  -- Create tasks for parallel execution
+  local tasks = {}
+  local task_idents = {}
   for _, ident in ipairs(identifiers) do
-    if callback_called then
-      return -- Already timed out
-    end
+    table.insert(tasks, function()
+      return lsp_context.get_definition_async(bufnr, ident.line, ident.col, 3000)
+    end)
+    table.insert(task_idents, ident)
+  end
 
+  -- Execute in parallel with timeout
+  local results, meta = async.parallel_limited(tasks, {
+    max_concurrent = 10,
+    timeout_ms = timeout_ms,
+  })
+
+  -- Process results
+  for i, locations in pairs(results) do
     if vim.tbl_count(seen_files) >= max_files then
-      completed = completed + 1
-      if completed >= pending and not callback_called then
-        callback_called = true
-        callback(definitions)
-      end
-      goto continue
+      break
     end
 
-    lsp_context.get_definition(bufnr, ident.line, ident.col, function(locations)
-      if callback_called then
-        return -- Already timed out or completed
-      end
-
-      completed = completed + 1
-
+    local ident = task_idents[i]
+    if locations and type(locations) == "table" then
       for _, loc in ipairs(locations) do
+        if not loc.uri then goto continue_loc end
+
         local filepath = vim.uri_to_fname(loc.uri)
 
-        if
-          filepath ~= current_file
+        if filepath ~= current_file
           and not seen_files[filepath]
           and lsp_context.is_project_file(filepath)
           and vim.tbl_count(seen_files) < max_files
         then
           seen_files[filepath] = true
 
-          -- Extract only the definition, not the whole file
           local def_line = loc.range and loc.range.start and loc.range.start.line or 0
           local def_col = loc.range and loc.range.start and loc.range.start.character or 0
 
-          local content, metadata =
-            semantic_chunking.extract_definition_at(filepath, def_line, def_col)
+          local content, chunk_meta = semantic_chunking.extract_definition_at(filepath, def_line, def_col)
 
           if content then
             table.insert(definitions, {
@@ -289,21 +287,30 @@ local function get_lsp_definitions(bufnr, callback, opts)
               content = content,
               line = def_line,
               col = def_col,
-              metadata = metadata,
+              metadata = chunk_meta,
               tokens = project_scanner.estimate_tokens(content),
             })
           end
         end
-      end
 
-      if completed >= pending and not callback_called then
-        callback_called = true
-        callback(definitions)
+        ::continue_loc::
       end
-    end)
-
-    ::continue::
+    end
   end
+
+  return definitions
+end
+
+---Get LSP definitions with definition-only extraction (callback version)
+---@param bufnr number
+---@param callback function
+---@param opts table
+local function get_lsp_definitions(bufnr, callback, opts)
+  async.run(function()
+    local definitions = get_lsp_definitions_async(bufnr, opts)
+    async.scheduler()
+    callback(definitions)
+  end)
 end
 
 -- =============================================================================
@@ -643,131 +650,123 @@ local function build_context_for_level(current_file, project_root, level, budget
   end
 end
 
+---Async wrapper for build_context_for_level
+---Must be called from within an async context
+---@param current_file string
+---@param project_root string
+---@param level table
+---@param budget number
+---@param question_lines? table
+---@return string context, number tokens, table metadata
+local function build_context_for_level_async(current_file, project_root, level, budget, question_lines)
+  return async.await(function(cb)
+    build_context_for_level(current_file, project_root, level, budget, question_lines, function(ctx, tokens, meta)
+      cb(ctx, tokens, meta)
+    end)
+  end)
+end
+
 -- =============================================================================
 -- Main Entry Point
 -- =============================================================================
 
----Build context with smart backtracking strategy
+---Build context with smart backtracking strategy (async version)
+---Must be called from within an async context
+---@param current_file string
+---@param opts? table {budget?: number, timeout?: number, question_lines?: {min: number, max: number}}
+---@return string context, table metadata
+function M.build_context_with_strategy_async(current_file, opts)
+  opts = opts or {}
+  local budget = opts.budget or config.options.context and config.options.context.token_budget or M.DEFAULT_BUDGET
+  local timeout_ms = opts.timeout or 25000
+  local question_lines = opts.question_lines
+
+  local project_root = project_scanner.get_project_root(current_file)
+  local attempts = {}
+  local best = nil
+
+  -- Try levels sequentially until one fits budget
+  for level_index, level in ipairs(M.LEVELS) do
+    local context, tokens, metadata = build_context_for_level_async(
+      current_file, project_root, level, budget, question_lines
+    )
+
+    table.insert(attempts, {
+      level = level.name,
+      tokens = tokens,
+      context = context,
+      metadata = metadata,
+    })
+
+    best = attempts[#attempts]
+
+    if tokens <= budget then
+      -- Success! This level fits
+      return context, {
+        mode = "adaptive",
+        strategy = {
+          level_used = level.name,
+          level_description = level.description,
+          level_index = level_index,
+          levels_tried = level_index,
+        },
+        token_usage = {
+          budget = budget,
+          total = tokens,
+          remaining = budget - tokens,
+          within_budget = true,
+        },
+        files_included = metadata.files,
+        import_count = metadata.import_count,
+        lsp_count = metadata.lsp_count,
+      }
+    end
+  end
+
+  -- All levels exhausted, return the best attempt (minimal level)
+  return best.context, {
+    mode = "adaptive",
+    strategy = {
+      level_used = best.level,
+      levels_tried = #attempts,
+      all_attempts = attempts,
+    },
+    token_usage = {
+      budget = budget,
+      total = best.tokens,
+      within_budget = best.tokens <= budget,
+    },
+    files_included = best.metadata.files,
+    warning = best.tokens > budget and "all_levels_exceeded_budget" or nil,
+  }
+end
+
+---Build context with smart backtracking strategy (callback version)
 ---@param current_file string
 ---@param callback function Callback(context, metadata)
 ---@param opts? table {budget?: number, timeout?: number, question_lines?: {min: number, max: number}}
 function M.build_context_with_strategy(current_file, callback, opts)
   opts = opts or {}
-  local budget = opts.budget or config.options.context and config.options.context.token_budget or M.DEFAULT_BUDGET
-  local timeout_ms = opts.timeout or 25000 -- 25 second overall timeout
-  local question_lines = opts.question_lines -- {min: number, max: number} or nil
+  local timeout_ms = opts.timeout or 25000
 
-  local project_root = project_scanner.get_project_root(current_file)
-  local level_index = 1
-  local attempts = {}
-  local callback_called = false
+  async.run(function()
+    local context, metadata = async.with_timeout(function()
+      return M.build_context_with_strategy_async(current_file, opts)
+    end, timeout_ms, nil)
 
-  -- Overall timeout handler
-  vim.defer_fn(function()
-    if not callback_called then
-      callback_called = true
-      -- Return whatever we have, or minimal context
-      if #attempts > 0 then
-        local best = attempts[#attempts]
-        callback(best.context, {
-          mode = "adaptive",
-          strategy = {
-            level_used = best.level,
-            levels_tried = #attempts,
-            timeout = true,
-          },
-          token_usage = {
-            budget = budget,
-            total = best.tokens,
-            within_budget = best.tokens <= budget,
-          },
-          files_included = best.metadata and best.metadata.files or {},
-          warning = "strategy_timeout_after_" .. timeout_ms .. "ms",
-        })
-      else
-        -- No attempts completed, return empty with error
-        callback("", {
-          mode = "adaptive",
-          error = "strategy_timeout_no_attempts",
-          warning = "Context extraction timed out with no results",
-        })
-      end
-    end
-  end, timeout_ms)
+    async.scheduler()
 
-  local function try_level()
-    if callback_called then
-      return -- Already timed out
-    end
-
-    if level_index > #M.LEVELS then
-      if callback_called then return end
-      callback_called = true
-      -- All levels exhausted, return the best attempt (minimal level)
-      local best = attempts[#attempts]
-      callback(best.context, {
+    if context == nil then
+      -- Timeout occurred
+      callback("", {
         mode = "adaptive",
-        strategy = {
-          level_used = best.level,
-          levels_tried = #attempts,
-          all_attempts = attempts,
-        },
-        token_usage = {
-          budget = budget,
-          total = best.tokens,
-          within_budget = best.tokens <= budget,
-        },
-        files_included = best.metadata.files,
-        warning = best.tokens > budget and "all_levels_exceeded_budget" or nil,
+        error = "strategy_timeout",
+        warning = "Context extraction timed out after " .. timeout_ms .. "ms",
       })
-      return
+    else
+      callback(context, metadata)
     end
-
-    local level = M.LEVELS[level_index]
-
-    build_context_for_level(current_file, project_root, level, budget, question_lines, function(context, tokens, metadata)
-      if callback_called then return end
-
-      table.insert(attempts, {
-        level = level.name,
-        tokens = tokens,
-        context = context,
-        metadata = metadata,
-      })
-
-      if tokens <= budget then
-        if callback_called then return end
-        callback_called = true
-        -- Success! This level fits
-        callback(context, {
-          mode = "adaptive",
-          strategy = {
-            level_used = level.name,
-            level_description = level.description,
-            level_index = level_index,
-            levels_tried = level_index,
-          },
-          token_usage = {
-            budget = budget,
-            total = tokens,
-            remaining = budget - tokens,
-            within_budget = true,
-          },
-          files_included = metadata.files,
-          import_count = metadata.import_count,
-          lsp_count = metadata.lsp_count,
-        })
-      else
-        -- Over budget, try next level
-        -- Check callback_called before recursive call to prevent race with timeout
-        if callback_called then return end
-        level_index = level_index + 1
-        try_level()
-      end
-    end)
-  end
-
-  try_level()
+  end)
 end
 
 ---Get available strategy levels (for debugging/display)
