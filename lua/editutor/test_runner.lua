@@ -16,6 +16,8 @@ M.config = {
   lsp_timeout = 15000,  -- 15 seconds for LSP
   dry_run = true,       -- Don't actually call LLM
   save_contexts = true, -- Save full context to files
+  cleanup_interval = 20, -- Cleanup all buffers every N tests
+  start_from = 1,       -- Start from this test case index
 }
 
 -- =============================================================================
@@ -84,6 +86,53 @@ local function close_log()
     log_file:close()
     log_file = nil
   end
+end
+
+-- =============================================================================
+-- Buffer & LSP Cleanup
+-- =============================================================================
+
+local function cleanup_buffer(bufnr)
+  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+
+  -- Stop all LSP clients attached to this buffer
+  local clients = vim.lsp.get_clients({ bufnr = bufnr })
+  for _, client in ipairs(clients) do
+    pcall(function()
+      vim.lsp.buf_detach_client(bufnr, client.id)
+    end)
+  end
+
+  -- Force delete buffer
+  pcall(function()
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+  end)
+end
+
+local function cleanup_all_buffers()
+  log("  [CLEANUP] Starting periodic buffer cleanup...", "DEBUG")
+  local cleaned = 0
+
+  -- Get all buffers
+  local buffers = vim.api.nvim_list_bufs()
+  for _, bufnr in ipairs(buffers) do
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      local name = vim.api.nvim_buf_get_name(bufnr)
+      -- Only cleanup repo test buffers, not our working files
+      if name:match("%.cache/editutor%-tests/repos/") then
+        cleanup_buffer(bufnr)
+        cleaned = cleaned + 1
+      end
+    end
+  end
+
+  -- Force garbage collection
+  collectgarbage("collect")
+
+  log(string.format("  [CLEANUP] Cleaned %d buffers, GC done", cleaned), "DEBUG")
+  return cleaned
 end
 
 -- =============================================================================
@@ -267,10 +316,8 @@ local function run_test_case(tc, callback)
         result.errors[#result.errors + 1] = "Context extraction timeout after " .. extraction_timeout .. "ms"
         log("    [TIMEOUT] Context extraction timed out", "ERROR")
 
-        -- Close buffer
-        pcall(function()
-          vim.cmd("bdelete!")
-        end)
+        -- Close buffer with proper cleanup
+        cleanup_buffer(bufnr)
 
         callback(result)
       end
@@ -430,10 +477,8 @@ local function run_test_case(tc, callback)
 
       log(string.format("    Test case complete, status: %s", result.status), "DEBUG")
 
-      -- Close buffer
-      pcall(function()
-        vim.cmd("bdelete!")
-      end)
+      -- Close buffer with proper cleanup
+      cleanup_buffer(bufnr)
 
       log("    Calling test callback...", "DEBUG")
         callback(result)
@@ -450,9 +495,8 @@ local function run_test_case(tc, callback)
         result.errors[#result.errors + 1] = "Context extraction error: " .. tostring(extract_err)
         log("    [ERROR] " .. tostring(extract_err), "ERROR")
 
-        pcall(function()
-          vim.cmd("bdelete!")
-        end)
+        -- Close buffer with proper cleanup
+        cleanup_buffer(bufnr)
 
         callback(result)
       end
@@ -516,9 +560,15 @@ function M.run(opts)
   log(string.format("Results dir: %s", M.config.results_dir))
   log("")
 
-  local case_index = 0
+  -- Support starting from a specific index
+  local start_index = opts.start_from or M.config.start_from or 1
+  local case_index = start_index - 1  -- Will be incremented to start_index
   local total_tokens = 0
   local total_extraction_ms = 0
+
+  if start_index > 1 then
+    log(string.format("Starting from test case #%d", start_index))
+  end
 
   local function run_next()
     case_index = case_index + 1
@@ -526,6 +576,12 @@ function M.run(opts)
     if case_index > #cases_to_run then
       M.finish()
       return
+    end
+
+    -- Periodic cleanup to prevent memory buildup
+    if M.config.cleanup_interval > 0 and case_index > start_index and
+       (case_index - start_index) % M.config.cleanup_interval == 0 then
+      cleanup_all_buffers()
     end
 
     local tc = cases_to_run[case_index]
@@ -834,6 +890,35 @@ function M.validate_cases()
     for _, inv in ipairs(validation.invalid) do
       print(string.format("  - %s/%s: %s", inv.test_case.repo, inv.test_case.file, inv.error))
     end
+  end
+end
+
+-- Resume test from a specific index
+function M.resume(start_index)
+  M.run({ start_from = start_index })
+end
+
+-- Force cleanup all test buffers
+function M.cleanup()
+  local cleaned = cleanup_all_buffers()
+  vim.notify(string.format("Cleaned %d test buffers", cleaned), vim.log.levels.INFO)
+end
+
+-- Get test case info by index
+function M.get_case(index)
+  local tc = test_cases.TEST_CASES[index]
+  if tc then
+    print(string.format("Test case #%d:", index))
+    print(string.format("  repo: %s", tc.repo))
+    print(string.format("  file: %s", tc.file))
+    print(string.format("  lang: %s", tc.lang))
+    print(string.format("  lines: %d-%d", tc.lines[1], tc.lines[2]))
+    print(string.format("  pattern: %s", tc.pattern))
+    print(string.format("  question: %s", tc.question))
+    return tc
+  else
+    print("Test case not found: " .. index)
+    return nil
   end
 end
 
