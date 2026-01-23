@@ -759,6 +759,8 @@ function M.build_context_with_strategy(current_file, callback, opts)
         })
       else
         -- Over budget, try next level
+        -- Check callback_called before recursive call to prevent race with timeout
+        if callback_called then return end
         level_index = level_index + 1
         try_level()
       end

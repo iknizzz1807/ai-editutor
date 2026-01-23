@@ -601,12 +601,17 @@ function M.extract_library_info(bufnr, question_start_line, question_end_line, q
   local lib_found = 0
 
   local function check_complete()
-    if completed >= pending and not callback_called then
+    -- Use vim.schedule to ensure atomic check-and-set on callback_called
+    -- This prevents race condition when multiple async LSP callbacks complete simultaneously
+    vim.schedule(function()
+      if callback_called then return end
+      if completed < pending then return end
+
+      callback_called = true
       debug_log.log(string.format("[LSP_LIB] Complete: skipped_no_pos=%d, skipped_not_lib=%d, lib_found=%d",
         skipped_no_pos, skipped_not_lib, lib_found), "DEBUG")
-      callback_called = true
       callback(result)
-    end
+    end)
   end
 
   for _, ident in ipairs(all_identifiers) do

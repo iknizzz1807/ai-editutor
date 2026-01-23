@@ -282,36 +282,40 @@ function M.extract(callback, opts)
   end, overall_timeout)
 
   local function check_complete()
-    if callback_called then return end
+    -- Use vim.schedule to ensure atomic check-and-set on callback_called
+    -- This prevents race condition when both tasks complete simultaneously
+    vim.schedule(function()
+      if callback_called then return end
 
-    pending = pending - 1
-    if pending > 0 then
-      return
-    end
+      pending = pending - 1
+      if pending > 0 then
+        return
+      end
 
-    callback_called = true
+      callback_called = true
 
-    -- Combine code context and library info
-    local final_context = code_context or ""
-    if library_info and library_info ~= "" then
-      final_context = final_context .. "\n\n" .. library_info
-    end
+      -- Combine code context and library info
+      local final_context = code_context or ""
+      if library_info and library_info ~= "" then
+        final_context = final_context .. "\n\n" .. library_info
+      end
 
-    -- Merge metadata
-    local final_metadata = code_metadata or {}
-    final_metadata.library_info = library_metadata or {}
+      -- Merge metadata
+      local final_metadata = code_metadata or {}
+      final_metadata.library_info = library_metadata or {}
 
-    -- Fix: Get total_tokens from token_usage if not set directly
-    local code_tokens = final_metadata.total_tokens
-      or (final_metadata.token_usage and final_metadata.token_usage.total)
-      or 0
-    final_metadata.total_tokens = code_tokens
+      -- Fix: Get total_tokens from token_usage if not set directly
+      local code_tokens = final_metadata.total_tokens
+        or (final_metadata.token_usage and final_metadata.token_usage.total)
+        or 0
+      final_metadata.total_tokens = code_tokens
 
-    if library_metadata and library_metadata.tokens then
-      final_metadata.total_tokens = final_metadata.total_tokens + library_metadata.tokens
-    end
+      if library_metadata and library_metadata.tokens then
+        final_metadata.total_tokens = final_metadata.total_tokens + library_metadata.tokens
+      end
 
-    callback(final_context, final_metadata)
+      callback(final_context, final_metadata)
+    end)
   end
 
   -- Compute question line range for truncation if needed
