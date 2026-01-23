@@ -39,6 +39,67 @@ function M.get_library_scan_radius()
 end
 
 -- =============================================================================
+-- LSP Diagnostics
+-- =============================================================================
+
+local SEVERITY_NAMES = {
+  [vim.diagnostic.severity.ERROR] = "ERROR",
+  [vim.diagnostic.severity.WARN] = "WARNING",
+  [vim.diagnostic.severity.INFO] = "INFO",
+  [vim.diagnostic.severity.HINT] = "HINT",
+}
+
+---Extract LSP diagnostics for current buffer
+---@param bufnr number Buffer number
+---@return string|nil formatted_diagnostics
+---@return table metadata
+function M.get_buffer_diagnostics(bufnr)
+  local diagnostics = vim.diagnostic.get(bufnr)
+
+  if #diagnostics == 0 then
+    return nil, { count = 0 }
+  end
+
+  -- Filter to ERROR and WARNING only
+  local filtered = vim.tbl_filter(function(d)
+    return d.severity <= vim.diagnostic.severity.WARN
+  end, diagnostics)
+
+  if #filtered == 0 then
+    return nil, { count = 0, total = #diagnostics, filtered_out = #diagnostics }
+  end
+
+  -- Sort by severity (errors first) then by line
+  table.sort(filtered, function(a, b)
+    if a.severity ~= b.severity then
+      return a.severity < b.severity
+    end
+    return a.lnum < b.lnum
+  end)
+
+  local parts = {}
+  table.insert(parts, string.format("=== LSP DIAGNOSTICS (%d issues) ===", #filtered))
+  table.insert(parts, "")
+
+  for _, d in ipairs(filtered) do
+    local sev = SEVERITY_NAMES[d.severity] or "UNKNOWN"
+    local line = d.lnum + 1 -- 0-indexed to 1-indexed
+    local msg = d.message:gsub("\n", " "):gsub("%s+", " ") -- Normalize whitespace
+    local source = d.source and (" (" .. d.source .. ")") or ""
+    table.insert(parts, string.format("[%s] Line %d%s: %s", sev, line, source, msg))
+  end
+
+  local formatted = table.concat(parts, "\n")
+  local tokens = project_scanner.estimate_tokens(formatted)
+
+  return formatted, {
+    count = #filtered,
+    total = #diagnostics,
+    tokens = tokens,
+  }
+end
+
+-- =============================================================================
 -- Context Mode Detection
 -- =============================================================================
 
@@ -338,9 +399,16 @@ function M.extract_async(opts)
     final_context = final_context .. "\n\n" .. library_info
   end
 
+  -- Add LSP diagnostics
+  local diagnostics_text, diagnostics_metadata = M.get_buffer_diagnostics(bufnr)
+  if diagnostics_text then
+    final_context = final_context .. "\n\n" .. diagnostics_text
+  end
+
   -- Merge metadata
   local final_metadata = code_metadata or {}
   final_metadata.library_info = library_metadata or {}
+  final_metadata.diagnostics = diagnostics_metadata or {}
 
   -- Fix: Get total_tokens from token_usage if not set directly
   local code_tokens = final_metadata.total_tokens
@@ -350,6 +418,10 @@ function M.extract_async(opts)
 
   if library_metadata and library_metadata.tokens then
     final_metadata.total_tokens = final_metadata.total_tokens + library_metadata.tokens
+  end
+
+  if diagnostics_metadata and diagnostics_metadata.tokens then
+    final_metadata.total_tokens = final_metadata.total_tokens + diagnostics_metadata.tokens
   end
 
   return final_context, final_metadata
