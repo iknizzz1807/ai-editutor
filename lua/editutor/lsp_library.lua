@@ -292,18 +292,6 @@ function M.get_hover_async(bufnr, line, col, timeout_ms)
 end
 
 ---Get hover info for a position (callback version)
----@param bufnr number
----@param line number 0-indexed
----@param col number 0-indexed
----@param callback function(hover_text: string|nil, error: string|nil)
-function M.get_hover(bufnr, line, col, callback)
-  async.run(function()
-    local hover_text, err = M.get_hover_async(bufnr, line, col)
-    async.scheduler()
-    callback(hover_text, err)
-  end)
-end
-
 ---Get definition location to check if it's a library (async version)
 ---Must be called from within an async context
 ---@param bufnr number
@@ -336,19 +324,6 @@ function M.get_definition_location_async(bufnr, line, col, timeout_ms)
   local is_library = M.is_library_path(filepath, project_root)
 
   return filepath, is_library
-end
-
----Get definition location to check if it's a library (callback version)
----@param bufnr number
----@param line number 0-indexed
----@param col number 0-indexed
----@param callback function(filepath: string|nil, is_library: boolean)
-function M.get_definition_location(bufnr, line, col, callback)
-  async.run(function()
-    local filepath, is_library = M.get_definition_location_async(bufnr, line, col)
-    async.scheduler()
-    callback(filepath, is_library)
-  end)
 end
 
 -- =============================================================================
@@ -545,20 +520,6 @@ function M.extract_library_info_async(bufnr, question_start_line, question_end_l
     lib_found, #result.items, result.total_tokens), "DEBUG")
 
   return result
-end
-
----Extract library info for identifiers (callback version)
----@param bufnr number Buffer number
----@param question_start_line number 0-indexed line where question block starts
----@param question_end_line number 0-indexed line where question block ends
----@param question_text string The question text (to parse for mentioned identifiers)
----@param callback function(result: LibraryInfoResult)
-function M.extract_library_info(bufnr, question_start_line, question_end_line, question_text, callback)
-  async.run(function()
-    local result = M.extract_library_info_async(bufnr, question_start_line, question_end_line, question_text)
-    async.scheduler()
-    callback(result)
-  end)
 end
 
 -- =============================================================================

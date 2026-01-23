@@ -66,20 +66,26 @@ end
 ---Run an async function with timeout
 ---@param async_fn function The async function
 ---@param timeout_ms number Timeout in milliseconds
----@param fallback? any Value to return on timeout (default: nil)
----@return any result Result or fallback on timeout
+---@param fallback? any Value to return on timeout or error (default: nil)
+---@return any result Result or fallback on timeout/error
 ---@return boolean timed_out Whether timeout occurred
+---@return string|nil error Error message if async_fn threw
 M.with_timeout = function(async_fn, timeout_ms, fallback)
   local result = nil
-  local completed = false
-  local timed_out = false
+  local err = nil
 
   -- Race between the async function and a sleep timer
   local winner = util.race({
     function()
-      result = async_fn()
-      completed = true
-      return "completed"
+      -- Wrap in pcall to catch errors
+      local ok, res = util.apcall(async_fn)
+      if ok then
+        result = res
+        return "completed"
+      else
+        err = tostring(res)
+        return "error"
+      end
     end,
     function()
       util.sleep(timeout_ms)
@@ -88,11 +94,12 @@ M.with_timeout = function(async_fn, timeout_ms, fallback)
   })
 
   if winner == "timeout" then
-    timed_out = true
-    return fallback, true
+    return fallback, true, nil
+  elseif winner == "error" then
+    return fallback, false, err
   end
 
-  return result, false
+  return result, false, nil
 end
 
 -- =============================================================================

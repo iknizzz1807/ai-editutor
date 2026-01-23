@@ -193,18 +193,6 @@ function M.build_adaptive_context_async(current_file, opts)
   end
 end
 
----Build adaptive context for large projects using smart backtracking strategy
----@param current_file string Path to current file
----@param callback function Callback(formatted_context, metadata)
----@param opts? table {question_lines?: {min: number, max: number}}
-function M.build_adaptive_context(current_file, callback, opts)
-  async.run(function()
-    local context, metadata = M.build_adaptive_context_async(current_file, opts)
-    async.scheduler()
-    callback(context, metadata)
-  end)
-end
-
 -- =============================================================================
 -- Library Info Extraction
 -- =============================================================================
@@ -249,18 +237,6 @@ function M.extract_library_info_async(bufnr, questions)
   -- Use async version directly
   local result = lsp_library.extract_library_info_async(bufnr, min_line, max_line, combined_question_text)
   return lsp_library.format_for_prompt(result)
-end
-
----Extract library API info for identifiers around question
----@param bufnr number
----@param questions table[] List of pending questions with block_start, block_end
----@param callback function Callback(library_info_text, metadata)
-function M.extract_library_info(bufnr, questions, callback)
-  async.run(function()
-    local formatted, metadata = M.extract_library_info_async(bufnr, questions)
-    async.scheduler()
-    callback(formatted, metadata)
-  end)
 end
 
 -- =============================================================================
@@ -319,7 +295,7 @@ function M.extract_async(opts)
   end)
 
   -- Execute in parallel with timeout
-  local results, timed_out = async.with_timeout(function()
+  local results, timed_out, async_err = async.with_timeout(function()
     return async.all(tasks)
   end, overall_timeout, {})
 
@@ -332,10 +308,23 @@ function M.extract_async(opts)
     code_metadata = { mode = mode_info.mode, timeout = true, warning = "Context extraction timeout" }
     library_info = ""
     library_metadata = {}
+  elseif async_err then
+    code_context = ""
+    code_metadata = { mode = mode_info.mode, error = async_err, warning = "Context extraction error" }
+    library_info = ""
+    library_metadata = {}
   else
     -- Results from async.all are wrapped: {{result1, result2}, {result1, result2}}
-    local code_result = results[1] and results[1][1] or {}
-    local lib_result = results[2] and results[2][1] or {}
+    -- Validate structure before accessing
+    local code_result = {}
+    local lib_result = {}
+
+    if type(results) == "table" and results[1] and type(results[1][1]) == "table" then
+      code_result = results[1][1]
+    end
+    if type(results) == "table" and results[2] and type(results[2][1]) == "table" then
+      lib_result = results[2][1]
+    end
 
     code_context = code_result[1] or ""
     code_metadata = code_result[2] or { mode = mode_info.mode }

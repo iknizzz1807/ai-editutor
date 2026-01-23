@@ -741,34 +741,6 @@ function M.build_context_with_strategy_async(current_file, opts)
   }
 end
 
----Build context with smart backtracking strategy (callback version)
----@param current_file string
----@param callback function Callback(context, metadata)
----@param opts? table {budget?: number, timeout?: number, question_lines?: {min: number, max: number}}
-function M.build_context_with_strategy(current_file, callback, opts)
-  opts = opts or {}
-  local timeout_ms = opts.timeout or 25000
-
-  async.run(function()
-    local context, metadata = async.with_timeout(function()
-      return M.build_context_with_strategy_async(current_file, opts)
-    end, timeout_ms, nil)
-
-    async.scheduler()
-
-    if context == nil then
-      -- Timeout occurred
-      callback("", {
-        mode = "adaptive",
-        error = "strategy_timeout",
-        warning = "Context extraction timed out after " .. timeout_ms .. "ms",
-      })
-    else
-      callback(context, metadata)
-    end
-  end)
-end
-
 ---Get available strategy levels (for debugging/display)
 ---@return table[]
 function M.get_levels()
