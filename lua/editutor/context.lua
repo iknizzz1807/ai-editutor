@@ -171,15 +171,11 @@ function M.build_adaptive_context_async(current_file, opts)
   opts = opts or {}
   local budget = M.get_token_budget()
 
-  -- Wrap the callback-based function
-  local context, metadata = async.await(function(cb)
-    context_strategy.build_context_with_strategy(current_file, function(ctx, meta)
-      cb(ctx, meta)
-    end, {
-      budget = budget,
-      question_lines = opts.question_lines,
-    })
-  end)
+  -- Call async version directly (no nested async.run)
+  local context, metadata = context_strategy.build_context_with_strategy_async(current_file, {
+    budget = budget,
+    question_lines = opts.question_lines,
+  })
 
   -- Add budget info to metadata
   metadata = metadata or {}
