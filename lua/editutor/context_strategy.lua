@@ -301,30 +301,19 @@ local function get_lsp_definitions_async(bufnr, opts)
   return definitions
 end
 
----Get LSP definitions with definition-only extraction (callback version)
----@param bufnr number
----@param callback function
----@param opts table
-local function get_lsp_definitions(bufnr, callback, opts)
-  async.run(function()
-    local definitions = get_lsp_definitions_async(bufnr, opts)
-    async.scheduler()
-    callback(definitions)
-  end)
-end
-
 -- =============================================================================
 -- Context Building
 -- =============================================================================
 
----Build context for a specific strategy level
+---Build context for a specific strategy level (async version)
+---Must be called from within an async context
 ---@param current_file string
 ---@param project_root string
 ---@param level table Strategy level configuration
 ---@param budget number Token budget
 ---@param question_lines? {min: number, max: number} Question line range for truncation
----@param callback function Callback(context, tokens, metadata)
-local function build_context_for_level(current_file, project_root, level, budget, question_lines, callback)
+---@return string context, number tokens, table metadata
+local function build_context_for_level(current_file, project_root, level, budget, question_lines)
   local parts = {}
   local total_tokens = 0
   local files_metadata = {}
@@ -445,12 +434,11 @@ local function build_context_for_level(current_file, project_root, level, budget
 
     -- If still over budget after truncation, return what we have
     if total_tokens > budget then
-      callback(table.concat(parts, "\n"), total_tokens, {
+      return table.concat(parts, "\n"), total_tokens, {
         level = level.name,
         files = files_metadata,
         warning = "current_file_exceeds_budget_after_truncation",
-      })
-      return
+      }
     end
   end
 
@@ -558,112 +546,79 @@ local function build_context_for_level(current_file, project_root, level, budget
 
   -- 4. LSP definitions (if enabled and budget allows)
   local lsp_budget = remaining_budget - import_tokens
+  local lsp_count = 0
 
   if level.lsp and lsp_budget > 500 then
     local bufnr = vim.api.nvim_get_current_buf()
 
-    get_lsp_definitions(bufnr, function(definitions)
-      local lsp_parts = {}
-      local lsp_tokens = 0
-      local lsp_count = 0
-
-      for _, def in ipairs(definitions) do
-        if not included_files[def.filepath] then
-          if lsp_tokens + def.tokens <= lsp_budget then
-            included_files[def.filepath] = true
-
-            local file_ext = def.filepath:match("%.([^.]+)$") or ""
-            local file_lang = project_scanner.get_language_for_ext(file_ext)
-            local file_display = get_display_path(def.filepath, project_root)
-
-            local mode_str = def.metadata and def.metadata.mode or "definition"
-            table.insert(
-              lsp_parts,
-              string.format("// Definition: %s in %s (%s)", def.name, file_display, mode_str)
-            )
-            table.insert(lsp_parts, "```" .. file_lang)
-            table.insert(lsp_parts, def.content)
-            table.insert(lsp_parts, "```")
-            table.insert(lsp_parts, "")
-
-            lsp_tokens = lsp_tokens + def.tokens
-            lsp_count = lsp_count + 1
-
-            table.insert(files_metadata, {
-              path = file_display,
-              tokens = def.tokens,
-              source = "lsp",
-              symbol = def.name,
-              mode = mode_str,
-            })
-          end
-        end
-      end
-
-      if #lsp_parts > 0 then
-        table.insert(parts, string.format("=== LSP DEFINITIONS (%d symbols) ===", lsp_count))
-        table.insert(parts, "")
-        for _, part in ipairs(lsp_parts) do
-          table.insert(parts, part)
-        end
-      end
-
-      total_tokens = total_tokens + lsp_tokens
-
-      -- Add project tree at the end
-      table.insert(parts, "=== PROJECT STRUCTURE ===")
-      table.insert(parts, "```")
-      table.insert(parts, tree_content)
-      table.insert(parts, "```")
-
-      total_tokens = total_tokens + tree_tokens
-
-      callback(table.concat(parts, "\n"), total_tokens, {
-        level = level.name,
-        level_description = level.description,
-        files = files_metadata,
-        import_count = #import_files,
-        lsp_count = lsp_count,
-        tree_tokens = tree_tokens,
-      })
-    end, {
+    -- Call async version directly (no nested async.run)
+    local definitions = get_lsp_definitions_async(bufnr, {
       max_files = level.max_lsp_files or 30,
     })
-  else
-    -- No LSP, finalize now
-    table.insert(parts, "=== PROJECT STRUCTURE ===")
-    table.insert(parts, "```")
-    table.insert(parts, tree_content)
-    table.insert(parts, "```")
 
-    total_tokens = total_tokens + tree_tokens
+    local lsp_parts = {}
+    local lsp_tokens = 0
 
-    callback(table.concat(parts, "\n"), total_tokens, {
-      level = level.name,
-      level_description = level.description,
-      files = files_metadata,
-      import_count = #import_files,
-      lsp_count = 0,
-      lsp_skipped = level.lsp and "budget_insufficient" or "disabled_by_level",
-      tree_tokens = tree_tokens,
-    })
+    for _, def in ipairs(definitions or {}) do
+      if not included_files[def.filepath] then
+        if lsp_tokens + def.tokens <= lsp_budget then
+          included_files[def.filepath] = true
+
+          local file_ext = def.filepath:match("%.([^.]+)$") or ""
+          local file_lang = project_scanner.get_language_for_ext(file_ext)
+          local file_display = get_display_path(def.filepath, project_root)
+
+          local mode_str = def.metadata and def.metadata.mode or "definition"
+          table.insert(
+            lsp_parts,
+            string.format("// Definition: %s in %s (%s)", def.name, file_display, mode_str)
+          )
+          table.insert(lsp_parts, "```" .. file_lang)
+          table.insert(lsp_parts, def.content)
+          table.insert(lsp_parts, "```")
+          table.insert(lsp_parts, "")
+
+          lsp_tokens = lsp_tokens + def.tokens
+          lsp_count = lsp_count + 1
+
+          table.insert(files_metadata, {
+            path = file_display,
+            tokens = def.tokens,
+            source = "lsp",
+            symbol = def.name,
+            mode = mode_str,
+          })
+        end
+      end
+    end
+
+    if #lsp_parts > 0 then
+      table.insert(parts, string.format("=== LSP DEFINITIONS (%d symbols) ===", lsp_count))
+      table.insert(parts, "")
+      for _, part in ipairs(lsp_parts) do
+        table.insert(parts, part)
+      end
+    end
+
+    total_tokens = total_tokens + lsp_tokens
   end
-end
 
----Async wrapper for build_context_for_level
----Must be called from within an async context
----@param current_file string
----@param project_root string
----@param level table
----@param budget number
----@param question_lines? table
----@return string context, number tokens, table metadata
-local function build_context_for_level_async(current_file, project_root, level, budget, question_lines)
-  return async.await(function(cb)
-    build_context_for_level(current_file, project_root, level, budget, question_lines, function(ctx, tokens, meta)
-      cb(ctx, tokens, meta)
-    end)
-  end)
+  -- Add project tree at the end
+  table.insert(parts, "=== PROJECT STRUCTURE ===")
+  table.insert(parts, "```")
+  table.insert(parts, tree_content)
+  table.insert(parts, "```")
+
+  total_tokens = total_tokens + tree_tokens
+
+  return table.concat(parts, "\n"), total_tokens, {
+    level = level.name,
+    level_description = level.description,
+    files = files_metadata,
+    import_count = #import_files,
+    lsp_count = lsp_count,
+    tree_tokens = tree_tokens,
+  }
 end
 
 -- =============================================================================
@@ -687,7 +642,7 @@ function M.build_context_with_strategy_async(current_file, opts)
 
   -- Try levels sequentially until one fits budget
   for level_index, level in ipairs(M.LEVELS) do
-    local context, tokens, metadata = build_context_for_level_async(
+    local context, tokens, metadata = build_context_for_level(
       current_file, project_root, level, budget, question_lines
     )
 
@@ -700,7 +655,7 @@ function M.build_context_with_strategy_async(current_file, opts)
 
     best = attempts[#attempts]
 
-    if tokens <= budget then
+    if tokens and tokens <= budget then
       -- Success! This level fits
       return context, {
         mode = "adaptive",

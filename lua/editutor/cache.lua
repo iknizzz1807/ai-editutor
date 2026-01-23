@@ -182,13 +182,6 @@ function M.project_key(project_root)
   return "project:" .. project_root
 end
 
----Cache key for LSP definitions
----@param filepath string
----@return string key
-function M.lsp_key(filepath)
-  return "lsp:" .. filepath
-end
-
 ---Get or compute project scan
 ---@param project_root string
 ---@param compute function
@@ -208,28 +201,6 @@ function M.get_project(project_root, compute)
   })
 
   return value
-end
-
----Get or compute LSP definitions (async)
----@param filepath string
----@param compute function Async compute(callback)
----@param callback function Result callback
-function M.get_lsp_async(filepath, compute, callback)
-  local key = M.lsp_key(filepath)
-  local value, hit = M.get(key)
-
-  if hit then
-    callback(value)
-    return
-  end
-
-  compute(function(computed_value)
-    M.set(key, computed_value, {
-      ttl = M.config.lsp_ttl,
-      tags = { "lsp", "file:" .. filepath },
-    })
-    callback(computed_value)
-  end)
 end
 
 return M
