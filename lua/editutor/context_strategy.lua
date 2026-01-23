@@ -315,8 +315,9 @@ end
 ---@param project_root string
 ---@param level table Strategy level configuration
 ---@param budget number Token budget
+---@param question_lines? {min: number, max: number} Question line range for truncation
 ---@param callback function Callback(context, tokens, metadata)
-local function build_context_for_level(current_file, project_root, level, budget, callback)
+local function build_context_for_level(current_file, project_root, level, budget, question_lines, callback)
   local parts = {}
   local total_tokens = 0
   local files_metadata = {}
@@ -351,14 +352,99 @@ local function build_context_for_level(current_file, project_root, level, budget
     mode = "full",
   })
 
-  -- Check if current file alone exceeds budget
+  -- Check if current file alone exceeds budget - truncate if needed
   if total_tokens > budget then
-    callback(table.concat(parts, "\n"), total_tokens, {
-      level = level.name,
-      files = files_metadata,
-      warning = "current_file_exceeds_budget",
-    })
-    return
+    -- Truncate large file: keep imports (first 30 lines) + 50 lines before/after question
+    local content_lines = vim.split(current_content, "\n")
+    local total_lines = #content_lines
+    local truncated_lines = {}
+    local truncated = false
+
+    -- Determine which lines to keep
+    local keep_start = 1
+    local keep_end = math.min(30, total_lines) -- Always keep first 30 lines (imports)
+
+    if question_lines then
+      -- Keep 50 lines before and after the question range
+      local q_start = math.max(1, question_lines.min - 50)
+      local q_end = math.min(total_lines, question_lines.max + 50)
+
+      if q_start > keep_end + 1 then
+        -- Gap between imports and question area - need to truncate
+        for i = keep_start, keep_end do
+          table.insert(truncated_lines, content_lines[i])
+        end
+        table.insert(truncated_lines, "")
+        table.insert(truncated_lines, string.format("// ... [lines %d-%d truncated] ...", keep_end + 1, q_start - 1))
+        table.insert(truncated_lines, "")
+        for i = q_start, q_end do
+          table.insert(truncated_lines, content_lines[i])
+        end
+        if q_end < total_lines then
+          table.insert(truncated_lines, "")
+          table.insert(truncated_lines, string.format("// ... [lines %d-%d truncated] ...", q_end + 1, total_lines))
+        end
+        truncated = true
+      else
+        -- Question is near the top, just keep from start to q_end + 50
+        keep_end = math.min(total_lines, question_lines.max + 50)
+        for i = 1, keep_end do
+          table.insert(truncated_lines, content_lines[i])
+        end
+        if keep_end < total_lines then
+          table.insert(truncated_lines, "")
+          table.insert(truncated_lines, string.format("// ... [lines %d-%d truncated] ...", keep_end + 1, total_lines))
+          truncated = true
+        end
+      end
+    else
+      -- No question lines info, just keep first portion that fits budget
+      local target_lines = math.floor(total_lines * (budget / total_tokens) * 0.8)
+      target_lines = math.max(100, target_lines) -- At least 100 lines
+      for i = 1, math.min(target_lines, total_lines) do
+        table.insert(truncated_lines, content_lines[i])
+      end
+      if target_lines < total_lines then
+        table.insert(truncated_lines, "")
+        table.insert(truncated_lines, string.format("// ... [lines %d-%d truncated to fit budget] ...", target_lines + 1, total_lines))
+        truncated = true
+      end
+    end
+
+    if truncated then
+      -- Rebuild parts with truncated content
+      current_content = table.concat(truncated_lines, "\n")
+      current_tokens = project_scanner.estimate_tokens(current_content)
+      current_lines = #truncated_lines
+
+      parts = {}
+      table.insert(parts, "=== CURRENT FILE (contains questions) ===")
+      table.insert(parts, string.format("// File: %s (truncated from %d lines)", display_current, total_lines))
+      table.insert(parts, "```" .. language)
+      table.insert(parts, current_content)
+      table.insert(parts, "```")
+      table.insert(parts, "")
+
+      total_tokens = current_tokens
+      files_metadata = {{
+        path = display_current,
+        tokens = current_tokens,
+        lines = current_lines,
+        original_lines = total_lines,
+        source = "current",
+        mode = "truncated",
+      }}
+    end
+
+    -- If still over budget after truncation, return what we have
+    if total_tokens > budget then
+      callback(table.concat(parts, "\n"), total_tokens, {
+        level = level.name,
+        files = files_metadata,
+        warning = "current_file_exceeds_budget_after_truncation",
+      })
+      return
+    end
   end
 
   -- 2. Project tree (reserve ~5% of budget, max 1000 tokens)
@@ -564,11 +650,12 @@ end
 ---Build context with smart backtracking strategy
 ---@param current_file string
 ---@param callback function Callback(context, metadata)
----@param opts? table {budget?: number, timeout?: number}
+---@param opts? table {budget?: number, timeout?: number, question_lines?: {min: number, max: number}}
 function M.build_context_with_strategy(current_file, callback, opts)
   opts = opts or {}
   local budget = opts.budget or config.options.context and config.options.context.token_budget or M.DEFAULT_BUDGET
   local timeout_ms = opts.timeout or 25000 -- 25 second overall timeout
+  local question_lines = opts.question_lines -- {min: number, max: number} or nil
 
   local project_root = project_scanner.get_project_root(current_file)
   local level_index = 1
@@ -638,7 +725,7 @@ function M.build_context_with_strategy(current_file, callback, opts)
 
     local level = M.LEVELS[level_index]
 
-    build_context_for_level(current_file, project_root, level, budget, function(context, tokens, metadata)
+    build_context_for_level(current_file, project_root, level, budget, question_lines, function(context, tokens, metadata)
       if callback_called then return end
 
       table.insert(attempts, {

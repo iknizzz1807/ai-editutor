@@ -163,7 +163,9 @@ end
 ---Build adaptive context for large projects using smart backtracking strategy
 ---@param current_file string Path to current file
 ---@param callback function Callback(formatted_context, metadata)
-function M.build_adaptive_context(current_file, callback)
+---@param opts? table {question_lines?: {min: number, max: number}}
+function M.build_adaptive_context(current_file, callback, opts)
+  opts = opts or {}
   local budget = M.get_token_budget()
 
   context_strategy.build_context_with_strategy(current_file, function(context, metadata)
@@ -183,6 +185,7 @@ function M.build_adaptive_context(current_file, callback)
     end
   end, {
     budget = budget,
+    question_lines = opts.question_lines,
   })
 end
 
@@ -297,11 +300,32 @@ function M.extract(callback, opts)
     -- Merge metadata
     local final_metadata = code_metadata or {}
     final_metadata.library_info = library_metadata or {}
+
+    -- Fix: Get total_tokens from token_usage if not set directly
+    local code_tokens = final_metadata.total_tokens
+      or (final_metadata.token_usage and final_metadata.token_usage.total)
+      or 0
+    final_metadata.total_tokens = code_tokens
+
     if library_metadata and library_metadata.tokens then
-      final_metadata.total_tokens = (final_metadata.total_tokens or 0) + library_metadata.tokens
+      final_metadata.total_tokens = final_metadata.total_tokens + library_metadata.tokens
     end
 
     callback(final_context, final_metadata)
+  end
+
+  -- Compute question line range for truncation if needed
+  local question_lines = nil
+  if questions and #questions > 0 then
+    local min_line = math.huge
+    local max_line = 0
+    for _, q in ipairs(questions) do
+      if q.block_start then min_line = math.min(min_line, q.block_start) end
+      if q.block_end then max_line = math.max(max_line, q.block_end) end
+    end
+    if min_line < math.huge and max_line > 0 then
+      question_lines = { min = min_line, max = max_line }
+    end
   end
 
   -- Task 1: Extract code context
@@ -316,7 +340,7 @@ function M.extract(callback, opts)
       code_context = formatted
       code_metadata = metadata
       check_complete()
-    end)
+    end, { question_lines = question_lines })
   end
 
   -- Task 2: Extract library info (parallel)
