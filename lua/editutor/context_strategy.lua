@@ -633,7 +633,6 @@ end
 function M.build_context_with_strategy_async(current_file, opts)
   opts = opts or {}
   local budget = opts.budget or config.options.context and config.options.context.token_budget or M.DEFAULT_BUDGET
-  local timeout_ms = opts.timeout or 25000
   local question_lines = opts.question_lines
 
   local project_root = project_scanner.get_project_root(current_file)
