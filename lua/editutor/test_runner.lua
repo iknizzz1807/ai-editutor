@@ -135,6 +135,26 @@ local function cleanup_all_buffers()
   return cleaned
 end
 
+local function stop_all_lsp_clients()
+  log("  [CLEANUP] Stopping all LSP clients...", "DEBUG")
+  local clients = vim.lsp.get_clients()
+  local stopped = 0
+  for _, client in ipairs(clients) do
+    pcall(function()
+      client.stop()
+      stopped = stopped + 1
+    end)
+  end
+  -- Give LSP time to shutdown
+  vim.wait(500, function() return false end)
+  collectgarbage("collect")
+  log(string.format("  [CLEANUP] Stopped %d LSP clients, GC done", stopped), "DEBUG")
+  return stopped
+end
+
+-- Track current repo for cleanup on repo change
+local current_test_repo = nil
+
 -- =============================================================================
 -- Project Structure Capture
 -- =============================================================================
@@ -570,6 +590,9 @@ function M.run(opts)
     log(string.format("Starting from test case #%d", start_index))
   end
 
+  -- Reset repo tracker
+  current_test_repo = nil
+
   local function run_next()
     case_index = case_index + 1
 
@@ -578,13 +601,22 @@ function M.run(opts)
       return
     end
 
+    local tc = cases_to_run[case_index]
+
+    -- Stop LSP clients when switching to a different repo (prevents memory buildup)
+    if current_test_repo and current_test_repo ~= tc.repo then
+      log(string.format("  [REPO CHANGE] %s -> %s", current_test_repo, tc.repo), "DEBUG")
+      cleanup_all_buffers()
+      stop_all_lsp_clients()
+    end
+    current_test_repo = tc.repo
+
     -- Periodic cleanup to prevent memory buildup
     if M.config.cleanup_interval > 0 and case_index > start_index and
        (case_index - start_index) % M.config.cleanup_interval == 0 then
       cleanup_all_buffers()
     end
 
-    local tc = cases_to_run[case_index]
     log(string.format("[%d/%d] %s/%s (L%d-%d)",
       case_index, #cases_to_run, tc.repo, tc.file, tc.lines[1], tc.lines[2]))
 
