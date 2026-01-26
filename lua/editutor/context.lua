@@ -50,10 +50,14 @@ local SEVERITY_NAMES = {
 }
 
 ---Extract LSP diagnostics for current buffer
+---Prioritizes diagnostics near the question area
 ---@param bufnr number Buffer number
+---@param question_lines? {min: number, max: number} Question line range (1-indexed)
+---@param max_tokens? number Maximum tokens for diagnostics (default: 2000)
 ---@return string|nil formatted_diagnostics
 ---@return table metadata
-function M.get_buffer_diagnostics(bufnr)
+function M.get_buffer_diagnostics(bufnr, question_lines, max_tokens)
+  max_tokens = max_tokens or 2000 -- Default 2k tokens for diagnostics
   local diagnostics = vim.diagnostic.get(bufnr)
 
   if #diagnostics == 0 then
@@ -69,33 +73,79 @@ function M.get_buffer_diagnostics(bufnr)
     return nil, { count = 0, total = #diagnostics, filtered_out = #diagnostics }
   end
 
-  -- Sort by severity (errors first) then by line
+  -- Calculate proximity to question for each diagnostic
+  local q_center = nil
+  if question_lines then
+    q_center = (question_lines.min + question_lines.max) / 2
+  end
+
+  -- Sort by: proximity to question (if available), then severity, then line
   table.sort(filtered, function(a, b)
+    if q_center then
+      local dist_a = math.abs(a.lnum + 1 - q_center)
+      local dist_b = math.abs(b.lnum + 1 - q_center)
+      -- Prioritize diagnostics within ±50 lines of question
+      local near_a = dist_a <= 50
+      local near_b = dist_b <= 50
+      if near_a ~= near_b then
+        return near_a -- near ones first
+      end
+      if near_a and near_b and dist_a ~= dist_b then
+        return dist_a < dist_b -- closer ones first among near
+      end
+    end
+    -- Then by severity (errors first)
     if a.severity ~= b.severity then
       return a.severity < b.severity
     end
     return a.lnum < b.lnum
   end)
 
+  -- Add diagnostics one by one until budget exhausted
   local parts = {}
-  table.insert(parts, string.format("=== LSP DIAGNOSTICS (%d issues) ===", #filtered))
-  table.insert(parts, "")
+  local included_count = 0
 
   for _, d in ipairs(filtered) do
     local sev = SEVERITY_NAMES[d.severity] or "UNKNOWN"
     local line = d.lnum + 1 -- 0-indexed to 1-indexed
     local msg = d.message:gsub("\n", " "):gsub("%s+", " ") -- Normalize whitespace
     local source = d.source and (" (" .. d.source .. ")") or ""
-    table.insert(parts, string.format("[%s] Line %d%s: %s", sev, line, source, msg))
+    local diag_line = string.format("[%s] Line %d%s: %s", sev, line, source, msg)
+
+    -- Check budget before adding
+    local test_parts = vim.list_slice(parts, 1)
+    table.insert(test_parts, diag_line)
+    local header = string.format("=== LSP DIAGNOSTICS (%d issues) ===\n\n", #test_parts)
+    local test_tokens = project_scanner.estimate_tokens(header .. table.concat(test_parts, "\n"))
+
+    if test_tokens > max_tokens then
+      break -- Budget exhausted
+    end
+
+    table.insert(parts, diag_line)
+    included_count = included_count + 1
   end
 
-  local formatted = table.concat(parts, "\n")
+  if #parts == 0 then
+    return nil, { count = 0, total = #diagnostics, filtered_out = #diagnostics }
+  end
+
+  -- Build final output
+  local header
+  if included_count < #filtered then
+    header = string.format("=== LSP DIAGNOSTICS (%d of %d issues) ===", included_count, #filtered)
+  else
+    header = string.format("=== LSP DIAGNOSTICS (%d issues) ===", included_count)
+  end
+
+  local formatted = header .. "\n\n" .. table.concat(parts, "\n")
   local tokens = project_scanner.estimate_tokens(formatted)
 
   return formatted, {
-    count = #filtered,
+    count = included_count,
     total = #diagnostics,
     tokens = tokens,
+    original_filtered = #filtered,
   }
 end
 
@@ -401,8 +451,8 @@ function M.extract_async(opts)
     final_context = final_context .. "\n\n" .. library_info
   end
 
-  -- Add LSP diagnostics
-  local diagnostics_text, diagnostics_metadata = M.get_buffer_diagnostics(bufnr)
+  -- Add LSP diagnostics (prioritize near question, cap at 2k tokens)
+  local diagnostics_text, diagnostics_metadata = M.get_buffer_diagnostics(bufnr, question_lines)
   if diagnostics_text then
     final_context = final_context .. "\n\n" .. diagnostics_text
   end
