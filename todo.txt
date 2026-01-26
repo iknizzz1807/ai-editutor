@@ -1,2 +1,0 @@
-- LSP has error: give that error to LLM as well
-- Project todo thingy

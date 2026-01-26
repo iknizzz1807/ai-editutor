@@ -40,21 +40,29 @@ end
 ---Load entries from a specific date file
 ---@param date string Date in YYYY-MM-DD format
 ---@return table[] entries
+---@return string|nil error Error message if file was corrupt
 local function load_date_entries(date)
   local filepath = get_date_file(date)
 
   if vim.fn.filereadable(filepath) ~= 1 then
-    return {}
+    return {}, nil -- File doesn't exist = new day, no error
   end
 
   local content = vim.fn.readfile(filepath)
   local ok, data = pcall(vim.json.decode, table.concat(content, "\n"))
 
   if ok and type(data) == "table" then
-    return data
+    return data, nil
   end
 
-  return {}
+  -- JSON corrupt → backup the file to prevent data loss
+  local backup_path = filepath .. ".corrupt." .. os.time()
+  vim.fn.rename(filepath, backup_path)
+
+  return {}, string.format(
+    "Knowledge file corrupt, backed up to: %s",
+    vim.fn.fnamemodify(backup_path, ":t")
+  )
 end
 
 ---Save entries to a specific date file
@@ -116,7 +124,12 @@ end
 ---@return boolean success
 function M.save(entry)
   local today = os.date("%Y-%m-%d")
-  local entries = load_date_entries(today)
+  local entries, load_err = load_date_entries(today)
+
+  -- Notify user if existing data was corrupt (but still save new entry)
+  if load_err then
+    vim.notify("[ai-editutor] " .. load_err, vim.log.levels.WARN)
+  end
 
   entry.timestamp = entry.timestamp or os.time()
 
@@ -156,7 +169,7 @@ function M.search(query, opts)
   query = query:lower()
 
   for _, date in ipairs(dates) do
-    local entries = load_date_entries(date)
+    local entries, _ = load_date_entries(date) -- ignore error for bulk ops
 
     for _, entry in ipairs(entries) do
       local match = false
@@ -203,7 +216,7 @@ function M.get_recent(limit)
   local results = {}
 
   for _, date in ipairs(dates) do
-    local entries = load_date_entries(date)
+    local entries, _ = load_date_entries(date) -- ignore error for bulk ops
 
     -- Add entries in reverse order (newest first)
     for i = #entries, 1, -1 do
@@ -221,7 +234,11 @@ end
 ---@param date string Date in YYYY-MM-DD format
 ---@return KnowledgeEntry[] entries
 function M.get_by_date(date)
-  return load_date_entries(date)
+  local entries, err = load_date_entries(date)
+  if err then
+    vim.notify("[ai-editutor] " .. err, vim.log.levels.WARN)
+  end
+  return entries
 end
 
 ---Get entry by ID
@@ -234,7 +251,11 @@ function M.get(id)
     return nil
   end
 
-  local entries = load_date_entries(date)
+  local entries, err = load_date_entries(date)
+  if err then
+    vim.notify("[ai-editutor] " .. err, vim.log.levels.WARN)
+  end
+
   for _, entry in ipairs(entries) do
     if entry.id == id then
       return entry
@@ -254,7 +275,11 @@ function M.delete(id)
     return false
   end
 
-  local entries = load_date_entries(date)
+  local entries, err = load_date_entries(date)
+  if err then
+    vim.notify("[ai-editutor] " .. err, vim.log.levels.WARN)
+  end
+
   for i, entry in ipairs(entries) do
     if entry.id == id then
       table.remove(entries, i)
@@ -280,7 +305,7 @@ function M.get_stats()
   }
 
   for _, date in ipairs(dates) do
-    local entries = load_date_entries(date)
+    local entries, _ = load_date_entries(date) -- ignore error for bulk ops
     stats.by_date[date] = #entries
     stats.total = stats.total + #entries
 
@@ -327,7 +352,7 @@ function M.export_markdown(filepath, opts)
   local total_entries = 0
 
   for _, date in ipairs(dates) do
-    local entries = load_date_entries(date)
+    local entries, _ = load_date_entries(date) -- ignore error for bulk ops
 
     if #entries > 0 then
       table.insert(lines, string.format("# %s", date))
