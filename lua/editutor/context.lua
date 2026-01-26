@@ -19,6 +19,7 @@ local async = require("editutor.async")
 
 local TOKEN_BUDGET = 25000 -- 25k tokens max
 local LIBRARY_INFO_BUDGET = 2000 -- 2k tokens for library API info
+local DIAGNOSTICS_BUDGET = 2000 -- 2k tokens for LSP diagnostics
 
 ---Get token budget from config or default
 ---@return number
@@ -30,6 +31,12 @@ end
 ---@return number
 function M.get_library_info_budget()
   return config.options.context and config.options.context.library_info_budget or LIBRARY_INFO_BUDGET
+end
+
+---Get diagnostics budget from config or default
+---@return number
+function M.get_diagnostics_budget()
+  return config.options.context and config.options.context.diagnostics_budget or DIAGNOSTICS_BUDGET
 end
 
 ---Get library scan radius from config or default
@@ -57,7 +64,7 @@ local SEVERITY_NAMES = {
 ---@return string|nil formatted_diagnostics
 ---@return table metadata
 function M.get_buffer_diagnostics(bufnr, question_lines, max_tokens)
-  max_tokens = max_tokens or 2000 -- Default 2k tokens for diagnostics
+  max_tokens = max_tokens or M.get_diagnostics_budget()
   local diagnostics = vim.diagnostic.get(bufnr)
 
   if #diagnostics == 0 then
@@ -280,8 +287,8 @@ end
 ---@return string|nil context, table metadata
 function M.build_adaptive_context_async(current_file, opts)
   opts = opts or {}
-  -- Reserve space for library info (added after strategy returns)
-  local code_budget = M.get_token_budget() - M.get_library_info_budget()
+  -- Reserve space for library info and diagnostics (added after strategy returns)
+  local code_budget = M.get_token_budget() - M.get_library_info_budget() - M.get_diagnostics_budget()
 
   -- Call async version directly (no nested async.run)
   local context, metadata = context_strategy.build_context_with_strategy_async(current_file, {
