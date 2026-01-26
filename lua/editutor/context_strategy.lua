@@ -320,6 +320,10 @@ local function build_context_for_level(current_file, project_root, level, budget
 
   local display_current = get_display_path(current_file, project_root)
 
+  -- Reserve tree budget upfront (used for truncation check)
+  local tree_budget = math.min(budget * 0.05, 1000)
+  local effective_budget = budget - tree_budget
+
   -- 1. Current file (always full)
   local current_content, current_lines = read_file(current_file)
   if not current_content then
@@ -348,8 +352,8 @@ local function build_context_for_level(current_file, project_root, level, budget
     mode = "full",
   })
 
-  -- Check if current file alone exceeds budget - truncate if needed
-  if total_tokens > budget then
+  -- Check if current file alone exceeds effective budget (budget minus tree overhead)
+  if total_tokens > effective_budget then
     -- Truncate large file: keep imports (first 30 lines) + 50 lines before/after question
     local content_lines = vim.split(current_content, "\n")
     local total_lines = #content_lines
@@ -395,7 +399,7 @@ local function build_context_for_level(current_file, project_root, level, budget
       end
     else
       -- No question lines info, just keep first portion that fits budget
-      local target_lines = math.floor(total_lines * (budget / total_tokens) * 0.8)
+      local target_lines = math.floor(total_lines * (effective_budget / total_tokens) * 0.8)
       target_lines = math.max(100, target_lines) -- At least 100 lines
       for i = 1, math.min(target_lines, total_lines) do
         table.insert(truncated_lines, content_lines[i])
@@ -432,8 +436,8 @@ local function build_context_for_level(current_file, project_root, level, budget
       }}
     end
 
-    -- If still over budget after truncation, return what we have
-    if total_tokens > budget then
+    -- If still over effective budget after truncation, return what we have
+    if total_tokens > effective_budget then
       return table.concat(parts, "\n"), total_tokens, {
         level = level.name,
         files = files_metadata,
@@ -442,8 +446,7 @@ local function build_context_for_level(current_file, project_root, level, budget
     end
   end
 
-  -- 2. Project tree (reserve ~5% of budget, max 1000 tokens)
-  local tree_budget = math.min(budget * 0.05, 1000)
+  -- 2. Project tree (tree_budget already reserved at top)
   local scan_result = cache.get_project(project_root, function()
     return project_scanner.scan_project({ root = project_root })
   end)
