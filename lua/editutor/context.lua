@@ -230,17 +230,19 @@ end
 ---@return string|nil context, table metadata
 function M.build_adaptive_context_async(current_file, opts)
   opts = opts or {}
-  local budget = M.get_token_budget()
+  -- Reserve space for library info (added after strategy returns)
+  local code_budget = M.get_token_budget() - M.get_library_info_budget()
 
   -- Call async version directly (no nested async.run)
   local context, metadata = context_strategy.build_context_with_strategy_async(current_file, {
-    budget = budget,
+    budget = code_budget,
     question_lines = opts.question_lines,
   })
 
-  -- Add budget info to metadata
+  -- Add budget info to metadata (report total budget, not just code budget)
   metadata = metadata or {}
-  metadata.budget = budget
+  metadata.budget = M.get_token_budget()
+  metadata.code_budget = code_budget
 
   if context then
     return context, metadata
@@ -248,7 +250,7 @@ function M.build_adaptive_context_async(current_file, opts)
     return nil, {
       mode = "adaptive",
       error = "strategy_failed",
-      budget = budget,
+      budget = M.get_token_budget(),
       details = metadata,
     }
   end
