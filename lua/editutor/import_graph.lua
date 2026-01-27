@@ -102,6 +102,12 @@ local function get_import_patterns()
       "use%s+([%w_.]+)",
       "require%s+([%w_.]+)",
     },
+
+    -- Zig
+    zig = {
+      -- @import("std"), @import("file.zig"), @import("path/to/file.zig")
+      "@import%s*%(%s*\"([^\"]+)\"%s*%)",
+    },
   }
 end
 
@@ -135,6 +141,7 @@ M.EXT_TO_LANG = {
   swift = "swift",
   ex = "elixir",
   exs = "elixir",
+  zig = "zig",
 }
 
 -- =============================================================================
@@ -276,6 +283,11 @@ function M.is_library_import(import_path, lang)
     if import_path:match("^std::") or import_path:match("^core::") or import_path:match("^alloc::") then
       return true
     end
+  elseif lang == "zig" then
+    -- std is Zig standard library
+    if import_path == "std" then
+      return true
+    end
   end
 
   return false
@@ -309,6 +321,8 @@ function M.resolve_import(import_path, source_file, project_root, lang)
     resolved = M._resolve_rust_import(import_path, source_dir, project_root)
   elseif lang == "c" or lang == "cpp" then
     resolved = M._resolve_c_import(import_path, source_dir, project_root)
+  elseif lang == "zig" then
+    resolved = M._resolve_zig_import(import_path, source_dir, project_root)
   else
     -- Generic: try relative resolution
     resolved = M._resolve_generic_import(import_path, source_dir, project_root)
@@ -499,6 +513,37 @@ function M._resolve_generic_import(import_path, source_dir, project_root)
       return path
     end
   end
+  return nil
+end
+
+---Resolve Zig import
+---@param import_path string The import string (e.g., "file.zig", "path/to/file.zig")
+---@param source_dir string Directory of source file
+---@param project_root string Project root directory
+---@return string|nil Resolved file path
+function M._resolve_zig_import(import_path, source_dir, project_root)
+  -- Zig imports are file paths relative to source or project
+  -- @import("foo.zig") looks for foo.zig relative to current file
+  -- @import("path/to/foo.zig") looks for path/to/foo.zig
+
+  local candidates = {
+    -- Relative to source file
+    source_dir .. "/" .. import_path,
+    -- Relative to project root
+    project_root .. "/" .. import_path,
+    -- In src directory
+    project_root .. "/src/" .. import_path,
+    -- In lib directory
+    project_root .. "/lib/" .. import_path,
+  }
+
+  for _, path in ipairs(candidates) do
+    local normalized = vim.fn.fnamemodify(path, ":p")
+    if vim.fn.filereadable(normalized) == 1 then
+      return normalized
+    end
+  end
+
   return nil
 end
 
