@@ -245,6 +245,26 @@ M.QUERIES = {
     (constructor_declaration
       name: (identifier) @constructor.name) @constructor
   ]],
+
+  -- Zig
+  zig = [[
+    ; Public function declarations
+    (FnProto
+      name: (IDENTIFIER) @func.name) @function
+
+    ; Struct definitions
+    (ContainerDecl) @container
+
+    ; Const declarations (pub const, const)
+    (VarDecl
+      name: (IDENTIFIER) @var.name) @var
+
+    ; Test declarations
+    (TestDecl) @test
+
+    ; Comptime blocks
+    (ComptimeExpr) @comptime
+  ]],
 }
 
 -- Aliases
@@ -276,6 +296,7 @@ M.EXT_TO_LANG = {
   hh = "cpp",
   hxx = "cpp",
   java = "java",
+  zig = "zig",
 }
 
 ---Get tree-sitter language from file extension
@@ -304,6 +325,7 @@ function M.get_parser_lang(lang)
     c = "c",
     cpp = "cpp",
     java = "java",
+    zig = "zig",
   }
   return parser_names[lang] or lang
 end

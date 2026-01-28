@@ -21,6 +21,7 @@ M.COMMENT_STYLES = {
   rust = { line = "//", block = { "/*", "*/" } },
   swift = { line = "//", block = { "/*", "*/" } },
   kotlin = { line = "//", block = { "/*", "*/" } },
+  zig = { line = "//", block = nil },
   scala = { line = "//", block = { "/*", "*/" } },
   dart = { line = "//", block = { "/*", "*/" } },
   php = { line = "//", block = { "/*", "*/" } },

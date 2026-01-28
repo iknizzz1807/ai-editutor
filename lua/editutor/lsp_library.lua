@@ -35,6 +35,9 @@ M.LIBRARY_PATTERNS = {
   "/usr/local/lib",
   "%.luarocks",
   "go/pkg/mod",
+  "%.zig%-cache",
+  "zig%-cache",
+  "%.cache/zig",
 }
 
 -- =============================================================================
