@@ -35,7 +35,7 @@ local M = {}
 M.defaults = {
   -- LLM Provider
   provider = "claude",
-  model = "claude-sonnet-4-20250514",
+   model = "gemini-3-flash-preview",
 
   -- Language for responses: "English", "Vietnamese", "vi", "en"
   language = "English",

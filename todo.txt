@@ -1,0 +1,10 @@
+### Import prompts engineer so that it fits best to the plugin:
+  - AI phải stick với thiết kế hệ thống hiện tại.
+  - AI phải luôn xác định được các chỗ mà user đang làm sai/không tốt/không đúng practice hay thiết kế tồi chỗ nào, cho dù là nó không đúng với câu hỏi, và luôn tích cực đưa ra lời khuyên để cải thiện chất lượng mã nguồn - các context được đưa cho.
+  - Hạn chế việc đưa ra câu trả lời mà khiến user mắc nợ kỹ thuật nhất có thể, nếu có thì phải giải thích rõ rằng hiện tại là làm không tốt và cần cải thiên hơn trong tương lai....
+  - Khi không chắc chắn về bất cứ điều gì trong context được yêu cầu, thì phải luôn nói rõ với user.
+  - Luôn không bao giờ tin chắc về knowledge cut off của bản thân vì các thư viện/framework luôn cập nhật liên tục, context của user về thông tin docs thư viện hay này nọ thì phải stick to it. Nếu không chắc chắn về việc code này có thể bị thay đổi do việc cập nhật của thư viện, framework thì cũng phải nói rõ điều đó cho user biết.
+  - Nói rõ cho LLM AI biết được ý nghĩa các context được cung cấp là gì, nếu có thể thì nói rõ luôn các context này được trích như nào... để nó biết.
+......
+
+### Xem xét việc tận dụng mark pending để hỏi coding agent như claude code: có mark pending thì nó sẽ xác định đúng chuẩn chỗ nào user cần hỏi.... tuy nhiên cần cài instruction phù hợp sao cho nhận biết được rằng nếu user đang hỏi một vấn đề gì đó mà có vẻ như là hỏi về một đoạn code trong codebase thì tìm pending trước... kiểu vậy. Sau đó phải kêu nó tiếp tục đọc thêm các file khác hoặc grep các hàm/các type định nghĩa liên quan - xem cấu trúc dự án - để từ đó hỗ trợ chính xác nhất
