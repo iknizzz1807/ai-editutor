@@ -33,45 +33,45 @@ local M = {}
 ---@field format_error function Parse error
 
 M.defaults = {
-  -- LLM Provider
-  provider = "claude",
-   model = "gemini-3-flash-preview",
+	-- LLM Provider
+	provider = "gemini",
+	model = "gemini-3-flash-preview",
 
-  -- Language for responses: "English", "Vietnamese", "vi", "en"
-  language = "English",
+	-- Language for responses: "English", "Vietnamese", "vi", "en"
+	language = "English",
 
-  -- Context extraction
-  context = {
-    token_budget = 25000, -- 25k tokens max for total context
-    library_info_budget = 2000, -- 2k tokens max for library API info
-    library_scan_radius = 50, -- Lines before/after question to scan for library usage
-  },
+	-- Context extraction
+	context = {
+		token_budget = 25000, -- 25k tokens max for total context
+		library_info_budget = 2000, -- 2k tokens max for library API info
+		library_scan_radius = 50, -- Lines before/after question to scan for library usage
+	},
 
-  -- Keymaps
-  keymaps = {
-    question = "<leader>mq", -- Spawn a new question block
-    ask = "<leader>ma",      -- Process all pending questions
-  },
+	-- Keymaps
+	keymaps = {
+		question = "<leader>mq", -- Spawn a new question block
+		ask = "<leader>ma", -- Process all pending questions
+	},
 
-  -- Custom provider overrides (built-in providers are in provider.lua)
-  -- Users can add custom providers here or override built-in ones
-  providers = {},
+	-- Custom provider overrides (built-in providers are in provider.lua)
+	-- Users can add custom providers here or override built-in ones
+	providers = {},
 }
 
 M.options = vim.deepcopy(M.defaults)
 
 ---@param opts? table User configuration
 function M.setup(opts)
-  opts = opts or {}
-  M.options = vim.tbl_deep_extend("force", M.defaults, opts)
-  -- api_key is stored in M.options.api_key if provided
-  -- provider.lua will check this before using provider's default api_key function
+	opts = opts or {}
+	M.options = vim.tbl_deep_extend("force", M.defaults, opts)
+	-- api_key is stored in M.options.api_key if provided
+	-- provider.lua will check this before using provider's default api_key function
 end
 
 ---@return EditutorProvider|nil
 function M.get_provider()
-  local provider_id = M.options.provider
-  return M.options.providers[provider_id]
+	local provider_id = M.options.provider
+	return M.options.providers[provider_id]
 end
 
 return M
