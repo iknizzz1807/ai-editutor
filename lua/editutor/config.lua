@@ -34,8 +34,8 @@ local M = {}
 
 M.defaults = {
 	-- LLM Provider
-	provider = "gemini",
-	model = "gemini-3-flash-preview",
+	provider = "gemini_proxy",
+	model = "gemini_cli/gemini-3-flash-preview",
 
 	-- Language for responses: "English", "Vietnamese", "vi", "en"
 	language = "English",

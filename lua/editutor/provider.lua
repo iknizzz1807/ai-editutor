@@ -152,6 +152,21 @@ M.PROVIDERS = {
 		end,
 	},
 
+	-- Local Gemini Proxy (OpenAI-compatible)
+	gemini_proxy = {
+		__inherited_from = "openai",
+		name = "gemini_proxy",
+		url = "http://127.0.0.1:7999/v1/chat/completions",
+		model = "gemini_cli/gemini-3-flash-preview",
+		headers = {
+			["content-type"] = "application/json",
+			["Authorization"] = "Bearer ${api_key}",
+		},
+		api_key = function()
+			return os.getenv("GEMINI_PROXY_API_KEY") or "mythong2005"
+		end,
+	},
+
 	-- Google Gemini
 	gemini = {
 		__inherited_from = "BASE_PROVIDER",
@@ -630,13 +645,14 @@ local function parse_sse_line(line, provider_name)
 	-- Extract text based on provider format
 	local text = nil
 
-	-- OpenAI-compatible providers (openai, deepseek, groq, together, openrouter)
+	-- OpenAI-compatible providers (openai, deepseek, groq, together, openrouter, gemini_proxy)
 	local openai_compatible = {
 		openai = true,
 		deepseek = true,
 		groq = true,
 		together = true,
 		openrouter = true,
+		gemini_proxy = true,
 	}
 
 	if provider_name == "claude" then
