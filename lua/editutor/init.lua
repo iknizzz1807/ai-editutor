@@ -37,16 +37,16 @@ M._messages = {
     context_budget_exceeded = "Context exceeds budget (%d > %d tokens)",
   },
   vi = {
-    no_pending = "Khong co cau hoi pending. Dung <leader>mq de tao moi.",
-    spawned = "Da tao question block. Nhap cau hoi, sau do dung <leader>ma de nhan tra loi.",
-    processing = "Dang xu ly %d cau hoi...",
-    gathering_context = "Dang thu thap context...",
-    success = "Da tra loi %d cau hoi",
-    partial_success = "Da tra loi %d/%d cau hoi. %d that bai.",
-    error = "Loi: ",
-    no_response = "Khong nhan duoc phan hoi",
-    invalid_response = "Khong the parse LLM response (thieu [ANSWER:id] markers)",
-    context_budget_exceeded = "Context vuot budget (%d > %d tokens)",
+    no_pending = "Không có câu hỏi pending. Dùng <leader>mq để tạo mới.",
+    spawned = "Đã tạo question block. Nhập câu hỏi, sau đó dùng <leader>ma để nhận trả lời.",
+    processing = "Đang xử lý %d câu hỏi...",
+    gathering_context = "Đang thu thập context...",
+    success = "Đã trả lời %d câu hỏi",
+    partial_success = "Đã trả lời %d/%d câu hỏi. %d thất bại.",
+    error = "Lỗi: ",
+    no_response = "Không nhận được phản hồi",
+    invalid_response = "Không thể parse LLM response (thiếu [ANSWER:id] markers)",
+    context_budget_exceeded = "Context vượt budget (%d > %d tokens)",
   },
 }
 
@@ -130,7 +130,7 @@ function M._create_commands()
   end, {
     nargs = "?",
     complete = function()
-      return { "English", "Vietnamese", "en", "vi" }
+      return { "English", "Tiếng Việt", "Vietnamese", "en", "vi" }
     end,
     desc = "Set response language",
   })
@@ -550,6 +550,10 @@ function M.set_language(lang)
     ["Vietnamese"] = "Vietnamese",
     ["vietnamese"] = "Vietnamese",
     ["vi"] = "Vietnamese",
+    ["Tiếng Việt"] = "Vietnamese",
+    ["tiếng việt"] = "Vietnamese",
+    ["Tieng Viet"] = "Vietnamese",
+    ["tieng viet"] = "Vietnamese",
   }
 
   local normalized = valid[lang]
@@ -559,7 +563,7 @@ function M.set_language(lang)
   end
 
   config.options.language = normalized
-  local msg = normalized == "English" and "Language set to English" or "Da chuyen sang tieng Viet"
+  local msg = normalized == "English" and "Language set to English" or "Đã chuyển sang tiếng Việt"
   vim.notify("[ai-editutor] " .. msg, vim.log.levels.INFO)
 end
 

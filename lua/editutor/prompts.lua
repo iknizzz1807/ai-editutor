@@ -47,12 +47,12 @@ TEACHING STYLE:
 - Include code that actually works
 - No emoji]],
 
-  vi = [[Ban la mentor lap trinh chuyen nghiep giup nguoi hoc trong luc xay dung du an that.
+  vi = [[Bạn là mentor lập trình chuyên nghiệp giúp người học trong lúc xây dựng dự án thực tế.
 
-VAI TRO:
-Tra loi cac cau hoi trong code. Moi cau hoi co ID duy nhat nhu [Q:q_123456].
+VAI TRÒ:
+Trả lời các câu hỏi trong code. Mỗi câu hỏi có ID duy nhất như [Q:q_123456].
 
-RESPONSE FORMAT:
+ĐỊNH DẠNG PHẢN HỒI:
 You MUST wrap each answer with EXACT markers. Do NOT change the format.
 
 For each question, use:
@@ -69,19 +69,19 @@ This is the answer for q_111
 This is the answer for q_222
 [/ANSWER:q_222]
 
-HUONG DAN TRA LOI:
-- Bat dau bang cau tra loi truc tiep (1-2 cau)
-- Giai thich khai niem va ly thuyet nen tang
-- Dua vi du code chay duoc khi can thiet
-- Chia se best practices va cac loi thuong gap
-- De cap cac chu de lien quan de tim hieu them
+HƯỚNG DẪN TRẢ LỜI:
+- Bắt đầu bằng câu trả lời trực tiếp (1-2 câu)
+- Giải thích khái niệm và lý thuyết nền tảng
+- Đưa ví dụ code chạy được khi cần thiết
+- Chia sẻ best practices và các lỗi thường gặp
+- Đề cập các chủ đề liên quan để tìm hiểu thêm
 
-PHONG CACH DAY:
-- Day du va toan dien - KHONG tu dong rut ngan cau tra loi
-- Giai thich nhu senior developer huong dan junior
-- Dung vi du thuc te, de hieu
-- Code phai chay duoc
-- Khong dung emoji]],
+PHONG CÁCH DẠY:
+- Đầy đủ và toàn diện - KHÔNG tự động rút ngắn câu trả lời
+- Giải thích như senior developer hướng dẫn junior
+- Dùng ví dụ thực tế, dễ hiểu
+- Code phải chạy được
+- Không dùng emoji]],
 }
 
 -- =============================================================================
@@ -99,6 +99,8 @@ local function get_lang_key()
     ["Vietnamese"] = "vi",
     ["vietnamese"] = "vi",
     ["vi"] = "vi",
+    ["Tiếng Việt"] = "vi",
+    ["tiếng việt"] = "vi",
     ["Tieng Viet"] = "vi",
     ["tieng viet"] = "vi",
   }
@@ -133,11 +135,11 @@ function M.build_user_prompt(questions, context_formatted, opts)
       line = "line",
     },
     vi = {
-      context = "NGU CANH CODE",
-      questions = "CAU HOI CAN TRA LOI",
-      instruction = "Tra loi moi cau hoi bang markers [ANSWER:id]...[/ANSWER:id].",
-      location = "Vi tri",
-      line = "dong",
+      context = "NGỮ CẢNH CODE",
+      questions = "CÂU HỎI CẦN TRẢ LỜI",
+      instruction = "Trả lời mỗi câu hỏi bằng markers [ANSWER:id]...[/ANSWER:id].",
+      location = "Vị trí",
+      line = "dòng",
     },
   }
   local l = labels[lang] or labels.en
@@ -198,7 +200,7 @@ end
 function M.get_available_languages()
   return {
     { key = "en", name = "English" },
-    { key = "vi", name = "Tieng Viet" },
+    { key = "vi", name = "Tiếng Việt" },
   }
 end
 
