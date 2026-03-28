@@ -13,9 +13,10 @@ CONTENTS                                                    *editutor-contents*
     8. Batch Processing ...................... |editutor-batch|
     9. Context Extraction .................... |editutor-context|
    10. Knowledge Tracking .................... |editutor-knowledge|
-   11. Commands .............................. |editutor-commands|
-   12. Keymaps ............................... |editutor-keymaps|
-   13. API ................................... |editutor-api|
+   11. Code Mode ............................. |editutor-code-mode|
+   12. Commands .............................. |editutor-commands|
+   13. Keymaps ............................... |editutor-keymaps|
+   14. API ................................... |editutor-api|
 
 ==============================================================================
 1. INTRODUCTION                                         *editutor-introduction*
@@ -247,14 +248,57 @@ Commands:
   :EditutorExport [path]  Export to markdown
 
 ==============================================================================
-11. COMMANDS                                                *editutor-commands*
+11. CODE MODE                                          *editutor-code-mode*
+
+Code Mode lets you request AI to write code directly into your file.
+Unlike QA mode (which inserts answers as comments), Code Mode deletes the
+request block and inserts raw code in its place.
+
+Workflow: >
+    1. Press <leader>mc to spawn a code request block
+    2. Describe what code you want
+    3. Press <leader>mx to generate code
+<
+
+Example:
+1. Press <leader>mc: >
+    /* [C:q_1737200000000]
+
+    [PENDING:q_1737200000000]
+    */
+<
+2. Type your request: >
+    /* [C:q_1737200000000]
+    implement a function that validates email with regex
+    [PENDING:q_1737200000000]
+    */
+<
+3. Press <leader>mx. The entire comment block is replaced with code: >
+    function validateEmail(email) {
+      const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      return regex.test(email);
+    }
+<
+
+Code blocks use `[C:id]` markers (vs `[Q:id]` for questions), so both
+modes can coexist in the same file without interference.
+
+Visual Selection:
+  Select code, press <leader>mc to create a code request with the selection
+  as context. The block includes "Modify this code:" with your selection.
+
+Note: Code mode does NOT save to knowledge base (it's code generation,
+not Q&A learning).
+
+==============================================================================
+12. COMMANDS                                                *editutor-commands*
 
 Core Commands:
   :EditutorQuestion       Spawn a new question block
   :EditutorAsk            Process all pending questions in current file
+  :EditutorCode           Spawn a new code request block
+  :EditutorExecute        Execute all pending code requests in current file
   :EditutorPending        Show pending question count
-
-Knowledge Commands:
   :EditutorHistory        Show recent Q&A history
   :EditutorBrowse [date]  Browse by date (tab-complete dates)
   :EditutorExport [path]  Export to markdown
@@ -271,19 +315,22 @@ Other Commands:
   :checkhealth editutor   Check plugin health
 
 ==============================================================================
-12. KEYMAPS                                                  *editutor-keymaps*
+13. KEYMAPS                                                  *editutor-keymaps*
 
 Default keymaps (configurable):
 
   Normal mode:
     <leader>mq    Spawn question block at cursor
     <leader>ma    Process all pending questions
+    <leader>mc    Spawn code request block at cursor
+    <leader>mx    Execute all pending code requests
 
   Visual mode:
     <leader>mq    Spawn question block with selected code
+    <leader>mc    Spawn code request block with selected code
 
 ==============================================================================
-13. API                                                          *editutor-api*
+14. API                                                          *editutor-api*
 
 Main API: >lua
     local editutor = require("editutor")
@@ -292,27 +339,39 @@ Main API: >lua
     editutor.spawn_question()         -- Spawn question block (normal mode)
     editutor.spawn_question_visual()  -- Spawn with visual selection
     editutor.ask()                    -- Process all pending questions
+    editutor.spawn_code()             -- Spawn code request block (normal mode)
+    editutor.spawn_code_visual()      -- Spawn code request with visual selection
+    editutor.execute()                -- Execute all pending code requests
     editutor.show_pending()           -- Show pending count
-    editutor.version()                -- Returns version string ("3.0.0")
+    editutor.version()                -- Returns version string ("3.1.0")
 <
 
 Parser API: >lua
     local parser = require("editutor.parser")
 
-    parser.generate_id()                       -- Generate unique question ID
-    parser.find_pending_questions(bufnr)       -- Find all [PENDING:id] blocks
+    parser.generate_id()                       -- Generate unique block ID
+    parser.find_pending_questions(bufnr)       -- Find all [Q:id] [PENDING:id] blocks
     parser.find_question_by_id(id, bufnr)      -- Find specific question
     parser.count_pending_questions(bufnr)      -- Count pending questions
     parser.has_pending_questions(bufnr)        -- Check if any pending
+    parser.find_pending_code_requests(bufnr)   -- Find all [C:id] [PENDING:id] blocks
+    parser.find_code_request_by_id(id, bufnr)  -- Find specific code request
+    parser.count_pending_code_requests(bufnr)  -- Count pending code requests
+    parser.has_pending_code_requests(bufnr)    -- Check if any pending
     parser.get_comment_style(bufnr)            -- Get comment style for buffer
 <
 
 Comment Writer API: >lua
     local comment_writer = require("editutor.comment_writer")
 
+    -- QA mode
     comment_writer.spawn_question_block(bufnr, selected_code)
     comment_writer.replace_pending_with_response(id, response, bufnr)
     comment_writer.replace_pending_batch(responses, bufnr)
+
+    -- Code mode
+    comment_writer.spawn_code_block(bufnr, selected_code)
+    comment_writer.replace_with_code_batch(responses, bufnr)
 <
 
 Provider API: >lua

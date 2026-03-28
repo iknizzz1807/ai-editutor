@@ -16,6 +16,8 @@ local M = {}
 ---@class EditutorKeymaps
 ---@field question string Spawn a new question block
 ---@field ask string Process all pending questions
+---@field code string Spawn a new code request block
+---@field execute string Execute all pending code requests
 
 ---@class EditutorContextConfig
 ---@field token_budget number Max tokens for context (default 25000)
@@ -51,6 +53,8 @@ M.defaults = {
 	keymaps = {
 		question = "<leader>mq", -- Spawn a new question block
 		ask = "<leader>ma", -- Process all pending questions
+		code = "<leader>mc", -- Spawn a new code request block
+		execute = "<leader>mx", -- Execute all pending code requests
 	},
 
 	-- Custom provider overrides (built-in providers are in provider.lua)
