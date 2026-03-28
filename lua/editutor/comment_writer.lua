@@ -233,6 +233,165 @@ function M._wrap_text(text, max_width)
 end
 
 -- =============================================================================
+-- Code Mode Block Spawning
+-- =============================================================================
+
+---Spawn a new code request block at cursor position
+---@param bufnr? number Buffer number
+---@param selected_code? string Optional code from visual selection
+---@return string id The generated block ID
+---@return number cursor_line Line number where cursor should be placed
+function M.spawn_code_block(bufnr, selected_code)
+	bufnr = bufnr or vim.api.nvim_get_current_buf()
+	local cursor = vim.api.nvim_win_get_cursor(0)
+	local cursor_line = cursor[1]
+	local style = M.get_style(bufnr)
+
+	-- Generate unique ID
+	local id = parser.generate_id()
+
+	-- Get indentation from current line
+	local current_line = vim.api.nvim_buf_get_lines(bufnr, cursor_line - 1, cursor_line, false)[1] or ""
+	local indent = current_line:match("^(%s*)") or ""
+
+	local block_lines = {}
+
+	if style.block then
+		-- Block comment format
+		table.insert(block_lines, "")
+		table.insert(block_lines, indent .. style.block[1] .. " [C:" .. id .. "]")
+
+		-- Add selected code if provided
+		if selected_code and selected_code ~= "" then
+			table.insert(block_lines, indent .. "Modify this code:")
+			table.insert(block_lines, indent .. "```")
+			for line in selected_code:gmatch("[^\n]+") do
+				table.insert(block_lines, indent .. line)
+			end
+			table.insert(block_lines, indent .. "```")
+			table.insert(block_lines, indent .. "")
+		end
+
+		-- Placeholder for user's request
+		table.insert(block_lines, indent .. "")
+
+		-- PENDING marker and close
+		table.insert(block_lines, indent .. "[PENDING:" .. id .. "]")
+		table.insert(block_lines, indent .. style.block[2])
+	else
+		-- Line comment format (for languages without block comments)
+		local prefix = style.line .. " "
+		table.insert(block_lines, "")
+		table.insert(block_lines, indent .. prefix .. "[C:" .. id .. "]")
+
+		-- Add selected code if provided
+		if selected_code and selected_code ~= "" then
+			table.insert(block_lines, indent .. prefix .. "Modify this code:")
+			for line in selected_code:gmatch("[^\n]+") do
+				table.insert(block_lines, indent .. prefix .. "  " .. line)
+			end
+			table.insert(block_lines, indent .. prefix .. "")
+		end
+
+		-- Placeholder for user's request
+		table.insert(block_lines, indent .. prefix .. "")
+
+		-- PENDING marker
+		table.insert(block_lines, indent .. prefix .. "[PENDING:" .. id .. "]")
+	end
+
+	-- Insert block into buffer
+	vim.api.nvim_buf_set_lines(bufnr, cursor_line, cursor_line, false, block_lines)
+
+	-- Calculate line where user should type their request
+	local request_input_line
+	if style.block then
+		request_input_line = cursor_line + #block_lines - 2
+	else
+		request_input_line = cursor_line + #block_lines - 1
+	end
+
+	return id, request_input_line
+end
+
+-- =============================================================================
+-- Code Mode Response Writing
+-- =============================================================================
+
+---Strip markdown code fences from code response if present
+---@param text string Raw code from LLM
+---@return string stripped
+local function strip_code_fences(text)
+	-- Remove leading code fence (```lang or ```)
+	text = text:gsub("^```[%w]*\n", "")
+	-- Remove trailing code fence
+	text = text:gsub("\n```%s*$", "")
+	return text
+end
+
+---Replace multiple pending code requests with generated code
+---Deletes the entire comment block and inserts raw code in its place
+---@param responses table<string, string> Map of id -> code text
+---@param bufnr? number Buffer number
+---@return number success_count
+---@return number fail_count
+function M.replace_with_code_batch(responses, bufnr)
+	bufnr = bufnr or vim.api.nvim_get_current_buf()
+
+	local success_count = 0
+	local fail_count = 0
+
+	-- Find all pending code requests
+	local code_requests = parser.find_pending_code_requests(bufnr)
+
+	-- Sort by block_start descending to avoid line number drift
+	table.sort(code_requests, function(a, b)
+		return a.block_start > b.block_start
+	end)
+
+	for _, block in ipairs(code_requests) do
+		local code = responses[block.id]
+		if code then
+			-- Strip code fences if LLM wrapped code in markdown
+			code = strip_code_fences(code)
+
+			-- Split code into lines
+			local code_lines = {}
+			local has_content = false
+			for line in code:gmatch("[^\n]*") do
+				has_content = true
+				table.insert(code_lines, line)
+			end
+
+			-- Remove trailing empty lines
+			while #code_lines > 0 and code_lines[#code_lines]:match("^%s*$") do
+				table.remove(code_lines)
+			end
+
+			if has_content then
+				-- Apply indentation from original block
+				local indent = block.indent or ""
+				if indent ~= "" then
+					for i, line in ipairs(code_lines) do
+						if line:match("%S") then -- only indent non-blank lines
+							code_lines[i] = indent .. line
+						end
+					end
+				end
+
+				-- Replace entire comment block with raw code
+				vim.api.nvim_buf_set_lines(bufnr, block.block_start - 1, block.block_end, false, code_lines)
+				success_count = success_count + 1
+			else
+				fail_count = fail_count + 1
+			end
+		end
+	end
+
+	return success_count, fail_count
+end
+
+-- =============================================================================
 -- Batch Response Writing
 -- =============================================================================
 

@@ -35,6 +35,12 @@ M._messages = {
     no_response = "No response received",
     invalid_response = "Failed to parse LLM response (missing [ANSWER:id] markers)",
     context_budget_exceeded = "Context exceeds budget (%d > %d tokens)",
+    no_pending_code = "No pending code requests in this file. Use <leader>mc to create one.",
+    code_spawned = "Code block created. Describe what you want, then use <leader>mx to generate.",
+    code_processing = "Processing %d code request(s)...",
+    code_success = "Generated %d code block(s)",
+    code_partial_success = "Generated %d/%d code block(s). %d failed.",
+    invalid_code_response = "Failed to parse LLM response (missing [CODE:id] markers)",
   },
   vi = {
     no_pending = "Không có câu hỏi pending. Dùng <leader>mq để tạo mới.",
@@ -47,6 +53,12 @@ M._messages = {
     no_response = "Không nhận được phản hồi",
     invalid_response = "Không thể parse LLM response (thiếu [ANSWER:id] markers)",
     context_budget_exceeded = "Context vượt budget (%d > %d tokens)",
+    no_pending_code = "Không có code request pending. Dùng <leader>mc để tạo mới.",
+    code_spawned = "Đã tạo code block. Mô tả yêu cầu, sau đó dùng <leader>mx để tạo code.",
+    code_processing = "Đang xử lý %d code request...",
+    code_success = "Đã tạo %d code block",
+    code_partial_success = "Đã tạo %d/%d code block. %d thất bại.",
+    invalid_code_response = "Không thể parse LLM response (thiếu [CODE:id] markers)",
   },
 }
 
@@ -99,6 +111,16 @@ function M._create_commands()
   vim.api.nvim_create_user_command("EditutorAsk", function()
     M.ask()
   end, { desc = "Process all pending questions in current file" })
+
+  -- Spawn code request block
+  vim.api.nvim_create_user_command("EditutorCode", function()
+    M.spawn_code()
+  end, { desc = "Spawn a new code request block" })
+
+  -- Execute pending code requests
+  vim.api.nvim_create_user_command("EditutorExecute", function()
+    M.execute()
+  end, { desc = "Execute all pending code requests in current file" })
 
   -- Show pending count
   vim.api.nvim_create_user_command("EditutorPending", function()
@@ -223,6 +245,31 @@ function M._setup_keymaps()
   if keymaps.ask then
     vim.keymap.set("n", keymaps.ask, M.ask, {
       desc = "ai-editutor: Process pending questions",
+    })
+  end
+
+  -- Spawn code request block (normal mode)
+  if keymaps.code then
+    vim.keymap.set("n", keymaps.code, M.spawn_code, {
+      desc = "ai-editutor: Spawn code request block",
+    })
+
+    -- Visual mode: spawn with selected code
+    vim.keymap.set("v", keymaps.code, function()
+      local esc = vim.api.nvim_replace_termcodes("<Esc>", true, false, true)
+      vim.api.nvim_feedkeys(esc, "nx", false)
+      vim.schedule(function()
+        M.spawn_code_visual()
+      end)
+    end, {
+      desc = "ai-editutor: Spawn code request about selection",
+    })
+  end
+
+  -- Execute pending code requests
+  if keymaps.execute then
+    vim.keymap.set("n", keymaps.execute, M.execute, {
+      desc = "ai-editutor: Execute pending code requests",
     })
   end
 end
@@ -443,6 +490,183 @@ function M._parse_response(response)
 
   -- Fallback: try to find any answer content if markers are malformed
   debug_log.log("No [ANSWER:id] markers found. Raw response: " .. response:sub(1, 300))
+  return nil
+end
+
+-- =============================================================================
+-- Code Mode: Spawn Code Request Block
+-- =============================================================================
+
+---Spawn a new code request block at cursor position
+function M.spawn_code()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local id, cursor_line = comment_writer.spawn_code_block(bufnr)
+
+  vim.api.nvim_win_set_cursor(0, { cursor_line, 0 })
+  vim.cmd("startinsert!")
+
+  vim.notify("[ai-editutor] " .. M._msg("code_spawned"), vim.log.levels.INFO)
+  debug_log.log("Spawned code block: " .. id)
+end
+
+---Spawn code request block with visual selection
+function M.spawn_code_visual()
+  local bufnr = vim.api.nvim_get_current_buf()
+
+  local start_pos = vim.fn.getpos("'<")
+  local end_pos = vim.fn.getpos("'>")
+  local start_line = start_pos[2]
+  local end_line = end_pos[2]
+
+  if start_line == 0 or end_line == 0 or start_line > end_line then
+    vim.notify("[ai-editutor] No visual selection found", vim.log.levels.WARN)
+    return
+  end
+
+  local lines = vim.api.nvim_buf_get_lines(bufnr, start_line - 1, end_line, false)
+  local selected_code = table.concat(lines, "\n")
+
+  local id, cursor_line = comment_writer.spawn_code_block(bufnr, selected_code)
+
+  vim.api.nvim_win_set_cursor(0, { cursor_line, 0 })
+  vim.cmd("startinsert!")
+
+  vim.notify("[ai-editutor] " .. M._msg("code_spawned"), vim.log.levels.INFO)
+  debug_log.log("Spawned code block with selection: " .. id)
+end
+
+-- =============================================================================
+-- Code Mode: Execute Code Requests
+-- =============================================================================
+
+---Execute all pending code requests in current file
+function M.execute()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local code_requests = parser.find_pending_code_requests(bufnr)
+
+  if #code_requests == 0 then
+    vim.notify("[ai-editutor] " .. M._msg("no_pending_code"), vim.log.levels.INFO)
+    return
+  end
+
+  local filepath = vim.api.nvim_buf_get_name(bufnr)
+  local loading_line = code_requests[1] and code_requests[1].block_start and (code_requests[1].block_start - 1) or nil
+
+  loading.start(string.format(M._msg("code_processing"), #code_requests), bufnr, loading_line)
+
+  context.extract(function(full_context, metadata)
+    if not full_context then
+      loading.stop()
+      vim.notify(
+        string.format("[ai-editutor] " .. M._msg("context_budget_exceeded"), metadata.total_tokens, metadata.budget),
+        vim.log.levels.ERROR
+      )
+      return
+    end
+
+    debug_log.log("Code mode - Context: " .. metadata.mode .. ", tokens: " .. (metadata.total_tokens or 0))
+    loading.update(loading.states.connecting)
+    M._process_code_requests(code_requests, filepath, bufnr, full_context, metadata)
+  end, {
+    current_file = filepath,
+    questions = code_requests, -- reuse same param for library info extraction
+  })
+end
+
+---Process code requests with context
+---@param code_requests table[] Pending code requests
+---@param filepath string
+---@param bufnr number
+---@param full_context string
+---@param metadata table
+function M._process_code_requests(code_requests, filepath, bufnr, full_context, metadata)
+  local system_prompt = prompts.get_code_system_prompt()
+  local user_prompt = prompts.build_code_user_prompt(code_requests, full_context, { filepath = filepath })
+
+  local prompt_size = #system_prompt + #user_prompt
+  debug_log.log(string.format("Code mode prompt size: %d chars (~%d tokens)", prompt_size, math.floor(prompt_size / 4)))
+
+  local provider_info = provider.get_info()
+
+  debug_log.log_request({
+    code_requests = vim.tbl_map(function(r)
+      return { id = r.id, request = r.question }
+    end, code_requests),
+    current_file = metadata.current_file or filepath,
+    metadata = metadata,
+    system_prompt = system_prompt,
+    user_prompt = user_prompt,
+    provider = provider_info.name or "unknown",
+    model = provider_info.model or "unknown",
+  })
+
+  local start_time = vim.loop.hrtime()
+
+  provider.query_async(system_prompt, user_prompt, function(response, err)
+    loading.stop()
+
+    local duration_ms = math.floor((vim.loop.hrtime() - start_time) / 1000000)
+    debug_log.log_response({
+      response = response,
+      error = err,
+      duration_ms = duration_ms,
+    })
+
+    if err then
+      vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
+      return
+    end
+
+    if not response then
+      vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
+      return
+    end
+
+    local responses = M._parse_code_response(response)
+    if not responses then
+      vim.notify("[ai-editutor] " .. M._msg("invalid_code_response"), vim.log.levels.ERROR)
+      debug_log.log("Failed to parse code response: " .. response:sub(1, 500))
+      return
+    end
+
+    -- Replace comment blocks with raw code (no knowledge saving)
+    local success_count, fail_count = comment_writer.replace_with_code_batch(responses, bufnr)
+
+    if fail_count == 0 then
+      vim.notify("[ai-editutor] " .. string.format(M._msg("code_success"), success_count), vim.log.levels.INFO)
+    else
+      vim.notify(
+        "[ai-editutor] " .. string.format(M._msg("code_partial_success"), success_count, #code_requests, fail_count),
+        vim.log.levels.WARN
+      )
+    end
+  end)
+end
+
+---Parse code marker-based response from LLM
+---Format: [CODE:q_123]...[/CODE:q_123]
+---@param response string Raw response
+---@return table<string, string>|nil Map of id -> code
+function M._parse_code_response(response)
+  if not response or response == "" then
+    return nil
+  end
+
+  local results = {}
+  local found_any = false
+
+  for id, code in response:gmatch("%[CODE:(q_%d+)%](.-)%[/CODE:q_%d+%]") do
+    code = code:gsub("^%s*\n?", ""):gsub("\n?%s*$", "")
+    results[id] = code
+    found_any = true
+    debug_log.log("Parsed code for " .. id .. " (" .. #code .. " chars)")
+  end
+
+  if found_any then
+    return results
+  end
+
+  debug_log.log("No [CODE:id] markers found. Raw response: " .. response:sub(1, 300))
   return nil
 end
 

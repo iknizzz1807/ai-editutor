@@ -90,33 +90,34 @@ local function escape_pattern(str)
 end
 
 -- =============================================================================
--- Question Block Detection
+-- Block Detection (supports both QA and Code modes)
 -- =============================================================================
 
----@class PendingQuestion
----@field id string Question ID (e.g., "q_1737200000000")
----@field question string The question text
+---@class PendingBlock
+---@field id string Block ID (e.g., "q_1737200000000")
+---@field question string The request/question text
 ---@field block_start number Start line of the block (1-indexed)
 ---@field block_end number End line of the block (1-indexed)
 ---@field pending_line number Line number of [PENDING:id] marker
 ---@field indent string Indentation of the block
+---@field mode string "Q" for questions, "C" for code requests
 
----Find all pending questions in current buffer
----Simple approach: find [PENDING:id], then find matching [Q:id]
----Supports both block comments (/* */) and line comments (# // --)
+---Find all pending blocks of a given mode in current buffer
 ---@param bufnr? number Buffer number
----@return PendingQuestion[] questions List of pending questions
-function M.find_pending_questions(bufnr)
+---@param mode string "Q" for questions, "C" for code requests
+---@return PendingBlock[] blocks List of pending blocks
+function M.find_pending_blocks(bufnr, mode)
+  mode = mode or "Q"
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local style = M.get_comment_style(bufnr)
 
   -- For languages without block comments (Python, Shell, etc.), use line comment parser
   if not style.block and style.line then
-    return M._find_pending_line_comments(lines, style)
+    return M._find_pending_line_comments(lines, style, mode)
   end
 
-  local questions = {}
+  local blocks = {}
 
   -- First pass: find all [PENDING:id] markers
   local pending_markers = {} -- id -> line_number
@@ -129,12 +130,13 @@ function M.find_pending_questions(bufnr)
 
   -- If no pending markers, return empty
   if vim.tbl_isempty(pending_markers) then
-    return questions
+    return blocks
   end
 
-  -- Second pass: find [Q:id] and match with pending
+  -- Second pass: find [MODE:id] and match with pending
+  local mode_pattern = "%[" .. mode .. ":(q_%d+)%]"
   for i, line in ipairs(lines) do
-    local id = line:match("%[Q:(q_%d+)%]")
+    local id = line:match(mode_pattern)
     if id and pending_markers[id] then
       local pending_line = pending_markers[id]
       local block_start = i
@@ -160,49 +162,52 @@ function M.find_pending_questions(bufnr)
         end
       end
 
-      -- Extract question text (between [Q:id] line and [PENDING:id] line)
-      local question_lines = {}
+      -- Extract text (between [MODE:id] line and [PENDING:id] line)
+      local text_lines = {}
       for j = i + 1, pending_line - 1 do
         local content = lines[j]:gsub("^%s*", ""):gsub("%s*$", "")
         if content ~= "" then
-          table.insert(question_lines, content)
+          table.insert(text_lines, content)
         end
       end
 
-      table.insert(questions, {
+      table.insert(blocks, {
         id = id,
-        question = table.concat(question_lines, "\n"),
+        question = table.concat(text_lines, "\n"),
         block_start = block_start,
         block_end = block_end,
         pending_line = pending_line,
         indent = indent,
+        mode = mode,
       })
     end
   end
 
-  return questions
+  return blocks
 end
 
----Find pending questions in line-comment style (for languages without block comments)
+---Find pending blocks in line-comment style (for languages without block comments)
 ---@param lines string[]
 ---@param style table
----@return PendingQuestion[]
-function M._find_pending_line_comments(lines, style)
-  local questions = {}
+---@param mode string "Q" or "C"
+---@return PendingBlock[]
+function M._find_pending_line_comments(lines, style, mode)
+  local blocks = {}
   local prefix_pattern = escape_pattern(style.line)
+  local mode_pattern = "%[" .. mode .. ":(q_%d+)%]"
 
   local i = 1
   while i <= #lines do
     local line = lines[i]
 
-    -- Check for line comment with [Q:id]
-    local id = line:match("%[Q:(q_%d+)%]")
+    -- Check for line comment with [MODE:id]
+    local id = line:match(mode_pattern)
     if id and line:match("^%s*" .. prefix_pattern) then
       local indent = line:match("^(%s*)") or ""
       local block_start = i
       local block_end = i
       local pending_line = nil
-      local question_lines = {}
+      local text_lines = {}
 
       -- Search consecutive comment lines for content and [PENDING:id]
       for j = i + 1, #lines do
@@ -220,22 +225,23 @@ function M._find_pending_line_comments(lines, style)
         if check_line:match("%[PENDING:" .. escape_pattern(id) .. "%]") then
           pending_line = j
         elseif not pending_line then
-          -- Collect question text
+          -- Collect text
           local content = check_line:gsub("^%s*" .. prefix_pattern .. "%s*", "")
           if content ~= "" then
-            table.insert(question_lines, content)
+            table.insert(text_lines, content)
           end
         end
       end
 
       if pending_line then
-        table.insert(questions, {
+        table.insert(blocks, {
           id = id,
-          question = table.concat(question_lines, "\n"),
+          question = table.concat(text_lines, "\n"),
           block_start = block_start,
           block_end = block_end,
           pending_line = pending_line,
           indent = indent,
+          mode = mode,
         })
       end
 
@@ -245,13 +251,24 @@ function M._find_pending_line_comments(lines, style)
     end
   end
 
-  return questions
+  return blocks
+end
+
+-- =============================================================================
+-- QA Mode (backward compatible)
+-- =============================================================================
+
+---Find all pending questions in current buffer
+---@param bufnr? number Buffer number
+---@return PendingBlock[] questions List of pending questions
+function M.find_pending_questions(bufnr)
+  return M.find_pending_blocks(bufnr, "Q")
 end
 
 ---Find a specific question block by ID
 ---@param id string Question ID
 ---@param bufnr? number Buffer number
----@return PendingQuestion|nil
+---@return PendingBlock|nil
 function M.find_question_by_id(id, bufnr)
   local questions = M.find_pending_questions(bufnr)
   for _, q in ipairs(questions) do
@@ -266,16 +283,53 @@ end
 ---@param bufnr? number Buffer number
 ---@return boolean
 function M.has_pending_questions(bufnr)
-  local questions = M.find_pending_questions(bufnr)
-  return #questions > 0
+  return #M.find_pending_questions(bufnr) > 0
 end
 
 ---Get count of pending questions
 ---@param bufnr? number Buffer number
 ---@return number
 function M.count_pending_questions(bufnr)
-  local questions = M.find_pending_questions(bufnr)
-  return #questions
+  return #M.find_pending_questions(bufnr)
+end
+
+-- =============================================================================
+-- Code Mode
+-- =============================================================================
+
+---Find all pending code requests in current buffer
+---@param bufnr? number Buffer number
+---@return PendingBlock[] code_requests List of pending code requests
+function M.find_pending_code_requests(bufnr)
+  return M.find_pending_blocks(bufnr, "C")
+end
+
+---Find a specific code request block by ID
+---@param id string Block ID
+---@param bufnr? number Buffer number
+---@return PendingBlock|nil
+function M.find_code_request_by_id(id, bufnr)
+  local requests = M.find_pending_code_requests(bufnr)
+  for _, r in ipairs(requests) do
+    if r.id == id then
+      return r
+    end
+  end
+  return nil
+end
+
+---Check if buffer has any pending code requests
+---@param bufnr? number Buffer number
+---@return boolean
+function M.has_pending_code_requests(bufnr)
+  return #M.find_pending_code_requests(bufnr) > 0
+end
+
+---Get count of pending code requests
+---@param bufnr? number Buffer number
+---@return number
+function M.count_pending_code_requests(bufnr)
+  return #M.find_pending_code_requests(bufnr)
 end
 
 return M

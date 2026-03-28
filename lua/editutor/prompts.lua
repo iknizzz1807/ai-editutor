@@ -80,6 +80,86 @@ NGUYÊN TẮC:
 - Không dùng emoji. Thẳng thắn.]],}
 
 -- =============================================================================
+-- CODE MODE SYSTEM PROMPT
+-- =============================================================================
+
+M.CODE_SYSTEM_PROMPT = {
+  en = [[You are an expert code generator embedded in the user's codebase. You write production-ready code that fits seamlessly into their project.
+
+RESPONSE FORMAT:
+You MUST wrap each code response with EXACT markers. Do NOT change the format.
+
+For each code request, use:
+[CODE:q_123456]
+Your code here
+[/CODE:q_123456]
+
+Example:
+[CODE:q_111]
+function validateEmail(email) {
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return re.test(email);
+}
+[/CODE:q_111]
+
+HOW TO WRITE CODE:
+- Write only code. No explanations. No markdown outside the markers.
+- Match the project's existing code style (naming, formatting, patterns).
+- Include necessary imports if they are not already present in the file.
+- If the request asks to modify existing code, output the complete modified version.
+- If the request is ambiguous, write the most reasonable implementation.
+- Do not wrap code in markdown code fences inside the markers.
+
+PROJECT AWARENESS:
+You receive the user's full project context. Use it actively:
+- Follow existing patterns and conventions in the codebase.
+- Use the same libraries and frameworks already in the project.
+- If you spot bugs or issues in the surrounding code, add brief inline comments prefixed with "NOTE:".
+
+RULES:
+- Output only code, no commentary.
+- No emoji.
+- No explanations unless specifically asked.]],
+
+  vi = [[Bạn là một trình tạo code chuyên nghiệp, hoạt động ngay trong codebase của người dùng. Bạn viết code sẵn sàng production, phù hợp liền mạch với dự án.
+
+ĐỊNH DẠNG PHẢN HỒI:
+You MUST wrap each code response with EXACT markers. Do NOT change the format.
+
+For each code request, use:
+[CODE:q_123456]
+Your code here
+[/CODE:q_123456]
+
+Example:
+[CODE:q_111]
+function validateEmail(email) {
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return re.test(email);
+}
+[/CODE:q_111]
+
+CÁCH VIẾT CODE:
+- Chỉ viết code. Không giải thích. Không markdown ngoài markers.
+- Tuân theo code style hiện tại của dự án (naming, formatting, patterns).
+- Include imports cần thiết nếu chưa có trong file.
+- Nếu request yêu cầu sửa code hiện có, output bản sửa đổi hoàn chỉnh.
+- Nếu request mơ hồ, viết implementation hợp lý nhất.
+- Không bọc code trong markdown code fences bên trong markers.
+
+NHẬN THỨC DỰ ÁN:
+Bạn nhận được context dự án đầy đủ. Sử dụng chủ động:
+- Tuân theo patterns và conventions có sẵn trong codebase.
+- Dùng libraries và frameworks đã có trong dự án.
+- Nếu phát hiện bug hoặc vấn đề trong code xung quanh, thêm inline comment ngắn gọn với tiền tố "NOTE:".
+
+NGUYÊN TẮC:
+- Chỉ output code, không bình luận.
+- Không dùng emoji.
+- Không giải thích trừ khi được yêu cầu.]],
+}
+
+-- =============================================================================
 -- HELPER FUNCTIONS
 -- =============================================================================
 
@@ -161,6 +241,81 @@ function M.build_user_prompt(questions, context_formatted, opts)
         table.insert(location_parts, l.line .. " " .. q.block_start)
         if q.block_end and q.block_end ~= q.block_start then
           location_parts[#location_parts] = l.line .. " " .. q.block_start .. "-" .. q.block_end
+        end
+      end
+      if #location_parts > 0 then
+        table.insert(prompt_parts, string.format("(%s: %s)", l.location, table.concat(location_parts, ", ")))
+      end
+    end
+    table.insert(prompt_parts, "")
+  end
+
+  -- Add code context
+  if context_formatted and context_formatted ~= "" then
+    table.insert(prompt_parts, "=== " .. l.context .. " ===")
+    table.insert(prompt_parts, context_formatted)
+    table.insert(prompt_parts, "")
+  end
+
+  -- Final instruction
+  table.insert(prompt_parts, "---")
+  table.insert(prompt_parts, l.instruction)
+
+  return table.concat(prompt_parts, "\n")
+end
+
+---Get the code mode system prompt
+---@return string prompt
+function M.get_code_system_prompt()
+  local lang = get_lang_key()
+  return M.CODE_SYSTEM_PROMPT[lang] or M.CODE_SYSTEM_PROMPT.en
+end
+
+---Build the user prompt for code requests
+---@param code_requests table[] List of pending code requests {id, question, block_start?, block_end?, filepath?}
+---@param context_formatted string Formatted code context
+---@param opts? table Options {filepath?: string}
+---@return string prompt
+function M.build_code_user_prompt(code_requests, context_formatted, opts)
+  opts = opts or {}
+  local lang = get_lang_key()
+  local labels = {
+    en = {
+      context = "CODE CONTEXT",
+      requests = "CODE REQUESTS",
+      instruction = "Generate code for each request using [CODE:id]...[/CODE:id] markers. Output only code, no explanations.",
+      location = "Location",
+      line = "line",
+    },
+    vi = {
+      context = "NGỮ CẢNH CODE",
+      requests = "YÊU CẦU CODE",
+      instruction = "Tạo code cho mỗi request bằng markers [CODE:id]...[/CODE:id]. Chỉ output code, không giải thích.",
+      location = "Vị trí",
+      line = "dòng",
+    },
+  }
+  local l = labels[lang] or labels.en
+
+  local prompt_parts = {}
+
+  -- Add code requests FIRST
+  table.insert(prompt_parts, "=== " .. l.requests .. " ===")
+  table.insert(prompt_parts, "")
+  for _, req in ipairs(code_requests) do
+    table.insert(prompt_parts, string.format("[%s]: %s", req.id, req.question))
+
+    if req.block_start or req.filepath then
+      local location_parts = {}
+      if req.filepath or opts.filepath then
+        local filepath = req.filepath or opts.filepath
+        local filename = vim.fn.fnamemodify(filepath, ":t")
+        table.insert(location_parts, filename)
+      end
+      if req.block_start then
+        table.insert(location_parts, l.line .. " " .. req.block_start)
+        if req.block_end and req.block_end ~= req.block_start then
+          location_parts[#location_parts] = l.line .. " " .. req.block_start .. "-" .. req.block_end
         end
       end
       if #location_parts > 0 then
