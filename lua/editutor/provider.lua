@@ -1,15 +1,14 @@
 -- editutor/provider.lua
--- LLM API client with declarative provider definitions and streaming support
+-- LLM API client for Google Gemini
 
 local M = {}
 
 local config = require("editutor.config")
 
 -- =============================================================================
--- Provider Registry with Inheritance
+-- Provider Registry
 -- =============================================================================
 
----Base provider template that others inherit from
 M.BASE_PROVIDER = {
 	name = "base",
 	url = "",
@@ -29,152 +28,16 @@ M.BASE_PROVIDER = {
 	format_error = function(response)
 		return "Unknown error"
 	end,
-	-- Streaming configuration
 	stream_enabled = true,
-	stream_parser = nil, -- Override for custom SSE parsing
 }
 
----Built-in provider definitions (declarative)
 M.PROVIDERS = {
-	-- Claude (Anthropic)
-	claude = {
-		__inherited_from = "BASE_PROVIDER",
-		name = "claude",
-		url = "https://api.anthropic.com/v1/messages",
-		model = "claude-sonnet-4-20250514",
-		headers = {
-			["content-type"] = "application/json",
-			["x-api-key"] = "${api_key}",
-			["anthropic-version"] = "2023-06-01",
-		},
-		api_key = function()
-			return os.getenv("ANTHROPIC_API_KEY")
-		end,
-		format_request = function(data)
-			return {
-				model = data.model,
-				max_tokens = data.max_tokens or 4096,
-				system = data.system,
-				messages = {
-					{ role = "user", content = data.message },
-				},
-			}
-		end,
-		format_response = function(response)
-			if response.content and response.content[1] then
-				return response.content[1].text
-			end
-			return nil
-		end,
-		format_error = function(response)
-			if response.error then
-				return response.error.message
-			end
-			return "Unknown error"
-		end,
-	},
-
-	-- OpenAI
-	openai = {
-		__inherited_from = "BASE_PROVIDER",
-		name = "openai",
-		url = "https://api.openai.com/v1/chat/completions",
-		model = "gpt-4o",
-		headers = {
-			["content-type"] = "application/json",
-			["Authorization"] = "Bearer ${api_key}",
-		},
-		api_key = function()
-			return os.getenv("OPENAI_API_KEY")
-		end,
-		format_request = function(data)
-			return {
-				model = data.model,
-				max_tokens = data.max_tokens or 4096,
-				messages = {
-					{ role = "system", content = data.system },
-					{ role = "user", content = data.message },
-				},
-			}
-		end,
-		format_response = function(response)
-			if response.choices and response.choices[1] then
-				return response.choices[1].message.content
-			end
-			return nil
-		end,
-		format_error = function(response)
-			if response.error then
-				return response.error.message
-			end
-			return "Unknown error"
-		end,
-	},
-
-	-- OpenAI-compatible providers (inherit from openai)
-	deepseek = {
-		__inherited_from = "openai",
-		name = "deepseek",
-		url = "https://api.deepseek.com/chat/completions",
-		model = "deepseek-chat",
-		api_key = function()
-			return os.getenv("DEEPSEEK_API_KEY")
-		end,
-	},
-
-	groq = {
-		__inherited_from = "openai",
-		name = "groq",
-		url = "https://api.groq.com/openai/v1/chat/completions",
-		model = "llama-3.3-70b-versatile",
-		api_key = function()
-			return os.getenv("GROQ_API_KEY")
-		end,
-	},
-
-	together = {
-		__inherited_from = "openai",
-		name = "together",
-		url = "https://api.together.xyz/v1/chat/completions",
-		model = "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-		api_key = function()
-			return os.getenv("TOGETHER_API_KEY")
-		end,
-	},
-
-	openrouter = {
-		__inherited_from = "openai",
-		name = "openrouter",
-		url = "https://openrouter.ai/api/v1/chat/completions",
-		model = "anthropic/claude-3.5-sonnet",
-		api_key = function()
-			return os.getenv("OPENROUTER_API_KEY")
-		end,
-	},
-
-	-- Local Gemini Proxy (OpenAI-compatible)
-	gemini_proxy = {
-		__inherited_from = "openai",
-		name = "gemini_proxy",
-		url = "http://127.0.0.1:7999/v1/chat/completions",
-		model = "gemini_cli/gemini-3-flash-preview",
-		headers = {
-			["content-type"] = "application/json",
-			["Authorization"] = "Bearer ${api_key}",
-		},
-		api_key = function()
-			return os.getenv("GEMINI_PROXY_API_KEY") or "mythong2005"
-		end,
-	},
-
-	-- Google Gemini
 	gemini = {
 		__inherited_from = "BASE_PROVIDER",
 		name = "gemini",
-		-- Base URL template - streaming uses different endpoint
 		url = "https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent",
 		streaming_url = "https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse",
-		model = "gemini-3-flash-preview",
+		model = "gemini-2.5-flash-preview-05-20",
 		headers = {
 			["content-type"] = "application/json",
 			["x-goog-api-key"] = "${api_key}",
@@ -182,7 +45,6 @@ M.PROVIDERS = {
 		api_key = function()
 			return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 		end,
-		-- Gemini: just replace model in URL, API key goes in header
 		build_url = function(base_url, model, _api_key)
 			return base_url:gsub("%${model}", model)
 		end,
@@ -220,41 +82,7 @@ M.PROVIDERS = {
 			return "Unknown error"
 		end,
 		stream_enabled = true,
-		-- Gemini doesn't use stream=true in body, uses different endpoint
 		stream_in_body = false,
-	},
-
-	-- Ollama (local)
-	ollama = {
-		__inherited_from = "BASE_PROVIDER",
-		name = "ollama",
-		url = "http://localhost:11434/api/chat",
-		model = "llama3.2",
-		headers = {
-			["content-type"] = "application/json",
-		},
-		api_key = function()
-			return nil -- No API key needed
-		end,
-		format_request = function(data)
-			return {
-				model = data.model,
-				messages = {
-					{ role = "system", content = data.system },
-					{ role = "user", content = data.message },
-				},
-				stream = false,
-			}
-		end,
-		format_response = function(response)
-			if response.message then
-				return response.message.content
-			end
-			return nil
-		end,
-		format_error = function(response)
-			return response.error or "Unknown error"
-		end,
 	},
 }
 
@@ -264,26 +92,23 @@ M.PROVIDERS = {
 function M.resolve_provider(provider_name)
 	local provider = M.PROVIDERS[provider_name]
 	if not provider then
-		-- Check config for custom providers
 		provider = config.options.providers and config.options.providers[provider_name]
 		if not provider then
 			return nil
 		end
 	end
 
-	-- Resolve inheritance chain
 	local resolved = vim.deepcopy(M.BASE_PROVIDER)
 
 	local function inherit_from(prov)
 		if prov.__inherited_from then
 			local parent_name = prov.__inherited_from
 			if parent_name == "BASE_PROVIDER" then
-			-- Already inherited from base
+				-- Already inherited from base
 			elseif M.PROVIDERS[parent_name] then
 				inherit_from(M.PROVIDERS[parent_name])
 			end
 		end
-		-- Apply this provider's overrides
 		for k, v in pairs(prov) do
 			if k ~= "__inherited_from" then
 				resolved[k] = v
@@ -297,7 +122,7 @@ end
 
 ---Register a custom provider
 ---@param name string Provider name
----@param definition table Provider definition (can use __inherited_from)
+---@param definition table Provider definition
 function M.register_provider(name, definition)
 	M.PROVIDERS[name] = definition
 end
@@ -308,7 +133,7 @@ end
 
 M._stream_buffer = {}
 M._stream_timer = nil
-M._stream_debounce_ms = 50 -- Debounce interval for UI updates
+M._stream_debounce_ms = 50
 
 ---Set streaming debounce interval
 ---@param ms number Milliseconds
@@ -339,15 +164,13 @@ end
 ---Get the current provider (resolved with inheritance)
 ---@return table|nil provider
 local function get_current_provider()
-	local provider_name = config.options.provider or "claude"
+	local provider_name = config.options.provider or "gemini"
 
-	-- First try to resolve from our registry
 	local resolved = M.resolve_provider(provider_name)
 	if resolved then
 		return resolved
 	end
 
-	-- Fallback to config providers
 	return config.get_provider()
 end
 
@@ -400,7 +223,7 @@ local function make_request_async(url, headers, body, callback)
 	curl.post(url, {
 		headers = headers,
 		body = vim.json.encode(body),
-		timeout = 60000, -- 60 seconds
+		timeout = 60000,
 		callback = function(response)
 			vim.schedule(function()
 				callback(response, nil)
@@ -422,7 +245,6 @@ local function make_request_sync(url, headers, body)
 
 	local co = coroutine.running()
 	if not co then
-		-- Not in coroutine, make blocking request
 		return curl.post(url, {
 			headers = headers,
 			body = vim.json.encode(body),
@@ -430,7 +252,6 @@ local function make_request_sync(url, headers, body)
 		})
 	end
 
-	-- In coroutine, yield until response
 	curl.post(url, {
 		headers = headers,
 		body = vim.json.encode(body),
@@ -446,11 +267,9 @@ local function make_request_sync(url, headers, body)
 end
 
 ---Get API key for current provider
----Checks config.options.api_key first, then provider's default
 ---@param provider table Provider configuration
 ---@return string|nil api_key
 local function get_api_key(provider)
-	-- Check if user provided api_key in setup()
 	local config_key = config.options.api_key
 	if config_key then
 		if type(config_key) == "function" then
@@ -459,7 +278,6 @@ local function get_api_key(provider)
 		return config_key
 	end
 
-	-- Fall back to provider's default api_key function
 	if provider.api_key then
 		local ok, key = pcall(provider.api_key)
 		if ok then
@@ -469,6 +287,10 @@ local function get_api_key(provider)
 
 	return nil
 end
+
+-- =============================================================================
+-- Query Functions
+-- =============================================================================
 
 ---Send a query to the LLM (async version)
 ---@param system_prompt string System prompt
@@ -481,27 +303,16 @@ function M.query_async(system_prompt, user_message, callback)
 		return
 	end
 
-	-- Get API key
 	local api_key = get_api_key(provider)
 
-	-- Check for required API key
-	if provider.name ~= "ollama" and not api_key then
-		callback(
-			nil,
-			string.format(
-				"API key not found for %s. Set %s_API_KEY environment variable.",
-				provider.name,
-				provider.name:upper()
-			)
-		)
+	if not api_key then
+		callback(nil, "GEMINI_API_KEY or GOOGLE_API_KEY environment variable not set")
 		return
 	end
 
-	-- Build request
 	local headers = build_headers(provider.headers, api_key)
 	local model = config.options.model or provider.model
 
-	-- Build URL (some providers like Gemini need custom URL building)
 	local url = provider.url
 	if provider.build_url then
 		url = provider.build_url(provider.url, model, api_key)
@@ -514,7 +325,6 @@ function M.query_async(system_prompt, user_message, callback)
 		message = user_message,
 	})
 
-	-- Make request
 	make_request_async(url, headers, request_body, function(response, err)
 		if err then
 			callback(nil, err)
@@ -526,7 +336,7 @@ function M.query_async(system_prompt, user_message, callback)
 	end)
 end
 
----Send a query to the LLM (sync version for use in coroutines)
+---Send a query to the LLM (sync version)
 ---@param system_prompt string System prompt
 ---@param user_message string User message
 ---@return string|nil response_text
@@ -537,19 +347,15 @@ function M.query(system_prompt, user_message)
 		return nil, "Provider not configured"
 	end
 
-	-- Get API key
 	local api_key = get_api_key(provider)
 
-	-- Check for required API key
-	if provider.name ~= "ollama" and not api_key then
-		return nil, string.format("API key not found for %s", provider.name)
+	if not api_key then
+		return nil, "GEMINI_API_KEY or GOOGLE_API_KEY environment variable not set"
 	end
 
-	-- Build request
 	local headers = build_headers(provider.headers, api_key)
 	local model = config.options.model or provider.model
 
-	-- Build URL (some providers like Gemini need custom URL building)
 	local url = provider.url
 	if provider.build_url then
 		url = provider.build_url(provider.url, model, api_key)
@@ -562,7 +368,6 @@ function M.query(system_prompt, user_message)
 		message = user_message,
 	})
 
-	-- Make request
 	local response = make_request_sync(url, headers, request_body)
 	return process_response(response, provider)
 end
@@ -576,11 +381,9 @@ function M.check_provider()
 		return false, "No provider configured"
 	end
 
-	if provider.name ~= "ollama" then
-		local api_key = get_api_key(provider)
-		if not api_key then
-			return false, string.format("%s_API_KEY environment variable not set", provider.name:upper())
-		end
+	local api_key = get_api_key(provider)
+	if not api_key then
+		return false, "GEMINI_API_KEY or GOOGLE_API_KEY environment variable not set"
 	end
 
 	return true, nil
@@ -618,11 +421,9 @@ end
 
 ---Parse SSE (Server-Sent Events) data line
 ---@param line string Data line from SSE
----@param provider_name string Provider name
 ---@return string|nil text Extracted text content
 ---@return boolean done Whether stream is done
-local function parse_sse_line(line, provider_name)
-	-- Skip empty lines and non-data lines
+local function parse_sse_line(line)
 	if not line or line == "" or line == "data: [DONE]" then
 		if line == "data: [DONE]" then
 			return nil, true
@@ -630,73 +431,30 @@ local function parse_sse_line(line, provider_name)
 		return nil, false
 	end
 
-	-- Remove "data: " prefix
 	local data = line:match("^data: (.+)$")
 	if not data then
 		return nil, false
 	end
 
-	-- Parse JSON
 	local ok, json = pcall(vim.json.decode, data)
 	if not ok or not json then
 		return nil, false
 	end
 
-	-- Extract text based on provider format
 	local text = nil
 
-	-- OpenAI-compatible providers (openai, deepseek, groq, together, openrouter, gemini_proxy)
-	local openai_compatible = {
-		openai = true,
-		deepseek = true,
-		groq = true,
-		together = true,
-		openrouter = true,
-		gemini_proxy = true,
-	}
-
-	if provider_name == "claude" then
-		-- Claude format: {"type":"content_block_delta","delta":{"type":"text_delta","text":"..."}}
-		if json.type == "content_block_delta" and json.delta and json.delta.text then
-			text = json.delta.text
-		elseif json.type == "message_stop" then
-			return nil, true
+	if json.candidates and json.candidates[1] then
+		local content = json.candidates[1].content
+		if content and content.parts and content.parts[1] then
+			text = content.parts[1].text
 		end
-	elseif provider_name == "gemini" then
-		-- Gemini SSE format: {"candidates":[{"content":{"parts":[{"text":"..."}]}}]}
-		if json.candidates and json.candidates[1] then
-			local content = json.candidates[1].content
-			if content and content.parts and content.parts[1] then
-				text = content.parts[1].text
-			end
-			-- Check for finishReason
-			local finish_reason = json.candidates[1].finishReason
-			if finish_reason and finish_reason == "STOP" then
-				return text, true
-			end
-		end
-		-- Check for error in stream
-		if json.error then
-			return nil, true
-		end
-	elseif openai_compatible[provider_name] then
-		-- OpenAI format: {"choices":[{"delta":{"content":"..."}}]}
-		if json.choices and json.choices[1] and json.choices[1].delta then
-			text = json.choices[1].delta.content
-		end
-		-- Check for finish_reason (vim.NIL from JSON null is truthy, so check explicitly)
-		local finish_reason = json.choices and json.choices[1] and json.choices[1].finish_reason
-		if finish_reason and finish_reason ~= vim.NIL then
+		local finish_reason = json.candidates[1].finishReason
+		if finish_reason and finish_reason == "STOP" then
 			return text, true
 		end
-	elseif provider_name == "ollama" then
-		-- Ollama format: {"message":{"content":"..."},"done":false}
-		if json.message and json.message.content then
-			text = json.message.content
-		end
-		if json.done then
-			return text, true
-		end
+	end
+	if json.error then
+		return nil, true
 	end
 
 	return text, false
@@ -718,23 +476,18 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
 		return
 	end
 
-	-- Get API key
 	local api_key = get_api_key(prov)
 
-	-- Check for required API key
-	if prov.name ~= "ollama" and not api_key then
-		on_done(nil, string.format("API key not found for %s", prov.name))
+	if not api_key then
+		on_done(nil, "GEMINI_API_KEY or GOOGLE_API_KEY environment variable not set")
 		return
 	end
 
-	-- Build streaming request
 	local headers = build_headers(prov.headers, api_key)
 	local model = config.options.model or prov.model
 
-	-- Build URL - Gemini uses different streaming endpoint
 	local url
 	if prov.build_streaming_url and prov.streaming_url then
-		-- Provider has dedicated streaming URL (e.g., Gemini)
 		url = prov.build_streaming_url(prov.streaming_url, model, api_key)
 	elseif prov.build_url then
 		url = prov.build_url(prov.url, model, api_key)
@@ -749,26 +502,21 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
 		message = user_message,
 	})
 
-	-- Enable streaming in body (most providers except Gemini)
-	-- Gemini uses different endpoint instead of stream=true in body
 	if prov.stream_in_body ~= false then
 		request_body.stream = true
 	end
 
-	-- Use plenary.curl with streaming support
 	local curl_ok, curl = pcall(require, "plenary.curl")
 	if not curl_ok then
 		on_done(nil, "plenary.nvim is required for HTTP requests")
 		return nil
 	end
 
-	-- Streaming state
 	local full_response = {}
 	local pending_chunks = {}
 	local debounce_timer = nil
 	local stream_done = false
 
-	-- Debounced flush of pending chunks
 	local function flush_pending()
 		if #pending_chunks > 0 and not stream_done then
 			local batch = table.concat(pending_chunks, "")
@@ -784,7 +532,6 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
 		end
 	end
 
-	-- Schedule debounced flush
 	local function schedule_flush()
 		if debounce_timer then
 			vim.fn.timer_stop(debounce_timer)
@@ -794,15 +541,13 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
 		end)
 	end
 
-	-- Stream callback - called for each chunk of data
 	local stream_callback = vim.schedule_wrap(function(_, data)
 		if not data or data == "" then
 			return
 		end
 
-		-- Parse SSE lines
 		for line in data:gmatch("[^\n]+") do
-			local text, done = parse_sse_line(line, prov.name)
+			local text, done = parse_sse_line(line)
 
 			if text then
 				table.insert(full_response, text)
@@ -832,26 +577,22 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
 		raw = { "--no-buffer", "-sS" },
 		callback = function(response)
 			vim.schedule(function()
-				-- Final callback when request completes
 				stream_done = true
 				if debounce_timer then
 					vim.fn.timer_stop(debounce_timer)
 				end
 				flush_pending()
 
-				-- If we got an error status
 				if response and response.status and response.status >= 400 then
 					local err_msg = response.body or "Unknown error"
 					on_done(nil, string.format("API error (%d): %s", response.status, err_msg))
 					return
 				end
 
-				-- If we haven't received any response through streaming
 				if #full_response == 0 then
-					-- Try to parse non-streaming response
 					if response and response.body and response.body ~= "" then
 						for line in response.body:gmatch("[^\n]+") do
-							local text, _ = parse_sse_line(line, prov.name)
+							local text, _ = parse_sse_line(line)
 							if text then
 								table.insert(full_response, text)
 							end
@@ -883,7 +624,7 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
 end
 
 ---Cancel a streaming request
----@param job any Job from query_stream (plenary curl job)
+---@param job any Job from query_stream
 function M.cancel_stream(job)
 	if job and job.shutdown then
 		pcall(job.shutdown, job)

@@ -35,8 +35,8 @@ local M = {}
 
 M.defaults = {
   -- LLM Provider
-  provider = "gemini_proxy",
-  model = "gemini_cli/gemini-3-flash-preview",
+  provider = "gemini",
+  model = "gemini-2.5-flash-preview-05-20",
 
   -- Context extraction
   context = {
