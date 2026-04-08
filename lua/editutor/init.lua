@@ -20,55 +20,34 @@ M._version = "3.1.0"
 M._setup_called = false
 
 -- =============================================================================
--- UI Messages
+-- UI Messages (English only - removed bilingual support)
+-- Respond in user's language automatically via LLM prompt instructions
 -- =============================================================================
 
 M._messages = {
-  en = {
-    no_pending = "No pending questions in this file. Use <leader>mq to create one.",
-    spawned = "Question block created. Type your question, then use <leader>ma to get answer.",
-    processing = "Processing %d question(s)...",
-    gathering_context = "Gathering context...",
-    success = "Answered %d question(s)",
-    partial_success = "Answered %d/%d question(s). %d failed.",
-    error = "Error: ",
-    no_response = "No response received",
-    invalid_response = "Failed to parse LLM response (missing [ANSWER:id] markers)",
-    context_budget_exceeded = "Context exceeds budget (%d > %d tokens)",
-    no_pending_code = "No pending code requests in this file. Use <leader>mc to create one.",
-    code_spawned = "Code block created. Describe what you want, then use <leader>mx to generate.",
-    code_processing = "Processing %d code request(s)...",
-    code_success = "Generated %d code block(s)",
-    code_partial_success = "Generated %d/%d code block(s). %d failed.",
-    invalid_code_response = "Failed to parse LLM response (missing [CODE:id] markers)",
-  },
-  vi = {
-    no_pending = "Không có câu hỏi pending. Dùng <leader>mq để tạo mới.",
-    spawned = "Đã tạo question block. Nhập câu hỏi, sau đó dùng <leader>ma để nhận trả lời.",
-    processing = "Đang xử lý %d câu hỏi...",
-    gathering_context = "Đang thu thập context...",
-    success = "Đã trả lời %d câu hỏi",
-    partial_success = "Đã trả lời %d/%d câu hỏi. %d thất bại.",
-    error = "Lỗi: ",
-    no_response = "Không nhận được phản hồi",
-    invalid_response = "Không thể parse LLM response (thiếu [ANSWER:id] markers)",
-    context_budget_exceeded = "Context vượt budget (%d > %d tokens)",
-    no_pending_code = "Không có code request pending. Dùng <leader>mc để tạo mới.",
-    code_spawned = "Đã tạo code block. Mô tả yêu cầu, sau đó dùng <leader>mx để tạo code.",
-    code_processing = "Đang xử lý %d code request...",
-    code_success = "Đã tạo %d code block",
-    code_partial_success = "Đã tạo %d/%d code block. %d thất bại.",
-    invalid_code_response = "Không thể parse LLM response (thiếu [CODE:id] markers)",
-  },
+  no_pending = "No pending questions in this file. Use <leader>mq to create one.",
+  spawned = "Question block created. Type your question, then use <leader>ma to get answer.",
+  processing = "Processing %d question(s)...",
+  gathering_context = "Gathering context...",
+  success = "Answered %d question(s)",
+  partial_success = "Answered %d/%d question(s). %d failed.",
+  error = "Error: ",
+  no_response = "No response received",
+  invalid_response = "Failed to parse LLM response (missing [ANSWER:id] markers)",
+  context_budget_exceeded = "Context exceeds budget (%d > %d tokens)",
+  no_pending_code = "No pending code requests in this file. Use <leader>mc to create one.",
+  code_spawned = "Code block created. Describe what you want, then use <leader>mx to generate.",
+  code_processing = "Processing %d code request(s)...",
+  code_success = "Generated %d code block(s)",
+  code_partial_success = "Generated %d/%d code block(s). %d failed.",
+  invalid_code_response = "Failed to parse LLM response (missing [CODE:id] markers)",
 }
 
----Get a message in the current language
+---Get a message
 ---@param key string Message key
 ---@return string Message text
 function M._msg(key)
-  local lang = prompts.get_language()
-  local messages = M._messages[lang] or M._messages.en
-  return messages[key] or M._messages.en[key] or key
+  return M._messages[key] or key
 end
 
 -- =============================================================================
@@ -144,17 +123,6 @@ function M._create_commands()
       return knowledge.get_dates()
     end,
     desc = "Browse knowledge by date",
-  })
-
-  -- Language command
-  vim.api.nvim_create_user_command("EditutorLang", function(opts)
-    M.set_language(opts.args ~= "" and opts.args or nil)
-  end, {
-    nargs = "?",
-    complete = function()
-      return { "English", "Tiếng Việt", "Vietnamese", "en", "vi" }
-    end,
-    desc = "Set response language",
   })
 
   -- Cache command
@@ -757,38 +725,6 @@ function M.browse_knowledge(date)
   end
 
   print(table.concat(lines, "\n"))
-end
-
----Set language
-function M.set_language(lang)
-  if not lang then
-    local current = config.options.language
-    print(string.format("Current language: %s\nUsage: :EditutorLang English or :EditutorLang Vietnamese", current))
-    return
-  end
-
-  local valid = {
-    ["English"] = "English",
-    ["english"] = "English",
-    ["en"] = "English",
-    ["Vietnamese"] = "Vietnamese",
-    ["vietnamese"] = "Vietnamese",
-    ["vi"] = "Vietnamese",
-    ["Tiếng Việt"] = "Vietnamese",
-    ["tiếng việt"] = "Vietnamese",
-    ["Tieng Viet"] = "Vietnamese",
-    ["tieng viet"] = "Vietnamese",
-  }
-
-  local normalized = valid[lang]
-  if not normalized then
-    vim.notify("[ai-editutor] Invalid language. Use 'English' or 'Vietnamese'.", vim.log.levels.ERROR)
-    return
-  end
-
-  config.options.language = normalized
-  local msg = normalized == "English" and "Language set to English" or "Đã chuyển sang tiếng Việt"
-  vim.notify("[ai-editutor] " .. msg, vim.log.levels.INFO)
 end
 
 ---Get version

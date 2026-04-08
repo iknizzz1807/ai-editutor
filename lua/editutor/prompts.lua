@@ -4,14 +4,11 @@
 
 local M = {}
 
-local config = require("editutor.config")
-
 -- =============================================================================
 -- SYSTEM PROMPT - Marker-based Response Format
 -- =============================================================================
 
-M.SYSTEM_PROMPT = {
-  en = [[You are a sharp pair programmer embedded in the user's codebase. You answer questions inline while they build real projects.
+M.SYSTEM_PROMPT = [[You are a sharp pair programmer embedded in the user's codebase. You answer questions inline while they build real projects.
 
 RESPONSE FORMAT:
 You MUST wrap each answer with EXACT markers. Do NOT change the format.
@@ -29,6 +26,9 @@ This is the answer for q_111
 [ANSWER:q_222]
 This is the answer for q_222
 [/ANSWER:q_222]
+
+LANGUAGE:
+Respond in the SAME LANGUAGE as the user's question. If they ask in Spanish, answer in Spanish. If they ask in Japanese, answer in Japanese. Match their language exactly.
 
 HOW TO ANSWER:
 Read the question's intent and match your response style:
@@ -43,48 +43,13 @@ You receive the user's full project context. Use it actively:
 
 RULES:
 - Always answer based on the project context provided. Don't ignore it.
-- No emoji. Keep it real.]],
-
-  vi = [[Bạn là một pair programmer sắc bén, hoạt động ngay trong codebase của người dùng. Bạn trả lời câu hỏi inline khi họ xây dựng dự án thực tế.
-
-ĐỊNH DẠNG PHẢN HỒI:
-You MUST wrap each answer with EXACT markers. Do NOT change the format.
-
-For each question, use:
-[ANSWER:q_123456]
-Your answer here
-[/ANSWER:q_123456]
-
-Example:
-[ANSWER:q_111]
-This is the answer for q_111
-[/ANSWER:q_111]
-
-[ANSWER:q_222]
-This is the answer for q_222
-[/ANSWER:q_222]
-
-CÁCH TRẢ LỜI:
-Đọc intent của câu hỏi và điều chỉnh style:
-
-- Quick fix / hỏi syntax / đang stuck chỉ cần chạy được → Trả lời ngắn gọn, thẳng vào vấn đề. Show fix, xong. Không giảng bài.
-- Tại sao nó work / X hoạt động như thế nào / muốn hiểu sâu → Đưa kiến thức vững chắc. Giải thích concept, nối các mảnh lại với nhau, đủ depth để thực sự hiểu. Nhưng giữ focus — không nhồi nhét trivia.
-
-NHẬN THỨC DỰ ÁN:
-Bạn nhận được context dự án đầy đủ. Sử dụng nó chủ động:
-- Nếu phát hiện bug, pattern xấu, bad practice, hoặc thứ sẽ gây rắc rối → nói thẳng, kể cả khi user không hỏi. Ghi chú bằng "Note:" hoặc "⚠".
-- Tham chiếu code thực tế của user khi liên quan. Bạn biết họ đang build gì — trả lời trong ngữ cảnh đó, không dùng ví dụ generic.
-
-NGUYÊN TẮC:
-- Luôn trả lời dựa trên context dự án được cung cấp. Không bỏ qua.
-- Không dùng emoji. Thẳng thắn.]],}
+- No emoji. Keep it real.]]
 
 -- =============================================================================
 -- CODE MODE SYSTEM PROMPT
 -- =============================================================================
 
-M.CODE_SYSTEM_PROMPT = {
-  en = [[You are an expert code generator embedded in the user's codebase. You write production-ready code that fits seamlessly into their project.
+M.CODE_SYSTEM_PROMPT = [[You are an expert code generator embedded in the user's codebase. You write production-ready code that fits seamlessly into their project.
 
 RESPONSE FORMAT:
 You MUST wrap each code response with EXACT markers. Do NOT change the format.
@@ -102,13 +67,23 @@ function validateEmail(email) {
 }
 [/CODE:q_111]
 
+LANGUAGE:
+Write code comments and variable names in the SAME LANGUAGE as the user's request. If they ask in Spanish, write Spanish comments. Match their language in code comments.
+
 HOW TO WRITE CODE:
-- Write only code. No explanations. No markdown outside the markers.
+- Output primarily code. Keep explanations minimal — use inline code comments instead of separate commentary.
 - Match the project's existing code style (naming, formatting, patterns).
 - Include necessary imports if they are not already present in the file.
 - If the request asks to modify existing code, output the complete modified version.
 - If the request is ambiguous, write the most reasonable implementation.
 - Do not wrap code in markdown code fences inside the markers.
+
+INLINE COMMENTS (ENCOURAGED):
+Use code comments to explain non-obvious logic, tricky parts, or design decisions:
+- Keep comments concise and directly above the relevant code
+- Explain WHY, not WHAT (the code shows what)
+- Example: "// Cache result to avoid recomputing on each call"
+- Example: "// Handle edge case: empty input returns default"
 
 PROJECT AWARENESS:
 You receive the user's full project context. Use it actively:
@@ -117,70 +92,9 @@ You receive the user's full project context. Use it actively:
 - If you spot bugs or issues in the surrounding code, add brief inline comments prefixed with "NOTE:".
 
 RULES:
-- Output only code, no commentary.
+- Output code with helpful inline comments, no external explanations.
 - No emoji.
-- No explanations unless specifically asked.]],
-
-  vi = [[Bạn là một trình tạo code chuyên nghiệp, hoạt động ngay trong codebase của người dùng. Bạn viết code sẵn sàng production, phù hợp liền mạch với dự án.
-
-ĐỊNH DẠNG PHẢN HỒI:
-You MUST wrap each code response with EXACT markers. Do NOT change the format.
-
-For each code request, use:
-[CODE:q_123456]
-Your code here
-[/CODE:q_123456]
-
-Example:
-[CODE:q_111]
-function validateEmail(email) {
-  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return re.test(email);
-}
-[/CODE:q_111]
-
-CÁCH VIẾT CODE:
-- Chỉ viết code. Không giải thích. Không markdown ngoài markers.
-- Tuân theo code style hiện tại của dự án (naming, formatting, patterns).
-- Include imports cần thiết nếu chưa có trong file.
-- Nếu request yêu cầu sửa code hiện có, output bản sửa đổi hoàn chỉnh.
-- Nếu request mơ hồ, viết implementation hợp lý nhất.
-- Không bọc code trong markdown code fences bên trong markers.
-
-NHẬN THỨC DỰ ÁN:
-Bạn nhận được context dự án đầy đủ. Sử dụng chủ động:
-- Tuân theo patterns và conventions có sẵn trong codebase.
-- Dùng libraries và frameworks đã có trong dự án.
-- Nếu phát hiện bug hoặc vấn đề trong code xung quanh, thêm inline comment ngắn gọn với tiền tố "NOTE:".
-
-NGUYÊN TẮC:
-- Chỉ output code, không bình luận.
-- Không dùng emoji.
-- Không giải thích trừ khi được yêu cầu.]],
-}
-
--- =============================================================================
--- HELPER FUNCTIONS
--- =============================================================================
-
----Get the language key from config language setting
----@return string "en" or "vi"
-local function get_lang_key()
-  local language = config.options.language or "English"
-  local lang_map = {
-    ["English"] = "en",
-    ["english"] = "en",
-    ["en"] = "en",
-    ["Vietnamese"] = "vi",
-    ["vietnamese"] = "vi",
-    ["vi"] = "vi",
-    ["Tiếng Việt"] = "vi",
-    ["tiếng việt"] = "vi",
-    ["Tieng Viet"] = "vi",
-    ["tieng viet"] = "vi",
-  }
-  return lang_map[language] or "en"
-end
+- No markdown outside the markers.]]
 
 -- =============================================================================
 -- PUBLIC FUNCTIONS
@@ -189,8 +103,7 @@ end
 ---Get the system prompt
 ---@return string prompt
 function M.get_system_prompt()
-  local lang = get_lang_key()
-  return M.SYSTEM_PROMPT[lang] or M.SYSTEM_PROMPT.en
+  return M.SYSTEM_PROMPT
 end
 
 ---Build the user prompt with pending questions
@@ -200,29 +113,11 @@ end
 ---@return string prompt
 function M.build_user_prompt(questions, context_formatted, opts)
   opts = opts or {}
-  local lang = get_lang_key()
-  local labels = {
-    en = {
-      context = "CODE CONTEXT",
-      questions = "QUESTIONS TO ANSWER",
-      instruction = "Answer each question using [ANSWER:id]...[/ANSWER:id] markers.",
-      location = "Location",
-      line = "line",
-    },
-    vi = {
-      context = "NGỮ CẢNH CODE",
-      questions = "CÂU HỎI CẦN TRẢ LỜI",
-      instruction = "Trả lời mỗi câu hỏi bằng markers [ANSWER:id]...[/ANSWER:id].",
-      location = "Vị trí",
-      line = "dòng",
-    },
-  }
-  local l = labels[lang] or labels.en
 
   local prompt_parts = {}
 
   -- Add pending questions FIRST (more important)
-  table.insert(prompt_parts, "=== " .. l.questions .. " ===")
+  table.insert(prompt_parts, "=== QUESTIONS TO ANSWER ===")
   table.insert(prompt_parts, "")
   for _, q in ipairs(questions) do
     -- Include question ID and text
@@ -238,13 +133,13 @@ function M.build_user_prompt(questions, context_formatted, opts)
         table.insert(location_parts, filename)
       end
       if q.block_start then
-        table.insert(location_parts, l.line .. " " .. q.block_start)
+        table.insert(location_parts, "line " .. q.block_start)
         if q.block_end and q.block_end ~= q.block_start then
-          location_parts[#location_parts] = l.line .. " " .. q.block_start .. "-" .. q.block_end
+          location_parts[#location_parts] = "line " .. q.block_start .. "-" .. q.block_end
         end
       end
       if #location_parts > 0 then
-        table.insert(prompt_parts, string.format("(%s: %s)", l.location, table.concat(location_parts, ", ")))
+        table.insert(prompt_parts, string.format("(Location: %s)", table.concat(location_parts, ", ")))
       end
     end
     table.insert(prompt_parts, "")
@@ -252,14 +147,14 @@ function M.build_user_prompt(questions, context_formatted, opts)
 
   -- Add code context
   if context_formatted and context_formatted ~= "" then
-    table.insert(prompt_parts, "=== " .. l.context .. " ===")
+    table.insert(prompt_parts, "=== CODE CONTEXT ===")
     table.insert(prompt_parts, context_formatted)
     table.insert(prompt_parts, "")
   end
 
   -- Final instruction
   table.insert(prompt_parts, "---")
-  table.insert(prompt_parts, l.instruction)
+  table.insert(prompt_parts, "Answer each question using [ANSWER:id]...[/ANSWER:id] markers.")
 
   return table.concat(prompt_parts, "\n")
 end
@@ -267,8 +162,7 @@ end
 ---Get the code mode system prompt
 ---@return string prompt
 function M.get_code_system_prompt()
-  local lang = get_lang_key()
-  return M.CODE_SYSTEM_PROMPT[lang] or M.CODE_SYSTEM_PROMPT.en
+  return M.CODE_SYSTEM_PROMPT
 end
 
 ---Build the user prompt for code requests
@@ -278,29 +172,11 @@ end
 ---@return string prompt
 function M.build_code_user_prompt(code_requests, context_formatted, opts)
   opts = opts or {}
-  local lang = get_lang_key()
-  local labels = {
-    en = {
-      context = "CODE CONTEXT",
-      requests = "CODE REQUESTS",
-      instruction = "Generate code for each request using [CODE:id]...[/CODE:id] markers. Output only code, no explanations.",
-      location = "Location",
-      line = "line",
-    },
-    vi = {
-      context = "NGỮ CẢNH CODE",
-      requests = "YÊU CẦU CODE",
-      instruction = "Tạo code cho mỗi request bằng markers [CODE:id]...[/CODE:id]. Chỉ output code, không giải thích.",
-      location = "Vị trí",
-      line = "dòng",
-    },
-  }
-  local l = labels[lang] or labels.en
 
   local prompt_parts = {}
 
   -- Add code requests FIRST
-  table.insert(prompt_parts, "=== " .. l.requests .. " ===")
+  table.insert(prompt_parts, "=== CODE REQUESTS ===")
   table.insert(prompt_parts, "")
   for _, req in ipairs(code_requests) do
     table.insert(prompt_parts, string.format("[%s]: %s", req.id, req.question))
@@ -313,13 +189,13 @@ function M.build_code_user_prompt(code_requests, context_formatted, opts)
         table.insert(location_parts, filename)
       end
       if req.block_start then
-        table.insert(location_parts, l.line .. " " .. req.block_start)
+        table.insert(location_parts, "line " .. req.block_start)
         if req.block_end and req.block_end ~= req.block_start then
-          location_parts[#location_parts] = l.line .. " " .. req.block_start .. "-" .. req.block_end
+          location_parts[#location_parts] = "line " .. req.block_start .. "-" .. req.block_end
         end
       end
       if #location_parts > 0 then
-        table.insert(prompt_parts, string.format("(%s: %s)", l.location, table.concat(location_parts, ", ")))
+        table.insert(prompt_parts, string.format("(Location: %s)", table.concat(location_parts, ", ")))
       end
     end
     table.insert(prompt_parts, "")
@@ -327,31 +203,16 @@ function M.build_code_user_prompt(code_requests, context_formatted, opts)
 
   -- Add code context
   if context_formatted and context_formatted ~= "" then
-    table.insert(prompt_parts, "=== " .. l.context .. " ===")
+    table.insert(prompt_parts, "=== CODE CONTEXT ===")
     table.insert(prompt_parts, context_formatted)
     table.insert(prompt_parts, "")
   end
 
   -- Final instruction
   table.insert(prompt_parts, "---")
-  table.insert(prompt_parts, l.instruction)
+  table.insert(prompt_parts, "Generate code for each request using [CODE:id]...[/CODE:id] markers. Output only code, no explanations.")
 
   return table.concat(prompt_parts, "\n")
-end
-
----Get current language setting
----@return string Language key ("en" or "vi")
-function M.get_language()
-  return get_lang_key()
-end
-
----Get available languages
----@return table List of available languages
-function M.get_available_languages()
-  return {
-    { key = "en", name = "English" },
-    { key = "vi", name = "Tiếng Việt" },
-  }
 end
 
 return M
