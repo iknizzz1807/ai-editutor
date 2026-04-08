@@ -37,7 +37,7 @@ M.PROVIDERS = {
 		name = "gemini",
 		url = "https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent",
 		streaming_url = "https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse",
-		model = "gemini-2.5-flash-preview-05-20",
+		model = "gemini-3-flash-preview",
 		headers = {
 			["content-type"] = "application/json",
 			["x-goog-api-key"] = "${api_key}",
