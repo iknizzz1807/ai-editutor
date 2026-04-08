@@ -1,5 +1,5 @@
 -- editutor/provider.lua
--- LLM API client for Google Gemini
+-- LLM API client for Gemini and NVIDIA (Kimi K2.5)
 
 local M = {}
 
@@ -83,6 +83,48 @@ M.PROVIDERS = {
 		end,
 		stream_enabled = true,
 		stream_in_body = false,
+	},
+
+	nvidia = {
+		__inherited_from = "BASE_PROVIDER",
+		name = "nvidia",
+		url = "https://integrate.api.nvidia.com/v1/chat/completions",
+		model = "moonshotai/kimi-k2.5",
+		headers = {
+			["content-type"] = "application/json",
+			["Authorization"] = "Bearer ${api_key}",
+		},
+		api_key = function()
+			return os.getenv("NVIDIA_API_KEY")
+		end,
+		format_request = function(data)
+			return {
+				model = data.model,
+				messages = {
+					{ role = "system", content = data.system },
+					{ role = "user", content = data.message },
+				},
+				max_tokens = data.max_tokens or 16384,
+				temperature = 1.0,
+				top_p = 1.0,
+				stream = true,
+				chat_template_kwargs = { thinking = true },
+			}
+		end,
+		format_response = function(response)
+			if response.choices and response.choices[1] then
+				return response.choices[1].message.content
+			end
+			return nil
+		end,
+		format_error = function(response)
+			if response.error then
+				return response.error.message or "Unknown error"
+			end
+			return "Unknown error"
+		end,
+		stream_enabled = true,
+		stream_in_body = true,
 	},
 }
 
@@ -306,7 +348,7 @@ function M.query_async(system_prompt, user_message, callback)
 	local api_key = get_api_key(provider)
 
 	if not api_key then
-		callback(nil, "GEMINI_API_KEY or GOOGLE_API_KEY environment variable not set")
+		callback(nil, "API key not found. Set GEMINI_API_KEY or NVIDIA_API_KEY environment variable.")
 		return
 	end
 
@@ -350,7 +392,7 @@ function M.query(system_prompt, user_message)
 	local api_key = get_api_key(provider)
 
 	if not api_key then
-		return nil, "GEMINI_API_KEY or GOOGLE_API_KEY environment variable not set"
+		return nil, "API key not found. Set GEMINI_API_KEY or NVIDIA_API_KEY environment variable."
 	end
 
 	local headers = build_headers(provider.headers, api_key)
@@ -383,7 +425,7 @@ function M.check_provider()
 
 	local api_key = get_api_key(provider)
 	if not api_key then
-		return false, "GEMINI_API_KEY or GOOGLE_API_KEY environment variable not set"
+		return false, "API key not found. Set GEMINI_API_KEY or NVIDIA_API_KEY environment variable."
 	end
 
 	return true, nil
@@ -423,7 +465,7 @@ end
 ---@param line string Data line from SSE
 ---@return string|nil text Extracted text content
 ---@return boolean done Whether stream is done
-local function parse_sse_line(line)
+local function parse_sse_line(line, provider_name)
 	if not line or line == "" or line == "data: [DONE]" then
 		if line == "data: [DONE]" then
 			return nil, true
@@ -443,18 +485,29 @@ local function parse_sse_line(line)
 
 	local text = nil
 
-	if json.candidates and json.candidates[1] then
-		local content = json.candidates[1].content
-		if content and content.parts and content.parts[1] then
-			text = content.parts[1].text
+	if provider_name == "gemini" then
+		if json.candidates and json.candidates[1] then
+			local content = json.candidates[1].content
+			if content and content.parts and content.parts[1] then
+				text = content.parts[1].text
+			end
+			local finish_reason = json.candidates[1].finishReason
+			if finish_reason and finish_reason == "STOP" then
+				return text, true
+			end
 		end
-		local finish_reason = json.candidates[1].finishReason
-		if finish_reason and finish_reason == "STOP" then
+		if json.error then
+			return nil, true
+		end
+	else
+		-- OpenAI-compatible (nvidia, etc.)
+		if json.choices and json.choices[1] and json.choices[1].delta then
+			text = json.choices[1].delta.content
+		end
+		local finish_reason = json.choices and json.choices[1] and json.choices[1].finish_reason
+		if finish_reason and finish_reason ~= vim.NIL then
 			return text, true
 		end
-	end
-	if json.error then
-		return nil, true
 	end
 
 	return text, false
@@ -479,7 +532,7 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
 	local api_key = get_api_key(prov)
 
 	if not api_key then
-		on_done(nil, "GEMINI_API_KEY or GOOGLE_API_KEY environment variable not set")
+		on_done(nil, "API key not found. Set GEMINI_API_KEY or NVIDIA_API_KEY environment variable.")
 		return
 	end
 
@@ -547,7 +600,7 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
 		end
 
 		for line in data:gmatch("[^\n]+") do
-			local text, done = parse_sse_line(line)
+			local text, done = parse_sse_line(line, prov.name)
 
 			if text then
 				table.insert(full_response, text)
@@ -592,7 +645,7 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
 				if #full_response == 0 then
 					if response and response.body and response.body ~= "" then
 						for line in response.body:gmatch("[^\n]+") do
-							local text, _ = parse_sse_line(line)
+							local text, _ = parse_sse_line(line, prov.name)
 							if text then
 								table.insert(full_response, text)
 							end
