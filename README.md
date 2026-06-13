@@ -1,276 +1,424 @@
 # ai-editutor
 
-**Build projects. Ask questions. Level up.**
+**A context-first Neovim assistant for developers who still want to think.**
 
-A Neovim plugin for developers who learn by building.
+`ai-editutor` lets you ask questions inside your codebase without handing the whole job to a coding agent. It gathers the smallest useful context around what you are doing, asks an LLM with that context, and writes the answer back inline so you can read, judge, learn, and keep control.
 
-## The Problem
+This project is built around one belief: **the assistant is only useful if its context is correct**.
 
-You're deep in your codebase. You hit a function you don't fully understand. You want to know:
+LLMs have stale training data. Libraries, frameworks, APIs, and best practices change constantly. `ai-editutor` is designed to lean on your actual project, your local LSP, your installed dependencies, and the code around your question instead of pretending the model's knowledge cutoff is enough.
 
-- *"What exactly does this function do?"*
-- *"Is there a library that handles this better?"*
-- *"What's the best practice for error handling here?"*
-- *"Why is this returning nil?"*
+## Why
 
-You could open ChatGPT. Copy your code. Paste it. Explain your project structure. Copy more context. Paste again. Get a generic answer that doesn't fit your codebase.
+Modern coding agents are powerful, but they can also make you passive:
 
-**Or you could just ask. Right here. In your code. With full context.**
+- they write too much before you understand the problem;
+- they hide decisions behind large diffs;
+- they make it easy to skip review;
+- they can confidently use outdated framework knowledge;
+- they often miss project-specific rules unless you keep repeating them.
 
-## The Solution
+`ai-editutor` takes a different shape. It is not trying to replace the developer. It is a pair-programming tutor that sits inside Neovim and answers questions with project context while keeping the code, question, and answer visible in the same file.
+
+The goal is to help you:
+
+- understand the code you are touching;
+- ask precise questions at the exact location of confusion;
+- get help that respects the current project design;
+- catch mistakes, bad patterns, and risky assumptions early;
+- stay involved instead of outsourcing your thinking.
+
+## Core Idea
+
+You put a temporary question block directly in the source file:
 
 ```python
-# You're looking at this function, confused:
+# [Q:q_1737200000000]
+# What does this function actually do?
+# Is this merge order correct?
+# What happens if config has no defaults key?
+# [PENDING:q_1737200000000]
 def process_user_data(data, config):
     normalized = {k.lower(): v for k, v in data.items() if v is not None}
     return {**config.get("defaults", {}), **normalized}
-
-# Press <leader>mq, type your question:
-# [Q:q_1737200000000]
-# What does this function do? Is the order of merging correct?
-# What happens if config doesn't have "defaults" key?
-# [PENDING:q_1737200000000]
 ```
 
-Press `<leader>ma`. AI sees your code, your imports, your project structure. Answers with full context:
+Then run `:EditutorAsk` or press `<leader>ma`.
+
+The assistant sees the current file, relevant imports, incoming references, project structure, LSP diagnostics, and library/API information when available. It replaces the pending marker with an answer:
 
 ```python
 # [Q:q_1737200000000]
-# What does this function do? Is the order of merging correct?
-# What happens if config doesn't have "defaults" key?
+# What does this function actually do?
+# Is this merge order correct?
+# What happens if config has no defaults key?
 #
-# This function:
-# 1. Filters out None values and lowercases keys from input data
-# 2. Merges with defaults from config (defaults first, then normalized overrides)
+# This normalizes user data by lowercasing keys and dropping None values.
+# The merge order means config defaults are applied first, then user data overrides them.
+# `config.get("defaults", {})` is safe if the key is missing.
 #
-# The merge order is correct - user data overwrites defaults.
-#
-# If "defaults" key missing: config.get("defaults", {}) returns empty dict,
-# so it just returns normalized data. Safe, no KeyError.
-#
-# Consider adding type hints for clarity:
-# def process_user_data(data: dict[str, Any], config: dict) -> dict:
+# Note: this assumes `config` is dict-like. If callers can pass None or another object,
+# validate that before calling `.get()`.
+def process_user_data(data, config):
+    normalized = {k.lower(): v for k, v in data.items() if v is not None}
+    return {**config.get("defaults", {}), **normalized}
 ```
 
-**Read it. Understand it. Delete the block. Keep coding.**
+Read it, question it, delete it, continue coding.
 
-## Why This Works
+## What Makes It Different
 
-### Context is Everything
+### Context First
 
-ChatGPT doesn't know your codebase. You have to explain everything.
+The context engine is the heart of this plugin. The assistant should not answer from vague memory when the project and local tools can provide better evidence.
 
-ai-editutor **automatically gathers context**:
-- Full current file
-- Files you import (and files that import you)
-- Type definitions via LSP
-- Project structure
+`ai-editutor` currently gathers:
 
-When you ask "is this the right approach?", AI actually sees what approach you're using.
+- current file content;
+- project tree and source files for small projects;
+- import graph context for larger projects;
+- files imported by the current file;
+- files that import the current file;
+- transitive imports when budget allows;
+- Tree-sitter semantic chunks for large files;
+- LSP definitions for project symbols;
+- LSP diagnostics near the question;
+- LSP hover/library API information near the question.
 
-### Stay in Flow
+The context system has a token budget and degrades from rich context to minimal context instead of blindly stuffing the prompt.
 
-No browser tabs. No copy-paste. No context switching.
+### Runtime Docs Over Stale Memory
 
-```
-Ask → Read → Understand → Delete → Keep building
-```
+The model may not know the version of a library you are actually using. `ai-editutor` tries to reduce that risk by pulling information from the active editor environment:
 
-The question block is temporary. It's a learning moment, not permanent documentation.
+- LSP hover text can expose installed API signatures and docs;
+- LSP definitions can show real project types and functions;
+- diagnostics can reveal the current compiler/typechecker state;
+- local imports reveal what code path you are actually working in.
 
-### Real Questions, Real Answers
+The assistant should prefer this live context over general training knowledge. If context is incomplete or the model is unsure, it should say so instead of pretending certainty.
 
-Not "explain closures". But:
+### Developer Stays In Control
 
-```javascript
-/* [Q:q_...]
-This useEffect runs on every render. How do I make it run only once?
-And should I use useCallback for the handleSubmit inside?
-[PENDING:q_...]
-*/
-useEffect(() => {
-  fetchUserData();
-}, []);
+Answers are inline and temporary. The plugin does not hide the reasoning in a chat window or silently rewrite your project.
 
-const handleSubmit = () => {
-  // ...
-};
-```
+You ask. You read. You decide.
 
-```go
-/* [Q:q_...]
-Is there a stdlib function that does this? Or should I use a library?
-What's idiomatic Go for this pattern?
-[PENDING:q_...]
-*/
-func contains(slice []string, item string) bool {
-    for _, v := range slice {
-        if v == item {
-            return true
-        }
-    }
-    return false
-}
-```
+Code generation exists, but it is intentionally request-block based. You still place the request, review the output, and keep control of what lands in the file.
 
-```rust
-/* [Q:q_...]
-When should I use &str vs String here?
-This function is called frequently, does it matter for performance?
-[PENDING:q_...]
-*/
-fn process_name(name: String) -> String {
-    name.trim().to_lowercase()
-}
-```
+### Project-Aware Feedback
+
+The assistant is expected to do more than answer the literal question. If the surrounding code shows a bug, weak design, bad practice, tech debt, or mismatch with the existing architecture, it should call that out clearly.
+
+The goal is not to produce comforting answers. The goal is to make the developer sharper.
+
+## Features
+
+- Inline question blocks with `[Q:id]` and `[PENDING:id]` markers.
+- Batch processing of multiple pending questions in one file.
+- Visual selection support: ask about selected code.
+- Code request blocks with `[C:id]` and generated `[CODE:id]` responses.
+- Adaptive project context extraction with token budgeting.
+- Import graph analysis across common languages.
+- Tree-sitter semantic chunking for large files.
+- LSP-powered definitions, diagnostics, hover text, and library API hints.
+- Local knowledge history stored as daily JSON files.
+- Debug logs for inspecting prompt/context behavior.
+- Health check for dependencies and provider setup.
 
 ## Quick Start
 
-**1. Install**
+### Install
+
+Using `lazy.nvim`:
 
 ```lua
--- lazy.nvim
 {
   "iknizzz1807/ai-editutor",
   dependencies = { "nvim-lua/plenary.nvim" },
   config = function()
     require("editutor").setup({
-      provider = "deepseek",  -- or claude, openai, gemini, ollama
+      provider = "gemini",
+      model = "gemini-3-flash-preview",
     })
   end,
 }
 ```
 
-**2. Set your API key**
+### Set API Key
+
+For Gemini:
 
 ```bash
-export DEEPSEEK_API_KEY="your-key"
-# or ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.
+export GEMINI_API_KEY="your-key"
 ```
 
-**3. Ask a question**
+or:
 
-1. Navigate to code you want to understand
-2. Press `<leader>mq` - question block appears
-3. Type your question
-4. Press `<Esc>`, then `<leader>ma`
-5. Read the answer, delete the block, keep building
+```bash
+export GOOGLE_API_KEY="your-key"
+```
+
+For NVIDIA:
+
+```bash
+export NVIDIA_API_KEY="your-key"
+```
+
+### Ask A Question
+
+1. Move the cursor to the code you want to understand.
+2. Press `<leader>mq` or run `:EditutorQuestion`.
+3. Type your question in the block.
+4. Press `<Esc>`.
+5. Press `<leader>ma` or run `:EditutorAsk`.
+6. Read the inline answer and decide what to do.
 
 ## Visual Selection
 
-Select confusing code first, then press `<leader>mq`:
+Select code first, then press `<leader>mq`:
 
 ```typescript
-// Select these lines, press <leader>mq:
 const result = data
-  .filter(x => x.status === 'active')
+  .filter(x => x.status === "active")
   .reduce((acc, item) => ({
     ...acc,
-    [item.id]: item.value * multiplier
+    [item.id]: item.value * multiplier,
   }), {});
+```
 
-// Question block created with your selection quoted:
+The generated question block includes the selected code as context:
+
+````typescript
 /* [Q:q_1737200000000]
 Regarding this code:
 ```
 const result = data
-  .filter(x => x.status === 'active')
+  .filter(x => x.status === "active")
   .reduce((acc, item) => ({
     ...acc,
-    [item.id]: item.value * multiplier
+    [item.id]: item.value * multiplier,
   }), {});
 ```
 
 Can this be simplified? Is reduce the right choice here?
-What if data is empty?
 [PENDING:q_1737200000000]
 */
+````
+
+## Code Requests
+
+`ai-editutor` can also generate code from inline request blocks.
+
+Use:
+
+```vim
+:EditutorCode
+:EditutorExecute
 ```
 
-## Batch Questions
+or the default keymaps:
 
-Multiple questions? Ask them all, process once:
-
-```python
-# [Q:q_1737200000000]
-# What does this decorator do?
-# [PENDING:q_1737200000000]
-
-@lru_cache(maxsize=128)
-def expensive_calculation(n):
-    # ...
-
-# [Q:q_1737200001000]
-# Should I use lru_cache or functools.cache here?
-# [PENDING:q_1737200001000]
+```text
+<leader>mc  create code request
+<leader>mx  execute pending code requests
 ```
 
-Press `<leader>ma` once. Both answered.
+This mode is for targeted generation, not full-agent autonomy. Prefer small requests that you can review carefully.
+
+## Commands
+
+| Command | Description |
+| --- | --- |
+| `:Editutor` | Process pending questions, lazy-load entry command |
+| `:Editutor ask` | Same as `:EditutorAsk` |
+| `:Editutor version` | Show plugin version |
+| `:EditutorQuestion` | Create a question block |
+| `:EditutorAsk` | Process pending questions in current file |
+| `:EditutorCode` | Create a code request block |
+| `:EditutorExecute` | Process pending code requests in current file |
+| `:EditutorPending` | Show pending question count |
+| `:EditutorHistory` | Show recent Q&A history |
+| `:EditutorBrowse` | Browse saved knowledge by date |
+| `:EditutorExport` | Export saved knowledge to Markdown |
+| `:EditutorClearCache` | Clear context cache |
+| `:EditutorLog` | Open debug log |
+| `:EditutorClearLog` | Clear debug log |
+| `:EditutorTestRun` | Run built-in context test runner commands |
+| `:EditutorTestResults` | View test runner results |
 
 ## Configuration
 
 ```lua
 require("editutor").setup({
-  provider = "deepseek",
-  model = "deepseek-chat",
-  language = "Vietnamese",  -- or "English"
+  provider = "gemini",
+  model = "gemini-3-flash-preview",
 
   keymaps = {
     question = "<leader>mq",
     ask = "<leader>ma",
+    code = "<leader>mc",
+    execute = "<leader>mx",
   },
 
   context = {
-    token_budget = 20000,
+    token_budget = 25000,
+    library_info_budget = 2000,
+    library_scan_radius = 50,
   },
 })
 ```
 
-## Providers
+### Built-In Providers
 
-| Provider | Environment Variable | Notes |
-|----------|---------------------|-------|
-| DeepSeek | `DEEPSEEK_API_KEY` | Cheap, good for code |
-| Claude | `ANTHROPIC_API_KEY` | Best quality |
-| OpenAI | `OPENAI_API_KEY` | GPT-4o |
-| Gemini | `GEMINI_API_KEY` | Google |
-| Groq | `GROQ_API_KEY` | Fast inference |
-| Ollama | - | Local, free |
+| Provider | Environment Variable | Default Model |
+| --- | --- | --- |
+| `gemini` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-3-flash-preview` |
+| `nvidia` | `NVIDIA_API_KEY` | `moonshotai/kimi-k2.5` |
 
-## Commands
+Custom providers can be registered or passed through `providers` in setup.
 
-| Command | Description |
-|---------|-------------|
-| `:EditutorQuestion` | Spawn question block |
-| `:EditutorAsk` | Process pending questions |
-| `:EditutorPending` | Count pending questions |
-| `:EditutorHistory` | View Q&A history |
-| `:EditutorBrowse` | Browse by date |
-| `:EditutorExport` | Export to markdown |
-| `:EditutorLang` | Switch language |
+## Context Engine
+
+The context engine chooses between two broad modes.
+
+### Full Project Mode
+
+If the project fits within the token budget, `ai-editutor` includes:
+
+- current file first;
+- project structure;
+- other source/config files selected by the scanner.
+
+### Adaptive Mode
+
+If the project is too large, it uses a backtracking strategy:
+
+| Level | Purpose |
+| --- | --- |
+| `maximum` | Full related files, import depth 2, LSP context |
+| `semantic_all` | Semantic chunks for large files |
+| `depth1_with_lsp` | Direct imports plus LSP definitions |
+| `depth1_no_lsp` | Direct imports without LSP |
+| `limited_imports` | Top related imports only |
+| `types_only` | Type/signature oriented context |
+| `minimal` | Current file only |
+
+The system should always try to return the best possible context within budget rather than fail because the project is large.
+
+## Project-Specific Guidance Files
+
+This is an important design direction for the project.
+
+Many projects need local instructions that are more reliable than generic model knowledge: architecture rules, preferred libraries, anti-patterns, domain vocabulary, testing conventions, framework version notes, and links to current docs.
+
+A future direction is for `ai-editutor` to discover project guidance files such as:
+
+- `EDITUTOR.md`
+- `.editutor.md`
+- `skills.md`
+- `.editutor/skills.md`
+- `.editutor/context.md`
+- `.editutor/docs.md`
+
+Suggested shape:
+
+```markdown
+# EDITUTOR.md
+
+## Project Intent
+What this project is trying to build and what tradeoffs matter.
+
+## Architecture Rules
+- Keep business logic in services, not UI components.
+- Do not bypass the repository layer.
+
+## Current Library Docs And Versions
+- React: use the project-installed version and local docs, not generic assumptions.
+- TanStack Query: prefer existing query key conventions in `src/queryKeys.ts`.
+
+## Local Anti-Patterns
+- Do not introduce global mutable state for request-scoped data.
+- Do not add compatibility layers unless there is a real persisted/external contract.
+
+## Review Checklist
+- Does this match existing patterns?
+- Is the error handling consistent?
+- Is this relying on outdated API knowledge?
+```
+
+The assistant should treat these files as project policy, not casual notes. When they conflict with stale model knowledge, the project files should win.
+
+This would make `ai-editutor` closer to a project-aware tutor: it knows not only the current code, but also the local rules of the codebase.
 
 ## Knowledge Tracking
 
-Every Q&A is saved. Review what you've learned:
+Every answered question is saved locally under Neovim's data directory:
 
-```vim
-:EditutorHistory    " Recent questions
-:EditutorBrowse     " Browse by date
-:EditutorExport     " Export to markdown for notes
+```text
+stdpath("data")/editutor/knowledge/YYYY-MM-DD.json
 ```
 
-Your learning history, searchable and exportable.
+Use:
 
----
+```vim
+:EditutorHistory
+:EditutorBrowse
+:EditutorExport
+```
+
+This history is meant to help you review what you learned, not to hide decisions in a black box.
+
+## Development
+
+Available Make targets:
+
+```bash
+make test
+make test-file FILE=tests/parser_spec.lua
+make test-verbose
+make lint
+make format
+make health
+```
+
+Notes:
+
+- `plenary.nvim` is required for HTTP requests and tests.
+- `curl` is required for provider requests.
+- Tree-sitter improves semantic extraction.
+- LSP clients significantly improve context quality.
+- The current repository may not include the full test fixtures referenced by the Makefile.
+
+## Health Check
+
+Run:
+
+```vim
+:checkhealth editutor
+```
+
+The health check verifies:
+
+- Neovim version;
+- `plenary.nvim`;
+- Tree-sitter availability;
+- `curl`;
+- active provider and API key;
+- context extraction mode;
+- LSP availability;
+- project scanner stats;
+- knowledge storage;
+- cache state.
 
 ## Philosophy
 
-This is not a code generator. This is not about shipping faster.
+`ai-editutor` is not about shipping faster at any cost.
 
-This is for the moments when you think *"I should understand this better"* - and then you actually do.
+It is for the moment when you think:
 
-**Learn while you build. Understand while you ship.**
+> I should understand this before I let an AI change it.
 
----
+The assistant should be sharp, context-aware, and honest about uncertainty. It should help you notice bad design, outdated assumptions, missing docs, and weak reasoning. It should make you better at reading and reviewing code, not worse.
 
-**Stop copy-pasting to ChatGPT. Start asking in context.**
+The product succeeds if it helps you keep agency while still getting high-quality AI support.
