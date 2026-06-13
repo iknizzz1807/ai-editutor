@@ -5,4 +5,4 @@
   - Khi không chắc chắn về bất cứ điều gì trong context được yêu cầu, thì phải luôn nói rõ với user.
   - Luôn không bao giờ tin chắc về knowledge cut off của bản thân vì các thư viện/framework luôn cập nhật liên tục, context của user về thông tin docs thư viện hay này nọ thì phải stick to it. Nếu không chắc chắn về việc code này có thể bị thay đổi do việc cập nhật của thư viện, framework thì cũng phải nói rõ điều đó cho user biết.
   - Nói rõ cho LLM AI biết được ý nghĩa các context được cung cấp là gì, nếu có thể thì nói rõ luôn các context này được trích như nào... để nó biết.
-......
+  - Đảm bảo logic trích xuất cây thư mục thật tốt và chuẩn, không bị phình to khi có nhiều file (ví dụ có file /data mà có 1 triệu file thì thôi luôn), luôn trách các file node modules, venv,.... thật chuẩn xác, nhạy cảm. Có thể tham khảo git ignore generator trên mạng không?

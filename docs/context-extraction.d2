@@ -1,0 +1,115 @@
+direction: down
+
+User: {
+  shape: person
+  label: "User in Neovim\nquestion + cursor + current buffer"
+}
+
+Entry: "Build Context\ncontext.lua"
+
+Scan: {
+  label: "Scan Project\nproject root, files, token estimate"
+}
+
+Mode: {
+  shape: diamond
+  label: "Project fits\ntoken budget?"
+}
+
+Full: {
+  label: "Full Project Mode\nsmall repo"
+  shape: rectangle
+}
+
+Adaptive: {
+  label: "Adaptive Mode\nlarge repo"
+  shape: rectangle
+}
+
+FullContext: {
+  label: "Include Directly\ncurrent file + project tree + source/config files"
+}
+
+CurrentFile: {
+  label: "1. Current File\nfull file if it fits\nelse header + question window"
+}
+
+Tree: {
+  label: "2. Project Tree\nsmall repo map for orientation"
+}
+
+Imports: {
+  label: "3. Import Graph\noutgoing imports + incoming importers\n+ transitive imports by depth"
+}
+
+Score: {
+  label: "4. Relevance Scoring\nboost same dir/types/config\npenalize tests/vendor/large/generated"
+}
+
+LSPDefs: {
+  label: "5. LSP Definitions\ndefinitions for identifiers\ninside project only"
+}
+
+Strategy: {
+  label: "6. Try Context Levels\nmaximum -> semantic_all -> depth1\n-> limited -> types_only -> minimal"
+}
+
+Shrink: {
+  shape: diamond
+  label: "Fits budget?"
+}
+
+Chunking: {
+  label: "Shrink Related Files\nfull file -> semantic chunks\n-> type/signature only"
+}
+
+Library: {
+  label: "Library Evidence\nLSP hover/docs for external APIs\nsmall separate budget"
+}
+
+Diagnostics: {
+  label: "Diagnostics\nLSP errors/warnings\nprioritize near question"
+}
+
+Assemble: {
+  label: "Assemble Final Prompt\ncurrent file, related files, LSP defs,\nlibrary info, diagnostics, project tree"
+}
+
+Audit: {
+  style.stroke-dash: 4
+  label: "Optional Upgrade\nContext Self-Audit\nDetect missing evidence before answering"
+}
+
+LLM: "Send To LLM"
+Answer: "Answer User"
+
+User -> Entry
+Entry -> Scan
+Scan -> Mode
+
+Mode -> Full: "yes"
+Mode -> Adaptive: "no"
+
+Full -> FullContext
+FullContext -> Assemble
+
+Adaptive -> CurrentFile
+CurrentFile -> Tree
+Tree -> Imports
+Imports -> Score
+Score -> LSPDefs
+LSPDefs -> Strategy
+Strategy -> Shrink
+Shrink -> Assemble: "yes"
+Shrink -> Chunking: "no"
+Chunking -> Strategy: "try smaller level"
+
+Library -> Assemble
+Diagnostics -> Assemble
+Scan -> Library
+Scan -> Diagnostics
+
+Assemble -> Audit
+Audit -> LLM: "prompt + missing-context warnings"
+Assemble -> LLM: "without audit"
+LLM -> Answer

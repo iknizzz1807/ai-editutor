@@ -87,6 +87,27 @@ The context engine is the heart of this plugin. The assistant should not answer 
 
 The context system has a token budget and degrades from rich context to minimal context instead of blindly stuffing the prompt.
 
+### Smart Context Extraction
+
+![Context extraction flow](docs/context-extraction.svg)
+
+The context extractor does not use one fixed strategy for every question. It first checks how large the project is, then chooses between two modes:
+
+- **Full project mode** for small repositories: include the current file, project tree, and source/config files until the token budget is reached.
+- **Adaptive mode** for larger repositories: start with the current file, then add related evidence in priority order and shrink the context only when needed.
+
+In adaptive mode, the extractor builds context roughly like this:
+
+1. **Current file first.** If it fits, the full current file is included. If it is too large, the extractor keeps the header/import area and the region around the question or cursor.
+2. **Project tree next.** A compact tree gives the model orientation without spending much budget.
+3. **Import graph expansion.** The extractor looks for files imported by the current file, files importing the current file, and transitive imports when the selected strategy allows it.
+4. **Relevance scoring.** Related files are ranked higher when they are nearby, type/config files, direct imports, incoming importers, or small useful files. Tests, vendor files, generated files, and very large files are penalized.
+5. **LSP definitions.** When enabled, identifiers from the current buffer are resolved through LSP so project symbol definitions can be included.
+6. **Budget backtracking.** The strategy starts rich and falls back step by step: full related files, semantic chunks, direct imports, type/signature-only context, then minimal context.
+7. **Extra evidence.** LSP hover/library information and diagnostics are added with separate small budgets, so library APIs and current typechecker errors can influence the answer.
+
+The result is a prompt built from the strongest available evidence instead of a blind dump of files. A planned improvement is a context self-audit step that explicitly tells the model what evidence was included and what might still be missing.
+
 ### Runtime Docs Over Stale Memory
 
 The model may not know the version of a library you are actually using. `ai-editutor` tries to reduce that risk by pulling information from the active editor environment:
