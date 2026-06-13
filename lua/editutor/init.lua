@@ -15,6 +15,43 @@ local cache = require("editutor.cache")
 local loading = require("editutor.loading")
 local debug_log = require("editutor.debug_log")
 
+local REQUEST_TIMEOUT_MS = 20000
+
+local function run_with_loading_cleanup(fn, loading_token)
+  local ok, err = xpcall(fn, debug.traceback)
+  if not ok then
+    loading.stop(loading_token)
+    debug_log.log_error("async_callback", err)
+    vim.notify("[ai-editutor] Internal error: " .. tostring(err), vim.log.levels.ERROR)
+  end
+end
+
+local function query_with_timeout(system_prompt, user_prompt, loading_token, callback)
+  local done = false
+  local timer = vim.fn.timer_start(REQUEST_TIMEOUT_MS, function()
+    if done then
+      return
+    end
+
+    done = true
+    loading.stop(loading_token)
+    callback(nil, string.format("Request timed out after %d seconds", REQUEST_TIMEOUT_MS / 1000))
+  end)
+
+  provider.query_async(system_prompt, user_prompt, function(response, err)
+    if done then
+      return
+    end
+
+    done = true
+    if timer then
+      pcall(vim.fn.timer_stop, timer)
+    end
+
+    callback(response, err)
+  end)
+end
+
 M._name = "Editutor"
 M._version = "3.1.0"
 M._setup_called = false
@@ -313,12 +350,13 @@ function M.ask()
   local loading_line = questions[1] and questions[1].block_start and (questions[1].block_start - 1) or nil
 
   -- Start loading at the first pending question's position
-  loading.start(string.format(M._msg("processing"), #questions), bufnr, loading_line)
+  local loading_token = loading.start(string.format(M._msg("processing"), #questions), bufnr, loading_line)
 
   -- Extract context (includes library API info extraction in parallel)
   context.extract(function(full_context, metadata)
+    run_with_loading_cleanup(function()
     if not full_context then
-      loading.stop()
+      loading.stop(loading_token)
       vim.notify(
         string.format("[ai-editutor] " .. M._msg("context_budget_exceeded"), metadata.total_tokens, metadata.budget),
         vim.log.levels.ERROR
@@ -332,8 +370,9 @@ function M.ask()
       debug_log.log("Library info: " .. metadata.library_info.items .. " items, " .. (metadata.library_info.tokens or 0) .. " tokens")
     end
 
-    loading.update(loading.states.connecting)
-    M._process_questions(questions, filepath, bufnr, full_context, metadata)
+    loading.update(loading.states.connecting, loading_token)
+    M._process_questions(questions, filepath, bufnr, full_context, metadata, loading_token)
+    end, loading_token)
   end, {
     current_file = filepath,
     questions = questions, -- Pass questions for library info extraction
@@ -346,7 +385,8 @@ end
 ---@param bufnr number
 ---@param full_context string
 ---@param metadata table
-function M._process_questions(questions, filepath, bufnr, full_context, metadata)
+---@param loading_token number
+function M._process_questions(questions, filepath, bufnr, full_context, metadata, loading_token)
   -- Build prompts
   local system_prompt = prompts.get_system_prompt()
   local user_prompt = prompts.build_user_prompt(questions, full_context, { filepath = filepath })
@@ -374,8 +414,9 @@ function M._process_questions(questions, filepath, bufnr, full_context, metadata
   local start_time = vim.loop.hrtime()
 
   -- Query LLM (async - wait for full response)
-  provider.query_async(system_prompt, user_prompt, function(response, err)
-    loading.stop()
+  query_with_timeout(system_prompt, user_prompt, loading_token, function(response, err)
+    run_with_loading_cleanup(function()
+    loading.stop(loading_token)
 
     local duration_ms = math.floor((vim.loop.hrtime() - start_time) / 1000000)
 
@@ -427,6 +468,7 @@ function M._process_questions(questions, filepath, bufnr, full_context, metadata
         vim.log.levels.WARN
       )
     end
+    end, loading_token)
   end)
 end
 
@@ -520,11 +562,12 @@ function M.execute()
   local filepath = vim.api.nvim_buf_get_name(bufnr)
   local loading_line = code_requests[1] and code_requests[1].block_start and (code_requests[1].block_start - 1) or nil
 
-  loading.start(string.format(M._msg("code_processing"), #code_requests), bufnr, loading_line)
+  local loading_token = loading.start(string.format(M._msg("code_processing"), #code_requests), bufnr, loading_line)
 
   context.extract(function(full_context, metadata)
+    run_with_loading_cleanup(function()
     if not full_context then
-      loading.stop()
+      loading.stop(loading_token)
       vim.notify(
         string.format("[ai-editutor] " .. M._msg("context_budget_exceeded"), metadata.total_tokens, metadata.budget),
         vim.log.levels.ERROR
@@ -533,8 +576,9 @@ function M.execute()
     end
 
     debug_log.log("Code mode - Context: " .. metadata.mode .. ", tokens: " .. (metadata.total_tokens or 0))
-    loading.update(loading.states.connecting)
-    M._process_code_requests(code_requests, filepath, bufnr, full_context, metadata)
+    loading.update(loading.states.connecting, loading_token)
+    M._process_code_requests(code_requests, filepath, bufnr, full_context, metadata, loading_token)
+    end, loading_token)
   end, {
     current_file = filepath,
     questions = code_requests, -- reuse same param for library info extraction
@@ -547,7 +591,8 @@ end
 ---@param bufnr number
 ---@param full_context string
 ---@param metadata table
-function M._process_code_requests(code_requests, filepath, bufnr, full_context, metadata)
+---@param loading_token number
+function M._process_code_requests(code_requests, filepath, bufnr, full_context, metadata, loading_token)
   local system_prompt = prompts.get_code_system_prompt()
   local user_prompt = prompts.build_code_user_prompt(code_requests, full_context, { filepath = filepath })
 
@@ -570,8 +615,9 @@ function M._process_code_requests(code_requests, filepath, bufnr, full_context, 
 
   local start_time = vim.loop.hrtime()
 
-  provider.query_async(system_prompt, user_prompt, function(response, err)
-    loading.stop()
+  query_with_timeout(system_prompt, user_prompt, loading_token, function(response, err)
+    run_with_loading_cleanup(function()
+    loading.stop(loading_token)
 
     local duration_ms = math.floor((vim.loop.hrtime() - start_time) / 1000000)
     debug_log.log_response({
@@ -608,6 +654,7 @@ function M._process_code_requests(code_requests, filepath, bufnr, full_context, 
         vim.log.levels.WARN
       )
     end
+    end, loading_token)
   end)
 end
 

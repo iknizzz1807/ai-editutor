@@ -11,6 +11,8 @@ M._spinner_idx = 1
 M._timer = nil
 M._extmark_id = nil
 M._namespace = vim.api.nvim_create_namespace("editutor_loading")
+M._token = 0
+M._autocmd_group = vim.api.nvim_create_augroup("EditutorLoading", { clear = true })
 -- Track the specific buffer and line where loading started
 M._target_bufnr = nil
 M._target_line = nil
@@ -54,8 +56,12 @@ local function advance_spinner()
 end
 
 ---Update virtual text display
-local function update_virtual_text()
+local function update_virtual_text(token)
   if not M._active then
+    return
+  end
+
+  if token and token ~= M._token then
     return
   end
 
@@ -65,6 +71,7 @@ local function update_virtual_text()
 
   -- Validate buffer is still valid
   if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+    M.stop()
     return
   end
 
@@ -113,10 +120,12 @@ end
 ---@param message? string Loading message
 ---@param bufnr? number Target buffer (defaults to current)
 ---@param line? number Target line 0-indexed (defaults to cursor line)
+---@return number token Loading token for guarded update/stop calls
 function M.start(message, bufnr, line)
-  if M._active then
-    M.stop()
-  end
+  M.stop()
+
+  M._token = M._token + 1
+  local token = M._token
 
   M._active = true
   M._message = message or "Thinking..."
@@ -131,16 +140,28 @@ function M.start(message, bufnr, line)
     M._target_line = cursor[1] - 1
   end
 
+  vim.api.nvim_clear_autocmds({ group = M._autocmd_group })
+  vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
+    group = M._autocmd_group,
+    buffer = M._target_bufnr,
+    once = true,
+    callback = function()
+      if token == M._token then
+        M.stop()
+      end
+    end,
+  })
+
   -- Start timer for animation
   M._timer = vim.fn.timer_start(M.config.interval_ms, function()
     vim.schedule(function()
-      if M._active then
+      if M._active and token == M._token then
         advance_spinner()
         if M.config.show_virtual_text then
-          update_virtual_text()
+          pcall(update_virtual_text, token)
         end
         -- Trigger statusline refresh
-        vim.cmd("redrawstatus")
+        pcall(vim.cmd, "redrawstatus")
       end
     end)
   end, { ["repeat"] = -1 })
@@ -148,31 +169,51 @@ function M.start(message, bufnr, line)
   -- Initial display
   if M.config.show_virtual_text then
     vim.schedule(function()
-      update_virtual_text()
+      if token == M._token then
+        pcall(update_virtual_text, token)
+      end
     end)
   end
+
+  return token
 end
 
 ---Update loading message
 ---@param message string New message
-function M.update(message)
+---@param token? number Loading token returned by start()
+function M.update(message, token)
+  if token and token ~= M._token then
+    return
+  end
+
   M._message = message
   if M.config.show_virtual_text and M._active then
+    local active_token = M._token
     vim.schedule(function()
-      update_virtual_text()
+      if active_token == M._token then
+        pcall(update_virtual_text, active_token)
+      end
     end)
   end
 end
 
 ---Stop loading indicator
-function M.stop()
+---@param token? number Loading token returned by start()
+function M.stop(token)
+  if token and token ~= M._token then
+    return
+  end
+
+  M._token = M._token + 1
   M._active = false
   M._message = ""
 
   if M._timer then
-    vim.fn.timer_stop(M._timer)
+    pcall(vim.fn.timer_stop, M._timer)
     M._timer = nil
   end
+
+  pcall(vim.api.nvim_clear_autocmds, { group = M._autocmd_group })
 
   clear_virtual_text()
 
@@ -180,7 +221,7 @@ function M.stop()
   M._target_bufnr = nil
   M._target_line = nil
 
-  vim.cmd("redrawstatus")
+  pcall(vim.cmd, "redrawstatus")
 end
 
 ---Check if loading is active
