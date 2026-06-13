@@ -1,11 +1,16 @@
-### Improve prompts engineer so that it fits best to the plugin:
+### Done: improve prompt engineering so it fits the plugin
   - AI phải stick với thiết kế hệ thống hiện tại.
-  - Phải luôn xác định được khi nào cần trả lời dài khi nào cần trả lời ngắn gọn thôi. (cái này trong system prompt hiện tại đã có, thêm vào để tránh không remove cái này đi).
-  - AI phải luôn xác định được các chỗ mà user đang làm sai/không tốt/không đúng practice hay thiết kế tồi chỗ nào, cho dù là nó không đúng với câu hỏi, và luôn tích cực đưa ra lời khuyên để cải thiện chất lượng mã nguồn - các context được đưa cho.
-  - Hạn chế việc đưa ra câu trả lời mà khiến user mắc nợ kỹ thuật nhất có thể, nếu có thì phải giải thích rõ rằng hiện tại là làm không tốt và cần cải thiên hơn trong tương lai....
-  - Khi không chắc chắn về bất cứ điều gì trong context được yêu cầu, thì phải luôn nói rõ với user.
-  - Luôn không bao giờ tin chắc về knowledge cut off của bản thân vì các thư viện/framework luôn cập nhật liên tục, context của user về thông tin docs thư viện hay này nọ thì phải stick to it. Nếu không chắc chắn về việc code này có thể bị thay đổi do việc cập nhật của thư viện, framework thì cũng phải nói rõ điều đó cho user biết.
-  - Nói rõ cho LLM AI biết được ý nghĩa các context được cung cấp là gì, nếu có thể thì nói rõ luôn các context này được trích như nào... để nó biết.
-  - Bào với LLM là nếu thấy cái nào giống với kiểu comment hỏi - trả lời trong context thì đó là cuộc trò chuyện hỏi - trả lời trước đó với LLM. Căn cứ vào đó follow up hoặc nắm rõ tình hình nếu có thể.
-  - Đảm bảo logic trích xuất cây thư mục thật tốt và chuẩn, không bị phình to khi có nhiều file (ví dụ có file /data mà có 1 triệu file thì thôi luôn), luôn trách các file node modules, venv,.... thật chuẩn xác, nhạy cảm. Có thể tham khảo git ignore generator trên mạng không? Hoặc tôi thấy neo tree của nvim làm khá ổn nè. 
-  - Thảo luận thêm về cách cải thiện siêu cấp context extraction logic: mục tiêu build thật hoàn hảo cho mọi loại tình huống và mọi loại câu hỏi.
+  - AI phải xác định khi nào cần trả lời dài, khi nào chỉ cần trả lời ngắn gọn.
+  - AI phải chủ động chỉ ra bug, bad practice, technical debt, thiết kế tồi, kể cả khi user không hỏi trực tiếp.
+  - Hạn chế đưa ra câu trả lời khiến user mắc nợ kỹ thuật; nếu phải shortcut thì nói rõ tradeoff và hướng cải thiện.
+  - Khi không chắc chắn vì thiếu context thì phải nói rõ với user.
+  - Không tin chắc vào knowledge cutoff; ưu tiên context local, LSP docs, diagnostics, library info, project files.
+  - Nói rõ cho LLM ý nghĩa các context được cung cấp: current file, related files, LSP definitions, library info, diagnostics, project tree.
+  - Nói rõ với LLM rằng các comment hỏi/trả lời cũ trong context là lịch sử conversation trước đó, có thể dùng để follow-up nếu relevant.
+  - Code prompt: nếu có bug/bad practice/missing context/risky assumption thì sneak feedback vào comment block hoặc inline comment trong code trả về, không viết explanation ngoài marker.
+
+### TODO: improve context extraction
+  - Đảm bảo logic trích xuất cây thư mục thật tốt và chuẩn, không bị phình to khi có nhiều file (ví dụ có folder /data có rất nhiều file), luôn tránh node_modules, venv, cache, build output, generated files thật chuẩn xác và nhạy cảm.
+  - Tham khảo cách ignore/filter của gitignore generator hoặc Neo-tree nếu hữu ích.
+  - Thảo luận và thiết kế tiếp context extraction nâng cao: intent detection, evidence checklist, context self-audit, missing-context detection.
+  - Mục tiêu dài hạn: context extraction đủ thông minh cho nhiều loại tình huống và nhiều loại câu hỏi khác nhau, không chỉ dựa vào current file/import graph/LSP definitions.

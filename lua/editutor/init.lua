@@ -350,7 +350,11 @@ function M.ask()
   local loading_line = questions[1] and questions[1].block_start and (questions[1].block_start - 1) or nil
 
   -- Start loading at the first pending question's position
-  local loading_token = loading.start(string.format(M._msg("processing"), #questions), bufnr, loading_line)
+  local loading_token = loading.start(
+    string.format("%s (%d question(s))", loading.states.gathering_context, #questions),
+    bufnr,
+    loading_line
+  )
 
   -- Extract context (includes library API info extraction in parallel)
   context.extract(function(full_context, metadata)
@@ -414,6 +418,7 @@ function M._process_questions(questions, filepath, bufnr, full_context, metadata
   local start_time = vim.loop.hrtime()
 
   -- Query LLM (async - wait for full response)
+  loading.update(loading.states.waiting_response, loading_token)
   query_with_timeout(system_prompt, user_prompt, loading_token, function(response, err)
     run_with_loading_cleanup(function()
     loading.stop(loading_token)
@@ -562,7 +567,11 @@ function M.execute()
   local filepath = vim.api.nvim_buf_get_name(bufnr)
   local loading_line = code_requests[1] and code_requests[1].block_start and (code_requests[1].block_start - 1) or nil
 
-  local loading_token = loading.start(string.format(M._msg("code_processing"), #code_requests), bufnr, loading_line)
+  local loading_token = loading.start(
+    string.format("%s (%d code request(s))", loading.states.gathering_context, #code_requests),
+    bufnr,
+    loading_line
+  )
 
   context.extract(function(full_context, metadata)
     run_with_loading_cleanup(function()
@@ -615,6 +624,7 @@ function M._process_code_requests(code_requests, filepath, bufnr, full_context, 
 
   local start_time = vim.loop.hrtime()
 
+  loading.update(loading.states.waiting_response, loading_token)
   query_with_timeout(system_prompt, user_prompt, loading_token, function(response, err)
     run_with_loading_cleanup(function()
     loading.stop(loading_token)

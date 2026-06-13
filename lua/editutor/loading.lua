@@ -303,7 +303,8 @@ M.states = {
   searching = "Searching codebase...",
   indexing = "Indexing project...",
   connecting = "Connecting to LLM...",
-  streaming = "Receiving response...",
+  waiting_response = "Waiting for LLM response...",
+  streaming = "Receiving streaming response...",
   formatting = "Formatting response...",
 }
 
