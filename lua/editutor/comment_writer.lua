@@ -173,16 +173,28 @@ end
 function M._format_response(response, indent)
   local lines = {}
   local max_width = 160
+  local previous_blank = false
 
-  -- Simple: preserve LLM output, add indent, wrap long lines only
-  for line in response:gmatch("[^\n]*") do
-    if #line > max_width - #indent then
+  response = (response or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
+
+  -- Preserve normal line breaks but avoid phantom blank lines from pattern matching.
+  for _, line in ipairs(vim.split(response, "\n", { plain = true })) do
+    local is_blank = line:match("^%s*$") ~= nil
+
+    if is_blank then
+      if #lines > 0 and not previous_blank then
+        table.insert(lines, indent)
+      end
+      previous_blank = true
+    elseif #line > max_width - #indent then
+      previous_blank = false
       -- Wrap long lines
       local wrapped = M._wrap_text(line, max_width - #indent)
       for _, wrapped_line in ipairs(wrapped) do
         table.insert(lines, indent .. wrapped_line)
       end
     else
+      previous_blank = false
       table.insert(lines, indent .. line)
     end
   end
