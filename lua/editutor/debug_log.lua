@@ -1,6 +1,6 @@
 -- editutor/debug_log.lua
 -- Debug logging for ai-editutor
--- Logs all LLM requests to {project_root}/.editutor.log
+-- Logs all LLM requests to {project_root}/.editutor/editutor.log
 -- Also logs all errors to ~/.local/share/nvim/editutor_errors.log
 
 local M = {}
@@ -19,7 +19,20 @@ M.MAX_BACKUP_COUNT = 2 -- Keep up to 2 backup files
 ---@return string
 function M.get_log_path()
   local project_root = project_scanner.get_project_root()
-  return project_root .. "/.editutor.log"
+  return project_root .. "/.editutor/editutor.log"
+end
+
+---Ensure the per-project editutor directory exists
+---@return string dir_path
+local function ensure_project_dir()
+  local project_root = project_scanner.get_project_root()
+  local dir_path = project_root .. "/.editutor"
+
+  if vim.fn.isdirectory(dir_path) ~= 1 then
+    vim.fn.mkdir(dir_path, "p")
+  end
+
+  return dir_path
 end
 
 ---Rotate log file if it exceeds max size
@@ -52,8 +65,9 @@ local function rotate_log_if_needed(log_path, max_size)
   vim.fn.rename(log_path, log_path .. ".1")
 end
 
----Ensure .editutor.log is in .gitignore
+---Ensure editutor log files are in .gitignore
 function M.ensure_gitignore()
+  ensure_project_dir()
   local project_root = project_scanner.get_project_root()
   project_scanner.ensure_gitignore_entry(project_root)
 end
@@ -390,6 +404,8 @@ end
 ---Simple log message (appends to project log)
 ---@param message string Message to log
 function M.log(message)
+  M.ensure_gitignore()
+
   local log_path = M.get_log_path()
   local line = string.format("[%s] %s", timestamp(), message)
   

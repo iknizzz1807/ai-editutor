@@ -975,11 +975,11 @@ function M.read_all_sources(scan_result, opts)
   }
 end
 
----Ensure .editutor.log is in .gitignore
+---Ensure editutor log files are in .gitignore
 ---@param project_root string
 function M.ensure_gitignore_entry(project_root)
   local gitignore_path = project_root .. "/.gitignore"
-  local entry = ".editutor.log"
+  local entry = ".editutor/editutor.log*"
 
   -- Read existing content
   local lines = {}
@@ -988,7 +988,8 @@ function M.ensure_gitignore_entry(project_root)
 
     -- Check if already present
     for _, line in ipairs(lines) do
-      if vim.trim(line) == entry then
+      local trimmed = vim.trim(line)
+      if trimmed == entry or trimmed == ".editutor.log" then
         return -- Already present
       end
     end
