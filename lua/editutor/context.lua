@@ -198,11 +198,35 @@ end
 -- Full Project Context
 -- =============================================================================
 
----Build full project context (simplified - no question line marking)
+---@param content string
+---@param question_lines? {min: number, max: number}
+---@return string
+local function mark_question_range(content, question_lines)
+  if not question_lines then
+    return content
+  end
+
+  local lines = vim.split(content, "\n", { plain = true })
+  local start_line = math.max(1, question_lines.min)
+  local end_line = math.min(#lines, question_lines.max)
+
+  if start_line > #lines or end_line < start_line then
+    return content
+  end
+
+  table.insert(lines, end_line + 1, "<<< EDITUTOR QUESTION RANGE END >>>")
+  table.insert(lines, start_line, "<<< EDITUTOR QUESTION RANGE START >>>")
+
+  return table.concat(lines, "\n")
+end
+
+---Build full project context
 ---@param current_file string Path to current file
+---@param opts? table {bufnr?: number, question_lines?: {min: number, max: number}}
 ---@return string formatted_context
 ---@return table metadata
-function M.build_full_project_context(current_file)
+function M.build_full_project_context(current_file, opts)
+  opts = opts or {}
   local project_root = project_scanner.get_project_root(current_file)
 
   -- Scan project (cached)
@@ -216,11 +240,20 @@ function M.build_full_project_context(current_file)
   -- Read current file
   local current_content = nil
   local current_lines = 0
-  local ok, lines = pcall(vim.fn.readfile, current_file)
-  if ok and lines then
+  local bufnr = opts.bufnr or vim.api.nvim_get_current_buf()
+  if vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_get_name(bufnr) == current_file then
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
     current_content = table.concat(lines, "\n")
     current_lines = #lines
+  else
+    local ok, lines = pcall(vim.fn.readfile, current_file)
+    if ok and lines then
+      current_content = table.concat(lines, "\n")
+      current_lines = #lines
+    end
   end
+
+  current_content = mark_question_range(current_content or "", opts.question_lines)
 
   -- Detect language
   local ext = current_file:match("%.(%w+)$") or ""
@@ -397,7 +430,7 @@ function M.extract_async(opts)
   -- Task 1: Extract code context
   table.insert(tasks, function()
     if mode_info.mode == "full_project" then
-      return { M.build_full_project_context(current_file) }
+      return { M.build_full_project_context(current_file, { bufnr = bufnr, question_lines = question_lines }) }
     else
       local ctx, meta = M.build_adaptive_context_async(current_file, { question_lines = question_lines })
       return { ctx, meta }

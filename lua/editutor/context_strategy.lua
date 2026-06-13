@@ -106,6 +106,41 @@ local function read_file(filepath)
   return table.concat(lines, "\n"), #lines
 end
 
+---@param filepath string
+---@return string|nil content
+---@return number line_count
+local function read_current_file_content(filepath)
+  local bufnr = vim.api.nvim_get_current_buf()
+  if vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_get_name(bufnr) == filepath then
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    return table.concat(lines, "\n"), #lines
+  end
+
+  return read_file(filepath)
+end
+
+---@param content string
+---@param question_lines? {min: number, max: number}
+---@return string
+local function mark_question_range(content, question_lines)
+  if not question_lines then
+    return content
+  end
+
+  local lines = vim.split(content, "\n", { plain = true })
+  local start_line = math.max(1, question_lines.min)
+  local end_line = math.min(#lines, question_lines.max)
+
+  if start_line > #lines or end_line < start_line then
+    return content
+  end
+
+  table.insert(lines, end_line + 1, "<<< EDITUTOR QUESTION RANGE END >>>")
+  table.insert(lines, start_line, "<<< EDITUTOR QUESTION RANGE START >>>")
+
+  return table.concat(lines, "\n")
+end
+
 ---Get display path (project_name/relative_path)
 ---@param filepath string
 ---@param project_root string
@@ -325,12 +360,8 @@ local function build_context_for_level(current_file, project_root, level, budget
   local effective_budget = budget - tree_budget
 
   -- 1. Current file (always full)
-  local current_content, current_lines = read_file(current_file)
-  if not current_content then
-    local buf_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-    current_content = table.concat(buf_lines, "\n")
-    current_lines = #buf_lines
-  end
+  local current_content, current_lines = read_current_file_content(current_file)
+  current_content = mark_question_range(current_content or "", question_lines)
 
   local ext = current_file:match("%.([^.]+)$") or ""
   local language = project_scanner.get_language_for_ext(ext)

@@ -134,10 +134,22 @@ function M._replace_question_direct(question, response, bufnr)
 	local indent = question.indent
 
 	-- Format the response
-	local response_lines = M._format_response(response, indent)
+  local response_lines = M._format_response(response, indent)
 
 	-- Get current buffer lines
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+
+  -- Recompute the block end at write time so the original closing delimiter is
+  -- removed even if parser metadata was stale or filetype changed mid-session.
+  if style.block then
+    local close_pattern = vim.pesc(style.block[2])
+    for i = question.pending_line, math.min(#lines, question.pending_line + 20) do
+      if lines[i] and lines[i]:match(close_pattern) then
+        question.block_end = i
+        break
+      end
+    end
+  end
 
 	-- Build new block content
 	local new_block = {}
