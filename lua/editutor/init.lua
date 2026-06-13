@@ -34,7 +34,6 @@ local function query_with_timeout(system_prompt, user_prompt, loading_token, cal
     end
 
     done = true
-    loading.stop(loading_token)
     callback(nil, string.format("Request timed out after %d seconds", REQUEST_TIMEOUT_MS / 1000))
   end)
 
@@ -356,31 +355,54 @@ function M.ask()
     loading_line
   )
 
-  -- Extract context (includes library API info extraction in parallel)
-  context.extract(function(full_context, metadata)
-    run_with_loading_cleanup(function()
-    if not full_context then
+  local success_total = 0
+  local fail_total = 0
+
+  local function process_next(index)
+    if index > #questions then
       loading.stop(loading_token)
-      vim.notify(
-        string.format("[ai-editutor] " .. M._msg("context_budget_exceeded"), metadata.total_tokens, metadata.budget),
-        vim.log.levels.ERROR
-      )
+      if fail_total == 0 then
+        vim.notify("[ai-editutor] " .. string.format(M._msg("success"), success_total), vim.log.levels.INFO)
+      else
+        vim.notify(
+          "[ai-editutor] " .. string.format(M._msg("partial_success"), success_total, #questions, fail_total),
+          vim.log.levels.WARN
+        )
+      end
       return
     end
 
-    -- Log context and library info
-    debug_log.log("Context mode: " .. metadata.mode .. ", tokens: " .. (metadata.total_tokens or 0))
-    if metadata.library_info and metadata.library_info.items then
-      debug_log.log("Library info: " .. metadata.library_info.items .. " items, " .. (metadata.library_info.tokens or 0) .. " tokens")
-    end
+    local question = questions[index]
+    loading.update(string.format("%s (%d/%d question)", loading.states.gathering_context, index, #questions), loading_token)
 
-    loading.update(loading.states.connecting, loading_token)
-    M._process_questions(questions, filepath, bufnr, full_context, metadata, loading_token)
-    end, loading_token)
-  end, {
-    current_file = filepath,
-    questions = questions, -- Pass questions for library info extraction
-  })
+    context.extract(function(full_context, metadata)
+      run_with_loading_cleanup(function()
+        if not full_context then
+          fail_total = fail_total + 1
+          debug_log.log(string.format("Question %s failed: context extraction returned empty context", question.id))
+          process_next(index + 1)
+          return
+        end
+
+        debug_log.log("Context mode: " .. metadata.mode .. ", tokens: " .. (metadata.total_tokens or 0))
+        if metadata.library_info and metadata.library_info.items then
+          debug_log.log("Library info: " .. metadata.library_info.items .. " items, " .. (metadata.library_info.tokens or 0) .. " tokens")
+        end
+
+        loading.update(string.format("%s (%d/%d question)", loading.states.connecting, index, #questions), loading_token)
+        M._process_questions({ question }, filepath, bufnr, full_context, metadata, loading_token, function(success_count, fail_count)
+          success_total = success_total + success_count
+          fail_total = fail_total + fail_count
+          process_next(index + 1)
+        end, index, #questions)
+      end, loading_token)
+    end, {
+      current_file = filepath,
+      questions = { question },
+    })
+  end
+
+  process_next(1)
 end
 
 ---Process questions with context
@@ -390,7 +412,10 @@ end
 ---@param full_context string
 ---@param metadata table
 ---@param loading_token number
-function M._process_questions(questions, filepath, bufnr, full_context, metadata, loading_token)
+---@param on_done? function Callback(success_count, fail_count)
+---@param progress_index? number
+---@param progress_total? number
+function M._process_questions(questions, filepath, bufnr, full_context, metadata, loading_token, on_done, progress_index, progress_total)
   -- Build prompts
   local system_prompt = prompts.get_system_prompt()
   local user_prompt = prompts.build_user_prompt(questions, full_context, { filepath = filepath })
@@ -418,11 +443,13 @@ function M._process_questions(questions, filepath, bufnr, full_context, metadata
   local start_time = vim.loop.hrtime()
 
   -- Query LLM (async - wait for full response)
-  loading.update(loading.states.waiting_response, loading_token)
+  if progress_index and progress_total then
+    loading.update(string.format("%s (%d/%d question)", loading.states.waiting_response, progress_index, progress_total), loading_token)
+  else
+    loading.update(loading.states.waiting_response, loading_token)
+  end
   query_with_timeout(system_prompt, user_prompt, loading_token, function(response, err)
     run_with_loading_cleanup(function()
-    loading.stop(loading_token)
-
     local duration_ms = math.floor((vim.loop.hrtime() - start_time) / 1000000)
 
     debug_log.log_response({
@@ -432,20 +459,22 @@ function M._process_questions(questions, filepath, bufnr, full_context, metadata
     })
 
     if err then
-      vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
+      debug_log.log("Question request failed: " .. err)
+      if on_done then on_done(0, #questions) end
       return
     end
 
     if not response then
-      vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
+      debug_log.log("Question request failed: no response")
+      if on_done then on_done(0, #questions) end
       return
     end
 
     -- Parse marker-based response
     local responses = M._parse_response(response)
     if not responses then
-      vim.notify("[ai-editutor] " .. M._msg("invalid_response"), vim.log.levels.ERROR)
       debug_log.log("Failed to parse response: " .. response:sub(1, 500))
+      if on_done then on_done(0, #questions) end
       return
     end
 
@@ -464,14 +493,18 @@ function M._process_questions(questions, filepath, bufnr, full_context, metadata
       end
     end
 
-    -- Notify result
-    if fail_count == 0 then
-      vim.notify("[ai-editutor] " .. string.format(M._msg("success"), success_count), vim.log.levels.INFO)
+    if on_done then
+      on_done(success_count, fail_count)
     else
-      vim.notify(
-        "[ai-editutor] " .. string.format(M._msg("partial_success"), success_count, #questions, fail_count),
-        vim.log.levels.WARN
-      )
+      loading.stop(loading_token)
+      if fail_count == 0 then
+        vim.notify("[ai-editutor] " .. string.format(M._msg("success"), success_count), vim.log.levels.INFO)
+      else
+        vim.notify(
+          "[ai-editutor] " .. string.format(M._msg("partial_success"), success_count, #questions, fail_count),
+          vim.log.levels.WARN
+        )
+      end
     end
     end, loading_token)
   end)
@@ -573,25 +606,50 @@ function M.execute()
     loading_line
   )
 
-  context.extract(function(full_context, metadata)
-    run_with_loading_cleanup(function()
-    if not full_context then
+  local success_total = 0
+  local fail_total = 0
+
+  local function process_next(index)
+    if index > #code_requests then
       loading.stop(loading_token)
-      vim.notify(
-        string.format("[ai-editutor] " .. M._msg("context_budget_exceeded"), metadata.total_tokens, metadata.budget),
-        vim.log.levels.ERROR
-      )
+      if fail_total == 0 then
+        vim.notify("[ai-editutor] " .. string.format(M._msg("code_success"), success_total), vim.log.levels.INFO)
+      else
+        vim.notify(
+          "[ai-editutor] " .. string.format(M._msg("code_partial_success"), success_total, #code_requests, fail_total),
+          vim.log.levels.WARN
+        )
+      end
       return
     end
 
-    debug_log.log("Code mode - Context: " .. metadata.mode .. ", tokens: " .. (metadata.total_tokens or 0))
-    loading.update(loading.states.connecting, loading_token)
-    M._process_code_requests(code_requests, filepath, bufnr, full_context, metadata, loading_token)
-    end, loading_token)
-  end, {
-    current_file = filepath,
-    questions = code_requests, -- reuse same param for library info extraction
-  })
+    local code_request = code_requests[index]
+    loading.update(string.format("%s (%d/%d code request)", loading.states.gathering_context, index, #code_requests), loading_token)
+
+    context.extract(function(full_context, metadata)
+      run_with_loading_cleanup(function()
+        if not full_context then
+          fail_total = fail_total + 1
+          debug_log.log(string.format("Code request %s failed: context extraction returned empty context", code_request.id))
+          process_next(index + 1)
+          return
+        end
+
+        debug_log.log("Code mode - Context: " .. metadata.mode .. ", tokens: " .. (metadata.total_tokens or 0))
+        loading.update(string.format("%s (%d/%d code request)", loading.states.connecting, index, #code_requests), loading_token)
+        M._process_code_requests({ code_request }, filepath, bufnr, full_context, metadata, loading_token, function(success_count, fail_count)
+          success_total = success_total + success_count
+          fail_total = fail_total + fail_count
+          process_next(index + 1)
+        end, index, #code_requests)
+      end, loading_token)
+    end, {
+      current_file = filepath,
+      questions = { code_request }, -- reuse same param for library info extraction
+    })
+  end
+
+  process_next(1)
 end
 
 ---Process code requests with context
@@ -601,7 +659,10 @@ end
 ---@param full_context string
 ---@param metadata table
 ---@param loading_token number
-function M._process_code_requests(code_requests, filepath, bufnr, full_context, metadata, loading_token)
+---@param on_done? function Callback(success_count, fail_count)
+---@param progress_index? number
+---@param progress_total? number
+function M._process_code_requests(code_requests, filepath, bufnr, full_context, metadata, loading_token, on_done, progress_index, progress_total)
   local system_prompt = prompts.get_code_system_prompt()
   local user_prompt = prompts.build_code_user_prompt(code_requests, full_context, { filepath = filepath })
 
@@ -624,11 +685,13 @@ function M._process_code_requests(code_requests, filepath, bufnr, full_context, 
 
   local start_time = vim.loop.hrtime()
 
-  loading.update(loading.states.waiting_response, loading_token)
+  if progress_index and progress_total then
+    loading.update(string.format("%s (%d/%d code request)", loading.states.waiting_response, progress_index, progress_total), loading_token)
+  else
+    loading.update(loading.states.waiting_response, loading_token)
+  end
   query_with_timeout(system_prompt, user_prompt, loading_token, function(response, err)
     run_with_loading_cleanup(function()
-    loading.stop(loading_token)
-
     local duration_ms = math.floor((vim.loop.hrtime() - start_time) / 1000000)
     debug_log.log_response({
       response = response,
@@ -637,32 +700,39 @@ function M._process_code_requests(code_requests, filepath, bufnr, full_context, 
     })
 
     if err then
-      vim.notify("[ai-editutor] " .. M._msg("error") .. err, vim.log.levels.ERROR)
+      debug_log.log("Code request failed: " .. err)
+      if on_done then on_done(0, #code_requests) end
       return
     end
 
     if not response then
-      vim.notify("[ai-editutor] " .. M._msg("no_response"), vim.log.levels.ERROR)
+      debug_log.log("Code request failed: no response")
+      if on_done then on_done(0, #code_requests) end
       return
     end
 
     local responses = M._parse_code_response(response)
     if not responses then
-      vim.notify("[ai-editutor] " .. M._msg("invalid_code_response"), vim.log.levels.ERROR)
       debug_log.log("Failed to parse code response: " .. response:sub(1, 500))
+      if on_done then on_done(0, #code_requests) end
       return
     end
 
     -- Replace comment blocks with raw code (no knowledge saving)
     local success_count, fail_count = comment_writer.replace_with_code_batch(responses, bufnr)
 
-    if fail_count == 0 then
-      vim.notify("[ai-editutor] " .. string.format(M._msg("code_success"), success_count), vim.log.levels.INFO)
+    if on_done then
+      on_done(success_count, fail_count)
     else
-      vim.notify(
-        "[ai-editutor] " .. string.format(M._msg("code_partial_success"), success_count, #code_requests, fail_count),
-        vim.log.levels.WARN
-      )
+      loading.stop(loading_token)
+      if fail_count == 0 then
+        vim.notify("[ai-editutor] " .. string.format(M._msg("code_success"), success_count), vim.log.levels.INFO)
+      else
+        vim.notify(
+          "[ai-editutor] " .. string.format(M._msg("code_partial_success"), success_count, #code_requests, fail_count),
+          vim.log.levels.WARN
+        )
+      end
     end
     end, loading_token)
   end)
