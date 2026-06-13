@@ -14,6 +14,16 @@ M.TEST_CASES = {
     lines = {61, 70},
     question = "How does the @cached_property decorator work and when should you use it instead of @property?",
     pattern = "decorator_pattern",
+    expected = {
+      must_include_files = {
+        "django/apps/config.py",
+        "django/utils/functional.py",
+      },
+      must_include_symbols = {
+        "cached_property",
+        "AppConfig",
+      },
+    },
   },
   {
     repo = "django",
@@ -1614,6 +1624,17 @@ M.TEST_CASES = {
     lines = {62, 85},
     question = "How does the ParseInputLazyPath class implement lazy evaluation of the path property?",
     pattern = "lazy_evaluation",
+    expected = {
+      must_include_files = {
+        "packages/zod/src/v3/types.ts",
+        "packages/zod/src/v3/helpers/parseUtil.ts",
+      },
+      must_include_symbols = {
+        "ParseInputLazyPath",
+        "_cachedPath",
+        "ParseInput",
+      },
+    },
   },
   {
     repo = "zod",
@@ -2654,6 +2675,17 @@ M.TEST_CASES = {
     lines = {92, 189},
     question = "How does the Engine struct use sync.Once and sync.Pool for efficient request handling and context reuse?",
     pattern = "mutex",
+    expected = {
+      must_include_files = {
+        "gin.go",
+        "context.go",
+      },
+      must_include_symbols = {
+        "type Engine struct",
+        "sync.Pool",
+        "allocateContext",
+      },
+    },
   },
   {
     repo = "gin",
@@ -3374,6 +3406,17 @@ M.TEST_CASES = {
     lines = {17, 62},
     question = "How does the IntoResponse trait enable composable error handling and custom response types in axum handlers?",
     pattern = "trait_implementation",
+    expected = {
+      must_include_files = {
+        "axum-core/src/response/into_response.rs",
+        "axum-core/src/response/mod.rs",
+      },
+      must_include_symbols = {
+        "IntoResponse",
+        "Response",
+        "impl IntoResponse",
+      },
+    },
   },
   {
     repo = "axum",
@@ -4174,6 +4217,16 @@ M.TEST_CASES = {
     lines = {27, 46},
     question = "Why does Async.new() set up a coroutine with pcall and what events can be emitted on error?",
     pattern = "coroutine",
+    expected = {
+      must_include_files = {
+        "lua/lazy/async.lua",
+      },
+      must_include_symbols = {
+        "Async.new",
+        "coroutine.create",
+        "pcall",
+      },
+    },
   },
   {
     repo = "lazy.nvim",
@@ -4830,6 +4883,16 @@ M.TEST_CASES = {
     lines = {25, 54},
     question = "This is a generic StringPool parameterized by a comptime config struct. How does Zig's comptime evaluation allow this data structure to be configured at compile-time while still being flexible?",
     pattern = "comptime",
+    expected = {
+      must_include_files = {
+        "src/analyser/string_pool.zig",
+      },
+      must_include_symbols = {
+        "StringPool",
+        "comptime",
+        "Config",
+      },
+    },
   },
   {
     repo = "zls",
@@ -5782,6 +5845,16 @@ M.TEST_CASES = {
     lines = {78, 100},
     question = "What RAII pattern is used in MatchResultListener for stream management?",
     pattern = "raii",
+    expected = {
+      must_include_files = {
+        "googletest/include/gtest/gtest-matchers.h",
+      },
+      must_include_symbols = {
+        "MatchResultListener",
+        "std::ostream",
+        "stream()",
+      },
+    },
   },
   {
     repo = "googletest",

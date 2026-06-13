@@ -5,6 +5,7 @@
 local M = {}
 
 local test_cases = require("editutor.test_cases")
+local test_validator = require("editutor.test_validator")
 
 -- =============================================================================
 -- Configuration
@@ -51,6 +52,12 @@ local results = {
       with_info = 0,
       without_info = 0,
       avg_items = 0,
+    },
+    validation_stats = {
+      passed = 0,
+      failed = 0,
+      warnings = 0,
+      golden_cases = 0,
     },
   },
   errors = {},
@@ -267,6 +274,13 @@ local function run_test_case(tc, callback)
       tokens = 0,
       identifiers_scanned = 0,
     },
+    validation = {
+      passed = false,
+      errors = 0,
+      warnings = 0,
+      assertions = {},
+      has_golden = false,
+    },
     errors = {},
     context_preview = nil,  -- First 500 chars of context
   }
@@ -355,66 +369,87 @@ local function run_test_case(tc, callback)
           return  -- Already timed out
         end
         extraction_done = true
-      local elapsed = vim.loop.now() - start_time
-      result.context.extraction_time_ms = elapsed
+        local elapsed = vim.loop.now() - start_time
+        result.context.extraction_time_ms = elapsed
 
-      log(string.format("    Context text length: %d", context_text and #context_text or 0), "DEBUG")
-      log(string.format("    Metadata mode: %s", metadata and metadata.mode or "nil"), "DEBUG")
+        log(string.format("    Context text length: %d", context_text and #context_text or 0), "DEBUG")
+        log(string.format("    Metadata mode: %s", metadata and metadata.mode or "nil"), "DEBUG")
 
-      if metadata then
-        log("    Processing metadata...", "DEBUG")
-        result.context.mode = metadata.mode
-        result.context.total_tokens = metadata.total_tokens
-          or (metadata.token_usage and metadata.token_usage.total)
-          or 0
-        -- files_included can be a table or number depending on context mode
-        local files = metadata.files_included or metadata.files or 0
-        if type(files) == "table" then
-          result.context.files_included = #files
-        else
-          result.context.files_included = files
-        end
-        result.context.strategy_level = metadata.strategy_level or (metadata.strategy and metadata.strategy.level_used)
+        if metadata then
+          log("    Processing metadata...", "DEBUG")
+          result.context.mode = metadata.mode
+          result.context.total_tokens = metadata.total_tokens
+            or (metadata.token_usage and metadata.token_usage.total)
+            or 0
+          -- files_included can be a table or number depending on context mode
+          local files = metadata.files_included or metadata.files or 0
+          if type(files) == "table" then
+            result.context.files_included = #files
+          else
+            result.context.files_included = files
+          end
+          result.context.strategy_level = metadata.strategy_level or (metadata.strategy and metadata.strategy.level_used)
 
-        -- Log metadata errors
-        if metadata.error then
-          result.errors[#result.errors + 1] = "Context error: " .. tostring(metadata.error)
-        end
-        if metadata.details and metadata.details.error then
-          result.errors[#result.errors + 1] = "Strategy error: " .. tostring(metadata.details.error)
-        end
+          -- Log metadata errors
+          if metadata.error then
+            result.errors[#result.errors + 1] = "Context error: " .. tostring(metadata.error)
+          end
+          if metadata.details and metadata.details.error then
+            result.errors[#result.errors + 1] = "Strategy error: " .. tostring(metadata.details.error)
+          end
 
-        if metadata.library_info then
-          result.library_info.items = metadata.library_info.items or 0
-          result.library_info.tokens = metadata.library_info.tokens or 0
+          if metadata.library_info then
+            result.library_info.items = metadata.library_info.items or 0
+            result.library_info.tokens = metadata.library_info.tokens or 0
 
-          -- Log library info errors
-          if metadata.library_info.errors then
-            local lib_errors = metadata.library_info.errors
-            if type(lib_errors) == "table" then
-              for _, lib_err in ipairs(lib_errors) do
-                result.errors[#result.errors + 1] = "Library info: " .. tostring(lib_err)
+            -- Log library info errors
+            if metadata.library_info.errors then
+              local lib_errors = metadata.library_info.errors
+              if type(lib_errors) == "table" then
+                for _, lib_err in ipairs(lib_errors) do
+                  result.errors[#result.errors + 1] = "Library info: " .. tostring(lib_err)
+                end
+              elseif type(lib_errors) == "number" and lib_errors > 0 then
+                result.errors[#result.errors + 1] = "Library info: " .. lib_errors .. " errors occurred"
               end
-            elseif type(lib_errors) == "number" and lib_errors > 0 then
-              result.errors[#result.errors + 1] = "Library info: " .. lib_errors .. " errors occurred"
+            end
+            if metadata.library_info.error then
+              result.errors[#result.errors + 1] = "Library info: " .. tostring(metadata.library_info.error)
             end
           end
-          if metadata.library_info.error then
-            result.errors[#result.errors + 1] = "Library info: " .. tostring(metadata.library_info.error)
-          end
+          log("    Metadata processed", "DEBUG")
+        else
+          result.errors[#result.errors + 1] = "Context extraction returned nil metadata"
+          log("    No metadata received", "DEBUG")
         end
-        log("    Metadata processed", "DEBUG")
-      else
-        result.errors[#result.errors + 1] = "Context extraction returned nil metadata"
-        log("    No metadata received", "DEBUG")
-      end
 
-      if not context_text or #context_text == 0 then
-        result.errors[#result.errors + 1] = "Context extraction returned empty context"
-        log("    Empty context", "DEBUG")
-      end
+        if not context_text or #context_text == 0 then
+          result.errors[#result.errors + 1] = "Context extraction returned empty context"
+          log("    Empty context", "DEBUG")
+        end
 
-      log("    Saving context...", "DEBUG")
+        log("    Running context validation...", "DEBUG")
+        local validation_ok, validation = pcall(function()
+          return test_validator.validate(tc, result, context_text, metadata)
+        end)
+
+        if validation_ok and validation then
+          result.validation = validation
+          for _, assertion in ipairs(validation.assertions or {}) do
+            local msg = string.format("Validation %s [%s]: %s",
+              assertion.severity or "warning",
+              assertion.kind or "unknown",
+              assertion.message or "")
+            if assertion.severity == "error" then
+              result.errors[#result.errors + 1] = msg
+            end
+            log("    " .. msg, assertion.severity == "error" and "ERROR" or "WARN")
+          end
+        else
+          result.errors[#result.errors + 1] = "Validation error: " .. tostring(validation)
+        end
+
+        log("    Saving context...", "DEBUG")
 
       -- Save context preview
       if context_text and #context_text > 0 then
@@ -451,6 +486,19 @@ local function run_test_case(tc, callback)
               f:write(string.format("LSP Clients: %s\n", table.concat(result.lsp.clients, ", ")))
               f:write(string.format("Library Info Items: %d\n", result.library_info.items))
               f:write(string.format("Extraction Time: %dms\n", result.context.extraction_time_ms))
+              f:write(string.format("Validation: %s (%d errors, %d warnings)\n",
+                result.validation.passed and "passed" or "failed",
+                result.validation.errors or 0,
+                result.validation.warnings or 0))
+              if result.validation.assertions and #result.validation.assertions > 0 then
+                f:write("\n=== VALIDATION ASSERTIONS ===\n")
+                for _, assertion in ipairs(result.validation.assertions) do
+                  f:write(string.format("- [%s] %s: %s\n",
+                    assertion.severity or "warning",
+                    assertion.kind or "unknown",
+                    assertion.message or ""))
+                end
+              end
               if #result.errors > 0 then
                 f:write("\n=== ERRORS ===\n")
                 for _, err in ipairs(result.errors) do
@@ -482,7 +530,8 @@ local function run_test_case(tc, callback)
         if err:match("Context error") or
            err:match("Strategy error") or
            err:match("nil metadata") or
-           err:match("empty context") then
+           err:match("empty context") or
+           err:match("Validation error") then
           critical_errors = critical_errors + 1
         end
       end
@@ -568,6 +617,7 @@ function M.run(opts)
       lsp_stats = { available = 0, unavailable = 0, timeout = 0 },
       context_stats = { full_project = 0, adaptive = 0, total_tokens = 0, total_extraction_ms = 0 },
       library_info_stats = { with_info = 0, without_info = 0, total_items = 0 },
+      validation_stats = { passed = 0, failed = 0, warnings = 0, golden_cases = 0 },
     },
     errors = {},
   }
@@ -668,14 +718,28 @@ function M.run(opts)
         results.summary.library_info_stats.without_info = results.summary.library_info_stats.without_info + 1
       end
 
+      -- Validation stats
+      if result.validation and result.validation.passed then
+        results.summary.validation_stats.passed = results.summary.validation_stats.passed + 1
+      else
+        results.summary.validation_stats.failed = results.summary.validation_stats.failed + 1
+      end
+      if result.validation then
+        results.summary.validation_stats.warnings = results.summary.validation_stats.warnings + (result.validation.warnings or 0)
+        if result.validation.has_golden then
+          results.summary.validation_stats.golden_cases = results.summary.validation_stats.golden_cases + 1
+        end
+      end
+
       -- Log result
       local status_icon = result.status == "passed" and "OK" or (result.status == "skipped" and "SKIP" or "FAIL")
-      log(string.format("  [%s] mode=%s tokens=%d lsp=%s lib_items=%d time=%dms",
+      log(string.format("  [%s] mode=%s tokens=%d lsp=%s lib_items=%d validation=%s time=%dms",
         status_icon,
         result.context.mode or "?",
         result.context.total_tokens,
         result.lsp.available and table.concat(result.lsp.clients, ",") or "none",
         result.library_info.items,
+        result.validation and (result.validation.passed and "pass" or "fail") or "?",
         result.context.extraction_time_ms
       ))
 
@@ -739,6 +803,14 @@ function M.finish()
     results.summary.library_info_stats.with_info,
     results.summary.library_info_stats.without_info,
     results.summary.library_info_stats.total_items
+  ))
+  log("")
+  log("Validation Stats:")
+  log(string.format("  Passed: %d | Failed: %d | Warnings: %d | Golden Cases: %d",
+    results.summary.validation_stats.passed,
+    results.summary.validation_stats.failed,
+    results.summary.validation_stats.warnings,
+    results.summary.validation_stats.golden_cases
   ))
 
   -- Save JSON results
@@ -805,6 +877,15 @@ function M.generate_report(filepath)
     string.format("| Cases without | %d |", results.summary.library_info_stats.without_info),
     string.format("| Total items extracted | %d |", results.summary.library_info_stats.total_items),
     "",
+    "## Context Validation",
+    "",
+    "| Metric | Value |",
+    "|--------|-------|",
+    string.format("| Validation Passed | %d |", results.summary.validation_stats.passed),
+    string.format("| Validation Failed | %d |", results.summary.validation_stats.failed),
+    string.format("| Validation Warnings | %d |", results.summary.validation_stats.warnings),
+    string.format("| Golden Cases | %d |", results.summary.validation_stats.golden_cases),
+    "",
     "## Results by Language",
     "",
     "| Language | Passed | Failed | Skipped |",
@@ -849,6 +930,23 @@ function M.generate_report(filepath)
     table.insert(lines, string.format("- LSP: %s", tc_result.lsp.available and table.concat(tc_result.lsp.clients, ", ") or "unavailable"))
     table.insert(lines, string.format("- Library Info Items: %d", tc_result.library_info.items))
     table.insert(lines, string.format("- Extraction Time: %dms", tc_result.context.extraction_time_ms))
+    if tc_result.validation then
+      table.insert(lines, string.format("- Validation: %s (%d errors, %d warnings)",
+        tc_result.validation.passed and "passed" or "failed",
+        tc_result.validation.errors or 0,
+        tc_result.validation.warnings or 0))
+    end
+
+    if tc_result.validation and tc_result.validation.assertions and #tc_result.validation.assertions > 0 then
+      table.insert(lines, "")
+      table.insert(lines, "**Validation Assertions:**")
+      for _, assertion in ipairs(tc_result.validation.assertions) do
+        table.insert(lines, string.format("- [%s] %s: %s",
+          assertion.severity or "warning",
+          assertion.kind or "unknown",
+          assertion.message or ""))
+      end
+    end
 
     if #tc_result.errors > 0 then
       table.insert(lines, "")
