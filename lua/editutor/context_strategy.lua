@@ -12,6 +12,7 @@ local semantic_chunking = require("editutor.semantic_chunking")
 local relevance_scorer = require("editutor.relevance_scorer")
 local cache = require("editutor.cache")
 local async = require("editutor.async")
+local repo_rank = require("editutor.repo_rank")
 
 -- =============================================================================
 -- Configuration
@@ -158,6 +159,70 @@ local function get_display_path(filepath, project_root)
     return root_name .. "/" .. relative
   end
   return root_name .. "/" .. vim.fn.fnamemodify(filepath, ":t")
+end
+
+---Extract lightweight personalization identifiers around the question/current target.
+---@param bufnr number
+---@param question_lines? {min: number, max: number}
+---@return string[]
+local function extract_mentioned_idents(bufnr, question_lines)
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return {}
+  end
+
+  local total_lines = vim.api.nvim_buf_line_count(bufnr)
+  local start_line = 0
+  local end_line = math.min(total_lines, 80)
+
+  if question_lines then
+    start_line = math.max(0, question_lines.min - 20)
+    end_line = math.min(total_lines, question_lines.max + 40)
+  end
+
+  local ok, lines = pcall(vim.api.nvim_buf_get_lines, bufnr, start_line, end_line, false)
+  if not ok or not lines then
+    return {}
+  end
+
+  local noise = {
+    ["and"] = true,
+    ["class"] = true,
+    ["const"] = true,
+    ["else"] = true,
+    ["end"] = true,
+    ["false"] = true,
+    ["for"] = true,
+    ["function"] = true,
+    ["if"] = true,
+    ["import"] = true,
+    ["local"] = true,
+    ["nil"] = true,
+    ["not"] = true,
+    ["or"] = true,
+    ["return"] = true,
+    ["self"] = true,
+    ["then"] = true,
+    ["true"] = true,
+    ["type"] = true,
+    ["var"] = true,
+    ["while"] = true,
+  }
+
+  local seen = {}
+  local idents = {}
+  for _, line in ipairs(lines) do
+    for ident in line:gmatch("[%a_][%w_]*") do
+      if #ident >= 3 and not noise[ident] and not seen[ident] then
+        seen[ident] = true
+        table.insert(idents, ident)
+        if #idents >= 30 then
+          return idents
+        end
+      end
+    end
+  end
+
+  return idents
 end
 
 ---Get file content based on chunking mode and threshold
@@ -498,11 +563,68 @@ local function build_context_for_level(current_file, project_root, level, budget
 
   -- 3. Import files
   local import_files = {}
+  local repo_rank_metadata = nil
   if level.import_depth > 0 then
     import_files = get_imports_with_depth(current_file, project_root, level.import_depth)
 
     -- Score and sort by relevance
     import_files = relevance_scorer.score_and_sort(import_files, current_file)
+
+    -- Add Aider-style repo-wide symbol graph ranking as an extra signal.
+    -- This complements import edges with def/ref relationships discovered via Tree-sitter.
+    local ok_rank, rank_result = pcall(function()
+      local bufnr = vim.api.nvim_get_current_buf()
+      local ranked_files, rank_meta = repo_rank.rank_project(current_file, project_root, scan_result, {
+        mentioned_idents = extract_mentioned_idents(bufnr, question_lines),
+        top_files = math.max(level.max_import_files or 20, 20),
+      })
+      return { files = ranked_files, meta = rank_meta }
+    end)
+
+    if ok_rank and rank_result and rank_result.files then
+      local ranked_files = rank_result.files
+      local rank_meta = rank_result.meta or {}
+      repo_rank_metadata = rank_meta
+      local seen_imports = { [current_file] = true }
+      for _, file_info in ipairs(import_files) do
+        seen_imports[file_info.path] = true
+      end
+
+      local top_repo_score = ranked_files[1] and ranked_files[1].repo_rank_score or 0
+      local min_repo_score = top_repo_score * 0.03
+      for _, ranked in ipairs(ranked_files) do
+        if not seen_imports[ranked.path] and ranked.repo_rank_score >= min_repo_score then
+          seen_imports[ranked.path] = true
+          table.insert(import_files, {
+            path = ranked.path,
+            relationship = "repo_rank",
+            depth = 0,
+            repo_rank_score = ranked.repo_rank_score,
+          })
+        end
+      end
+
+      for _, file_info in ipairs(import_files) do
+        local repo_score = rank_meta
+          and rank_meta.scores_by_path
+          and rank_meta.scores_by_path[file_info.path]
+          or file_info.repo_rank_score
+          or 0
+        file_info.repo_rank_score = repo_score
+        file_info.combined_score = (file_info.relevance_score or 0) + (repo_score * 1000)
+      end
+
+      table.sort(import_files, function(a, b)
+        local score_a = a.combined_score or a.relevance_score or 0
+        local score_b = b.combined_score or b.relevance_score or 0
+        if score_a == score_b then
+          return (a.path or "") < (b.path or "")
+        end
+        return score_a > score_b
+      end)
+    elseif not ok_rank then
+      repo_rank_metadata = { error = tostring(rank_result) }
+    end
 
     -- Filter to types only if specified
     if level.types_only then
@@ -563,6 +685,8 @@ local function build_context_for_level(current_file, project_root, level, budget
           depth = file_info.depth,
           mode = mode_str,
           relevance_score = file_info.relevance_score,
+          repo_rank_score = file_info.repo_rank_score,
+          combined_score = file_info.combined_score,
         })
       end
     end
@@ -652,6 +776,7 @@ local function build_context_for_level(current_file, project_root, level, budget
     import_count = #import_files,
     lsp_count = lsp_count,
     tree_tokens = tree_tokens,
+    repo_rank = repo_rank_metadata,
   }
 end
 
@@ -707,6 +832,7 @@ function M.build_context_with_strategy_async(current_file, opts)
         files_included = metadata.files,
         import_count = metadata.import_count,
         lsp_count = metadata.lsp_count,
+        repo_rank = metadata.repo_rank,
       }
     end
   end
@@ -725,6 +851,7 @@ function M.build_context_with_strategy_async(current_file, opts)
       within_budget = best.tokens <= budget,
     },
     files_included = best.metadata.files,
+    repo_rank = best.metadata.repo_rank,
     warning = best.tokens > budget and "all_levels_exceeded_budget" or nil,
   }
 end

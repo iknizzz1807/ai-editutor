@@ -51,6 +51,10 @@ Score: {
   label: "4. Relevance Scoring\nboost same dir/types/config\npenalize tests/vendor/large/generated"
 }
 
+RepoRank: {
+  label: "Repo Symbol Graph Ranking\nTree-sitter def/ref tags\nLua PageRank from current buffer"
+}
+
 LSPDefs: {
   label: "5. LSP Definitions\ndefinitions for identifiers\ninside project only"
 }
@@ -106,7 +110,8 @@ Adaptive -> CurrentFile
 CurrentFile -> Tree
 Tree -> Imports
 Imports -> Score
-Score -> LSPDefs
+Score -> RepoRank
+RepoRank -> LSPDefs
 LSPDefs -> Strategy
 Strategy -> Shrink
 Shrink -> Assemble: "yes"

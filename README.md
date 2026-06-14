@@ -81,6 +81,7 @@ The context engine is the heart of this plugin. The assistant should not answer 
 - files that import the current file;
 - transitive imports when budget allows;
 - Tree-sitter semantic chunks for large files;
+- repo-wide Tree-sitter definition/reference graph ranking;
 - LSP definitions for project symbols;
 - LSP references/call sites for symbols near the target code;
 - LSP diagnostics near the question;
@@ -104,10 +105,11 @@ In adaptive mode, the code-context branch builds context roughly like this:
 1. **Current file first.** If it fits, the full current file is included. If it is too large, the extractor keeps the header/import area and the region around the question or cursor.
 2. **Project tree next.** A compact tree gives the model orientation without spending much budget.
 3. **Import graph expansion.** The extractor looks for files imported by the current file, files importing the current file, and transitive imports when the selected strategy allows it.
-4. **Relevance scoring.** Related files are ranked higher when they are nearby, type/config files, direct imports, incoming importers, or small useful files. Tests, vendor files, generated files, and very large files are penalized.
-5. **LSP definitions.** When enabled, identifiers from the current buffer are resolved through LSP so project symbol definitions can be included.
-6. **Budget backtracking.** The strategy starts rich and falls back step by step: full related files, semantic chunks, direct imports, type/signature-only context, then minimal context.
-7. **Extra evidence.** LSP references/call sites, LSP hover/library information, and diagnostics are added with separate small budgets, so real callers, library APIs, and current typechecker errors can influence the answer.
+4. **Repo symbol graph ranking.** Tree-sitter definition/reference tags are converted into a repo-wide file graph, then a lightweight Lua PageRank ranks files that matter to the current buffer and identifiers near the question.
+5. **Relevance scoring.** Related files are ranked higher when they are nearby, type/config files, direct imports, incoming importers, small useful files, or high-ranking repo graph nodes. Tests, vendor files, generated files, and very large files are penalized.
+6. **LSP definitions.** When enabled, identifiers from the current buffer are resolved through LSP so project symbol definitions can be included.
+7. **Budget backtracking.** The strategy starts rich and falls back step by step: full related files, semantic chunks, direct imports, type/signature-only context, then minimal context.
+8. **Extra evidence.** LSP references/call sites, LSP hover/library information, and diagnostics are added with separate small budgets, so real callers, library APIs, and current typechecker errors can influence the answer.
 
 The result is a prompt built from the strongest available evidence instead of a blind dump of files.
 
@@ -145,6 +147,7 @@ The goal is not to produce comforting answers. The goal is to make the developer
 - Adaptive project context extraction with token budgeting.
 - Import graph analysis across common languages.
 - Tree-sitter semantic chunking for large files.
+- Aider-inspired repo-wide def/ref graph ranking with Lua PageRank.
 - LSP-powered definitions, diagnostics, hover text, and library API hints.
 - LSP reference/call-site extraction for symbols near the question target.
 - Local knowledge history stored as daily JSON files.
