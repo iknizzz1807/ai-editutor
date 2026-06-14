@@ -45,7 +45,7 @@ def process_user_data(data, config):
 
 Then run `:EditutorAsk` or press `<leader>ma`.
 
-The assistant sees the current file, relevant imports, incoming references, project structure, LSP diagnostics, and library/API information when available. It replaces the pending marker with an answer:
+The assistant sees the current file, relevant imports, incoming references, precise LSP call sites, project structure, LSP diagnostics, and library/API information when available. It replaces the pending marker with an answer:
 
 ```python
 # [Q:q_1737200000000]
@@ -82,6 +82,7 @@ The context engine is the heart of this plugin. The assistant should not answer 
 - transitive imports when budget allows;
 - Tree-sitter semantic chunks for large files;
 - LSP definitions for project symbols;
+- LSP references/call sites for symbols near the target code;
 - LSP diagnostics near the question;
 - LSP hover/library API information near the question.
 
@@ -96,7 +97,9 @@ The context extractor does not use one fixed strategy for every question. It fir
 - **Full project mode** for small repositories: include the current file, project tree, and source/config files until the token budget is reached.
 - **Adaptive mode** for larger repositories: start with the current file, then add related evidence in priority order and shrink the context only when needed.
 
-In adaptive mode, the extractor builds context roughly like this:
+The extractor runs independent evidence collection in parallel where possible: code context, local library/API info, and LSP references/call sites are gathered under an overall timeout, then diagnostics are appended with their own budget.
+
+In adaptive mode, the code-context branch builds context roughly like this:
 
 1. **Current file first.** If it fits, the full current file is included. If it is too large, the extractor keeps the header/import area and the region around the question or cursor.
 2. **Project tree next.** A compact tree gives the model orientation without spending much budget.
@@ -104,9 +107,9 @@ In adaptive mode, the extractor builds context roughly like this:
 4. **Relevance scoring.** Related files are ranked higher when they are nearby, type/config files, direct imports, incoming importers, or small useful files. Tests, vendor files, generated files, and very large files are penalized.
 5. **LSP definitions.** When enabled, identifiers from the current buffer are resolved through LSP so project symbol definitions can be included.
 6. **Budget backtracking.** The strategy starts rich and falls back step by step: full related files, semantic chunks, direct imports, type/signature-only context, then minimal context.
-7. **Extra evidence.** LSP hover/library information and diagnostics are added with separate small budgets, so library APIs and current typechecker errors can influence the answer.
+7. **Extra evidence.** LSP references/call sites, LSP hover/library information, and diagnostics are added with separate small budgets, so real callers, library APIs, and current typechecker errors can influence the answer.
 
-The result is a prompt built from the strongest available evidence instead of a blind dump of files. A planned improvement is a context self-audit step that explicitly tells the model what evidence was included and what might still be missing.
+The result is a prompt built from the strongest available evidence instead of a blind dump of files.
 
 ### Runtime Docs Over Stale Memory
 
@@ -143,6 +146,7 @@ The goal is not to produce comforting answers. The goal is to make the developer
 - Import graph analysis across common languages.
 - Tree-sitter semantic chunking for large files.
 - LSP-powered definitions, diagnostics, hover text, and library API hints.
+- LSP reference/call-site extraction for symbols near the question target.
 - Local knowledge history stored as daily JSON files.
 - Debug logs for inspecting prompt/context behavior.
 - Health check for dependencies and provider setup.
@@ -285,6 +289,7 @@ require("editutor").setup({
   context = {
     token_budget = 25000,
     library_info_budget = 2000,
+    diagnostics_budget = 2000,
     library_scan_radius = 50,
   },
 })
@@ -325,15 +330,19 @@ If the project is too large, it uses a backtracking strategy:
 | `types_only` | Type/signature oriented context |
 | `minimal` | Current file only |
 
+The adaptive code-context budget reserves space for library info and diagnostics before trying these levels. LSP references/call sites are gathered separately from the import graph so the prompt can include real usages even when the broader related-file set is compressed.
+
 The system should always try to return the best possible context within budget rather than fail because the project is large.
 
 ## Project-Specific Guidance Files
 
-This is an important design direction for the project.
+The project scanner already treats common AI/project guidance files such as `CLAUDE.md`, `AGENTS.md`, and `COPILOT.md` as useful config/source context when they are present.
+
+This remains an important design direction for the project.
 
 Many projects need local instructions that are more reliable than generic model knowledge: architecture rules, preferred libraries, anti-patterns, domain vocabulary, testing conventions, framework version notes, and links to current docs.
 
-A future direction is for `ai-editutor` to discover project guidance files such as:
+A future direction is to add first-class `ai-editutor` guidance files such as:
 
 - `EDITUTOR.md`
 - `.editutor.md`

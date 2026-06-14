@@ -11,6 +11,11 @@ Scan: {
   label: "Scan Project\nproject root, files, token estimate"
 }
 
+Parallel: {
+  shape: rectangle
+  label: "Run Evidence Tasks In Parallel\nasync.all + overall timeout"
+}
+
 Mode: {
   shape: diamond
   label: "Project fits\ntoken budget?"
@@ -67,17 +72,20 @@ Library: {
   label: "Library Evidence\nLSP hover/docs for external APIs\nsmall separate budget"
 }
 
+References: {
+  label: "LSP References / Call Sites\nTree-sitter picks symbols below question\nLSP returns real project usages"
+}
+
 Diagnostics: {
   label: "Diagnostics\nLSP errors/warnings\nprioritize near question"
 }
 
 Assemble: {
-  label: "Assemble Final Prompt\ncurrent file, related files, LSP defs,\nlibrary info, diagnostics, project tree"
+  label: "Assemble Final Prompt\ncurrent file, related files, LSP defs,\ncall sites, library info, diagnostics, project tree"
 }
 
-Audit: {
-  style.stroke-dash: 4
-  label: "Optional Upgrade\nContext Self-Audit\nDetect missing evidence before answering"
+Metadata: {
+  label: "Merge Metadata\ntokens, strategy level, files,\nreferences, library info, diagnostics"
 }
 
 LLM: "Send To LLM"
@@ -85,7 +93,8 @@ Answer: "Answer User"
 
 User -> Entry
 Entry -> Scan
-Scan -> Mode
+Scan -> Parallel
+Parallel -> Mode: "code context task"
 
 Mode -> Full: "yes"
 Mode -> Adaptive: "no"
@@ -104,12 +113,14 @@ Shrink -> Assemble: "yes"
 Shrink -> Chunking: "no"
 Chunking -> Strategy: "try smaller level"
 
+Parallel -> References: "references task"
+Parallel -> Library: "library task"
+Scan -> Diagnostics: "after parallel tasks"
+
+References -> Assemble
 Library -> Assemble
 Diagnostics -> Assemble
-Scan -> Library
-Scan -> Diagnostics
 
-Assemble -> Audit
-Audit -> LLM: "prompt + missing-context warnings"
-Assemble -> LLM: "without audit"
+Assemble -> Metadata
+Metadata -> LLM: "prompt + context metadata"
 LLM -> Answer
