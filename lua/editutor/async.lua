@@ -169,6 +169,44 @@ M.lsp_definition = function(bufnr, line, col, timeout_ms)
   return locations
 end
 
+---Async LSP references request
+---@param bufnr number Buffer number
+---@param line number 0-indexed line
+---@param col number 0-indexed column
+---@param timeout_ms? number Optional timeout (default: 5000ms)
+---@return table[] locations List of {uri, range}
+M.lsp_references = function(bufnr, line, col, timeout_ms)
+  timeout_ms = timeout_ms or 5000
+
+  local params = {
+    textDocument = vim.lsp.util.make_text_document_params(bufnr),
+    position = { line = line, character = col },
+    context = { includeDeclaration = false },
+  }
+
+  local results, timed_out = M.with_timeout(function()
+    return lsp_async.buf_request_all(bufnr, "textDocument/references", params)
+  end, timeout_ms, {})
+
+  if timed_out or not results then
+    return {}
+  end
+
+  local locations = {}
+  for _, client_result in pairs(results) do
+    local res = client_result.result
+    if type(res) == "table" then
+      for _, loc in ipairs(res) do
+        if loc.uri then
+          table.insert(locations, { uri = loc.uri, range = loc.range })
+        end
+      end
+    end
+  end
+
+  return locations
+end
+
 ---Async LSP hover request
 ---@param bufnr number Buffer number
 ---@param line number 0-indexed line

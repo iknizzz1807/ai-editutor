@@ -396,6 +396,20 @@ end
 -- Main Entry Point
 -- =============================================================================
 
+---@param bufnr number
+---@param questions table[]
+---@return string formatted_text
+---@return table metadata
+function M.extract_references_async(bufnr, questions)
+  local ok, lsp_references = pcall(require, "editutor.lsp_references")
+  if not ok then
+    return "", { error = "lsp_references module not found" }
+  end
+
+  local result = lsp_references.extract_async(bufnr, questions)
+  return lsp_references.format_for_prompt(result)
+end
+
 ---Extract context based on project size (async version)
 ---Must be called from within an async context
 ---@param opts? table {current_file?: string, questions?: table[], timeout?: number}
@@ -447,6 +461,16 @@ function M.extract_async(opts)
     end
   end)
 
+  -- Task 3: Extract precise symbol references/call sites near the target code
+  table.insert(tasks, function()
+    if #questions > 0 then
+      local refs, meta = M.extract_references_async(bufnr, questions)
+      return { refs, meta }
+    else
+      return { "", { skipped = "no_questions" } }
+    end
+  end)
+
   -- Execute in parallel with timeout
   local results, timed_out, async_err = async.with_timeout(function()
     return async.all(tasks)
@@ -455,22 +479,28 @@ function M.extract_async(opts)
   -- Extract results
   local code_context, code_metadata
   local library_info, library_metadata
+  local references_info, references_metadata
 
   if timed_out then
     code_context = ""
     code_metadata = { mode = mode_info.mode, timeout = true, warning = "Context extraction timeout" }
     library_info = ""
     library_metadata = {}
+    references_info = ""
+    references_metadata = {}
   elseif async_err then
     code_context = ""
     code_metadata = { mode = mode_info.mode, error = async_err, warning = "Context extraction error" }
     library_info = ""
     library_metadata = {}
+    references_info = ""
+    references_metadata = {}
   else
     -- Results from async.all are wrapped: {{result1, result2}, {result1, result2}}
     -- Validate structure before accessing
     local code_result = {}
     local lib_result = {}
+    local refs_result = {}
 
     if type(results) == "table" and results[1] and type(results[1][1]) == "table" then
       code_result = results[1][1]
@@ -478,15 +508,23 @@ function M.extract_async(opts)
     if type(results) == "table" and results[2] and type(results[2][1]) == "table" then
       lib_result = results[2][1]
     end
+    if type(results) == "table" and results[3] and type(results[3][1]) == "table" then
+      refs_result = results[3][1]
+    end
 
     code_context = code_result[1] or ""
     code_metadata = code_result[2] or { mode = mode_info.mode }
     library_info = lib_result[1] or ""
     library_metadata = lib_result[2] or {}
+    references_info = refs_result[1] or ""
+    references_metadata = refs_result[2] or {}
   end
 
   -- Combine code context and library info
   local final_context = code_context or ""
+  if references_info and references_info ~= "" then
+    final_context = final_context .. "\n\n" .. references_info
+  end
   if library_info and library_info ~= "" then
     final_context = final_context .. "\n\n" .. library_info
   end
@@ -499,6 +537,7 @@ function M.extract_async(opts)
 
   -- Merge metadata
   local final_metadata = code_metadata or {}
+  final_metadata.references = references_metadata or {}
   final_metadata.library_info = library_metadata or {}
   final_metadata.diagnostics = diagnostics_metadata or {}
 
@@ -510,6 +549,10 @@ function M.extract_async(opts)
 
   if library_metadata and library_metadata.tokens then
     final_metadata.total_tokens = final_metadata.total_tokens + library_metadata.tokens
+  end
+
+  if references_metadata and references_metadata.tokens then
+    final_metadata.total_tokens = final_metadata.total_tokens + references_metadata.tokens
   end
 
   if diagnostics_metadata and diagnostics_metadata.tokens then
