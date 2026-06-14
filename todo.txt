@@ -14,3 +14,4 @@
   - Tham khảo cách ignore/filter của gitignore generator hoặc Neo-tree nếu hữu ích.
   - Thảo luận và thiết kế tiếp context extraction nâng cao: intent detection, evidence checklist, context self-audit, missing-context detection.
   - Mục tiêu dài hạn: context extraction đủ thông minh cho nhiều loại tình huống và nhiều loại câu hỏi khác nhau, không chỉ dựa vào current file/import graph/LSP definitions.
+  - Render comment block đẹp
