@@ -6458,6 +6458,622 @@ M.TEST_CASES = {
   },
 }
 
+-- Golden expectations are kept separate from the generated/curated case list so
+-- we can steadily harden context extraction tests without rewriting every case.
+M.GOLDEN_EXPECTATIONS = {
+  ["django|django/apps/config.py|61-70"] = {
+    must_include_files = { "django/apps/config.py", "django/utils/functional.py" },
+    must_include_symbols = { "AppConfig", "cached_property", "default_auto_field" },
+  },
+  ["flask|src/flask/ctx.py|153-205"] = {
+    must_include_files = { "src/flask/ctx.py", "src/flask/globals.py" },
+    must_include_symbols = { "copy_current_request_context", "AppContext", "_cv_app" },
+  },
+  ["flask|src/flask/ctx.py|369-396"] = {
+    must_include_files = { "src/flask/ctx.py", "src/flask/sessions.py" },
+    must_include_symbols = { "AppContext", "request", "session", "SessionMixin" },
+  },
+  ["flask|src/flask/ctx.py|409-492"] = {
+    must_include_files = { "src/flask/ctx.py", "src/flask/globals.py", "src/flask/signals.py" },
+    must_include_symbols = { "AppContext", "push", "pop", "_cv_app", "appcontext_pushed", "appcontext_popped" },
+  },
+  ["fastapi|fastapi/concurrency.py|17-41"] = {
+    must_include_files = { "fastapi/concurrency.py", "fastapi/dependencies/utils.py" },
+    must_include_symbols = { "contextmanager_in_threadpool", "CapacityLimiter", "run_in_threadpool" },
+  },
+  ["fastapi|fastapi/encoders.py|67-111"] = {
+    must_include_files = { "fastapi/encoders.py", "fastapi/exception_handlers.py", "fastapi/routing.py" },
+    must_include_symbols = { "ENCODERS_BY_TYPE", "generate_encoders_by_class_tuples", "jsonable_encoder" },
+  },
+  ["pandas|pandas/_config/config.py|453-518"] = {
+    must_include_files = { "pandas/_config/config.py" },
+    must_include_symbols = { "option_context", "get_option", "set_option" },
+  },
+  ["pandas|pandas/core/accessor.py|76-146"] = {
+    must_include_files = { "pandas/core/accessor.py" },
+    must_include_symbols = { "PandasDelegate", "_add_delegate_accessors", "_create_delegator_property", "_create_delegator_method" },
+  },
+  ["pandas|pandas/core/accessor.py|148-199"] = {
+    must_include_files = { "pandas/core/accessor.py" },
+    must_include_symbols = { "delegate_names", "add_delegate_accessors", "PandasDelegate" },
+  },
+  ["pandas|pandas/core/accessor.py|202-230"] = {
+    must_include_files = { "pandas/core/accessor.py" },
+    must_include_symbols = { "Accessor", "__get__", "CachedAccessor" },
+  },
+  ["numpy|numpy/lib/_function_base_impl.py|61-63"] = {
+    must_include_files = { "numpy/lib/_function_base_impl.py", "numpy/_core/overrides.py" },
+    must_include_symbols = { "array_function_dispatch", "overrides" },
+  },
+  ["numpy|numpy/matrixlib/defmatrix.py|74-180"] = {
+    must_include_files = { "numpy/matrixlib/defmatrix.py", "numpy/_core/numeric.py" },
+    must_include_symbols = { "matrix", "__array_finalize__", "asmatrix" },
+  },
+  ["pydantic|pydantic/functional_validators.py|28-86"] = {
+    must_include_files = { "pydantic/functional_validators.py", "pydantic/_internal/_decorators.py" },
+    must_include_symbols = { "AfterValidator", "__get_pydantic_core_schema__", "inspect_validator", "FieldValidatorDecoratorInfo" },
+  },
+  ["pydantic|pydantic/functional_validators.py|378-451"] = {
+    must_include_files = { "pydantic/functional_validators.py", "pydantic/_internal/_decorators.py" },
+    must_include_symbols = { "field_validator", "FieldValidatorDecoratorInfo", "PydanticUserError" },
+  },
+  ["pydantic|pydantic/functional_validators.py|642-700"] = {
+    must_include_files = { "pydantic/functional_validators.py", "pydantic/_internal/_decorators.py" },
+    must_include_symbols = { "model_validator", "ModelValidatorDecoratorInfo", "PydanticUserError" },
+  },
+  ["sqlalchemy|lib/sqlalchemy/engine/url.py|152-216"] = {
+    must_include_files = { "lib/sqlalchemy/engine/url.py", "lib/sqlalchemy/util/_immutabledict.py" },
+    must_include_symbols = { "URL", "create", "_assert_str", "_assert_port", "_str_dict" },
+  },
+  ["sqlalchemy|lib/sqlalchemy/engine/url.py|839-890"] = {
+    must_include_files = { "lib/sqlalchemy/engine/url.py" },
+    must_include_symbols = { "make_url", "_parse_url", "URL" },
+  },
+  ["sqlalchemy|lib/sqlalchemy/orm/attributes.py|515-575"] = {
+    must_include_files = { "lib/sqlalchemy/orm/attributes.py", "lib/sqlalchemy/orm/exc.py" },
+    must_include_symbols = { "InstrumentedAttribute", "__get__", "__set__", "UnmappedInstanceError" },
+  },
+  ["pytest|src/_pytest/monkeypatch.py|35-62"] = {
+    must_include_files = { "src/_pytest/monkeypatch.py", "src/_pytest/fixtures.py" },
+    must_include_symbols = { "monkeypatch", "MonkeyPatch", "fixture", "undo" },
+  },
+  ["pytest|src/_pytest/fixtures.py|894-927"] = {
+    must_include_files = { "src/_pytest/fixtures.py", "src/_pytest/outcomes.py" },
+    must_include_symbols = { "call_fixture_func", "_teardown_yield_fixture", "FixtureRequest", "fail" },
+  },
+  ["pytest|src/_pytest/fixtures.py|1318-1390"] = {
+    must_include_files = { "src/_pytest/fixtures.py" },
+    must_include_symbols = { "fixture", "FixtureFunctionMarker", "FixtureFunctionDefinition" },
+  },
+  ["requests|src/requests/adapters.py|76-110"] = {
+    must_include_files = { "src/requests/adapters.py", "src/requests/models.py", "src/requests/utils.py" },
+    must_include_symbols = { "_urllib3_request_context", "PreparedRequest", "get_auth_from_url", "PoolManager" },
+  },
+  ["requests|src/requests/sessions.py|356-454"] = {
+    must_include_files = { "src/requests/sessions.py", "src/requests/adapters.py" },
+    must_include_symbols = { "Session", "__enter__", "__exit__", "HTTPAdapter" },
+  },
+  ["transformers|src/transformers/utils/import_utils.py|1951-2090"] = {
+    must_include_files = { "src/transformers/utils/import_utils.py" },
+    must_include_symbols = { "_LazyModule", "__getattr__", "requires_backends" },
+  },
+  ["django|django/apps/config.py|99-160"] = {
+    must_include_files = { "django/apps/config.py", "django/utils/module_loading.py" },
+    must_include_symbols = { "AppConfig", "create", "import_string", "module_has_submodule" },
+  },
+  ["django|django/apps/config.py|71-97"] = {
+    must_include_files = { "django/apps/config.py" },
+    must_include_symbols = { "_path_from_module", "ImproperlyConfigured", "paths" },
+  },
+  ["django|django/apps/registry.py|1-50"] = {
+    must_include_files = { "django/apps/registry.py", "django/apps/config.py" },
+    must_include_symbols = { "Apps", "AppConfig", "all_models" },
+  },
+  ["flask|src/flask/ctx.py|153-206"] = {
+    must_include_files = { "src/flask/ctx.py", "src/flask/globals.py" },
+    must_include_symbols = { "copy_current_request_context", "RequestContext", "update_wrapper" },
+  },
+  ["flask|src/flask/ctx.py|369-397"] = {
+    must_include_files = { "src/flask/ctx.py", "src/flask/sessions.py" },
+    must_include_symbols = { "request", "session", "open_session" },
+  },
+  ["flask|src/flask/ctx.py|409-481"] = {
+    must_include_files = { "src/flask/ctx.py", "src/flask/globals.py", "src/flask/signals.py" },
+    must_include_symbols = { "push", "pop", "RequestContext", "request_started" },
+  },
+  ["fastapi|fastapi/concurrency.py|17-42"] = {
+    must_include_files = { "fastapi/concurrency.py", "fastapi/dependencies/utils.py" },
+    must_include_symbols = { "contextmanager_in_threadpool", "CapacityLimiter", "run_in_threadpool" },
+  },
+  ["fastapi|fastapi/background.py|1-50"] = {
+    must_include_files = { "fastapi/background.py" },
+    must_include_symbols = { "BackgroundTasks", "BackgroundTask", "StarletteBackgroundTasks" },
+  },
+  ["fastapi|fastapi/dependencies/utils.py|1-60"] = {
+    must_include_files = { "fastapi/dependencies/utils.py", "fastapi/dependencies/models.py" },
+    must_include_symbols = { "Dependant", "SecurityBase", "get_typed_signature" },
+  },
+  ["fastapi|fastapi/encoders.py|1-50"] = {
+    must_include_files = { "fastapi/encoders.py" },
+    must_include_symbols = { "jsonable_encoder", "ENCODERS_BY_TYPE", "generate_encoders_by_class_tuples" },
+  },
+  ["pandas|pandas/_config/config.py|453-525"] = {
+    must_include_files = { "pandas/_config/config.py" },
+    must_include_symbols = { "option_context", "get_option", "set_option", "reset_option" },
+  },
+  ["pandas|pandas/core/accessor.py|202-231"] = {
+    must_include_files = { "pandas/core/accessor.py" },
+    must_include_symbols = { "Accessor", "__get__", "CachedAccessor" },
+  },
+  ["pandas|pandas/core/accessor.py|148-200"] = {
+    must_include_files = { "pandas/core/accessor.py" },
+    must_include_symbols = { "delegate_names", "add_delegate_accessors", "PandasDelegate" },
+  },
+  ["pandas|pandas/core/accessor.py|31-59"] = {
+    must_include_files = { "pandas/core/accessor.py" },
+    must_include_symbols = { "DirNamesMixin", "_accessors", "__dir__" },
+  },
+  ["numpy|numpy/matrixlib/defmatrix.py|1-80"] = {
+    must_include_files = { "numpy/matrixlib/defmatrix.py", "numpy/_core/numeric.py" },
+    must_include_symbols = { "matrix", "asmatrix", "__array_priority__" },
+  },
+  ["pydantic|pydantic/_internal/_dataclasses.py|65-80"] = {
+    must_include_files = { "pydantic/_internal/_dataclasses.py", "pydantic/_internal/_fields.py" },
+    must_include_symbols = { "set_dataclass_fields", "ConfigWrapper", "collect_dataclass_fields" },
+  },
+  ["pydantic|pydantic/functional_validators.py|1-60"] = {
+    must_include_files = { "pydantic/functional_validators.py", "pydantic/_internal/_decorators.py" },
+    must_include_symbols = { "AfterValidator", "BeforeValidator", "field_validator" },
+  },
+  ["pydantic|pydantic/_internal/_decorators.py|1-80"] = {
+    must_include_files = { "pydantic/_internal/_decorators.py" },
+    must_include_symbols = { "Decorator", "DecoratorInfo", "FieldValidatorDecoratorInfo", "ModelValidatorDecoratorInfo" },
+  },
+  ["sqlalchemy|lib/sqlalchemy/connectors/asyncio.py|43-100"] = {
+    must_include_files = { "lib/sqlalchemy/connectors/asyncio.py" },
+    must_include_symbols = { "AsyncAdapt_dbapi_module", "AsyncIODBAPIConnection", "await_" },
+  },
+  ["sqlalchemy|lib/sqlalchemy/orm/attributes.py|1-80"] = {
+    must_include_files = { "lib/sqlalchemy/orm/attributes.py", "lib/sqlalchemy/orm/interfaces.py" },
+    must_include_symbols = { "InstrumentedAttribute", "QueryableAttribute", "InspectionAttr" },
+  },
+  ["pytest|src/_pytest/fixtures.py|1-100"] = {
+    must_include_files = { "src/_pytest/fixtures.py", "src/_pytest/outcomes.py" },
+    must_include_symbols = { "FixtureRequest", "FixtureDef", "fail" },
+  },
+  ["pytest|src/_pytest/fixtures.py|300-400"] = {
+    must_include_files = { "src/_pytest/fixtures.py" },
+    must_include_symbols = { "yield", "fixture", "finalizer" },
+  },
+  ["pytest|src/_pytest/monkeypatch.py|1-80"] = {
+    must_include_files = { "src/_pytest/monkeypatch.py" },
+    must_include_symbols = { "MonkeyPatch", "monkeypatch", "undo" },
+  },
+  ["requests|src/requests/adapters.py|76-110"] = {
+    must_include_files = { "src/requests/adapters.py", "src/requests/models.py", "src/requests/utils.py" },
+    must_include_symbols = { "_urllib3_request_context", "PreparedRequest", "PoolManager" },
+  },
+  ["requests|src/requests/sessions.py|356-454"] = {
+    must_include_files = { "src/requests/sessions.py", "src/requests/adapters.py" },
+    must_include_symbols = { "Session", "__enter__", "__exit__", "HTTPAdapter" },
+  },
+  ["axios|lib/core/Axios.js|21-82"] = {
+    must_include_files = { "lib/core/Axios.js", "lib/core/InterceptorManager.js" },
+    must_include_symbols = { "Axios", "this.interceptors", "InterceptorManager" },
+  },
+  ["axios|lib/core/InterceptorManager.js|19-40"] = {
+    must_include_files = { "lib/core/InterceptorManager.js" },
+    must_include_symbols = { "use", "eject", "handlers" },
+  },
+  ["express|lib/application.js|59-83"] = {
+    must_include_files = { "lib/application.js" },
+    must_include_symbols = { "app.init", "Object.defineProperty", "Router" },
+  },
+  ["express|lib/application.js|190-244"] = {
+    must_include_files = { "lib/application.js" },
+    must_include_symbols = { "app.use", "mounted_app", "Object.setPrototypeOf", "emit" },
+  },
+  ["express|lib/application.js|522-575"] = {
+    must_include_files = { "lib/application.js", "lib/view.js" },
+    must_include_symbols = { "app.render", "renderOptions", "cache", "tryRender" },
+  },
+  ["zod|packages/zod/src/v3/types.ts|62-85"] = {
+    must_include_files = { "packages/zod/src/v3/types.ts", "packages/zod/src/v3/helpers/parseUtil.ts" },
+    must_include_symbols = { "ParseInputLazyPath", "_cachedPath", "ParseInput", "path" },
+  },
+  ["zod|packages/zod/src/v3/types.ts|87-101"] = {
+    must_include_files = { "packages/zod/src/v3/types.ts", "packages/zod/src/v3/ZodError.ts" },
+    must_include_symbols = { "handleResult", "isValid", "ZodError", "success" },
+  },
+  ["zustand|src/vanilla.ts|60-97"] = {
+    must_include_files = { "src/vanilla.ts" },
+    must_include_symbols = { "createStoreImpl", "listeners", "setState", "initialState" },
+  },
+  ["zustand|src/vanilla.ts|66-81"] = {
+    must_include_files = { "src/vanilla.ts" },
+    must_include_symbols = { "setState", "Object.is", "Object.assign", "listeners.forEach" },
+  },
+  ["zustand|src/vanilla.ts|88-92"] = {
+    must_include_files = { "src/vanilla.ts" },
+    must_include_symbols = { "subscribe", "listeners.add", "listeners.delete" },
+  },
+  ["redux|src/createStore.ts|162-169"] = {
+    must_include_files = { "src/createStore.ts" },
+    must_include_symbols = { "ensureCanMutateNextListeners", "currentListeners", "nextListeners", "Map" },
+  },
+  ["redux|src/createStore.ts|211-253"] = {
+    must_include_files = { "src/createStore.ts" },
+    must_include_symbols = { "subscribe", "unsubscribe", "ensureCanMutateNextListeners", "listenerIdCounter" },
+  },
+  ["redux|src/createStore.ts|354-390"] = {
+    must_include_files = { "src/createStore.ts", "src/utils/symbol-observable.ts" },
+    must_include_symbols = { "observable", "outerSubscribe", "observeState" },
+  },
+  ["redux|src/applyMiddleware.ts|50-77"] = {
+    must_include_files = { "src/applyMiddleware.ts", "src/compose.ts", "src/types/middleware.ts" },
+    must_include_symbols = { "applyMiddleware", "MiddlewareAPI", "middlewares.map", "compose" },
+  },
+  ["trpc|examples/.experimental/next-app-dir/src/server/trpc.ts|1-24"] = {
+    must_include_files = { "examples/.experimental/next-app-dir/src/server/trpc.ts", "examples/.experimental/next-app-dir/src/server/context.ts" },
+    must_include_symbols = { "initTRPC", "Context", "errorFormatter", "ZodError" },
+  },
+  ["trpc|examples/.experimental/next-app-dir/src/server/trpc.ts|35-45"] = {
+    must_include_files = { "examples/.experimental/next-app-dir/src/server/trpc.ts" },
+    must_include_symbols = { "protectedProcedure", "publicProcedure", "TRPCError", "next" },
+  },
+  ["trpc|examples/.experimental/next-app-dir/src/server/trpc.ts|47-59"] = {
+    must_include_files = { "examples/.experimental/next-app-dir/src/server/trpc.ts", "examples/.experimental/next-app-dir/src/server/context.ts" },
+    must_include_symbols = { "experimental_createServerActionHandler", "createAction", "createContext", "auth", "headers" },
+  },
+  ["swr|e2e/site/app/page.tsx|13-18"] = {
+    must_include_files = { "e2e/site/app/page.tsx" },
+    must_include_symbols = { "Section", "useSWR", "fetcher", "suspense" },
+  },
+  ["swr|e2e/site/app/page.tsx|20-31"] = {
+    must_include_files = { "e2e/site/app/page.tsx" },
+    must_include_symbols = { "Page", "useReducer", "OnlyRenderInClient", "Suspense" },
+  },
+  ["prisma|packages/adapter-d1/src/d1.ts|12-31"] = {
+    must_include_files = { "packages/adapter-d1/src/d1.ts", "packages/adapter-d1/src/d1-http.ts", "packages/adapter-d1/src/d1-worker.ts" },
+    must_include_symbols = { "PrismaD1", "isD1HttpParams", "PrismaD1HttpAdapterFactory", "PrismaD1WorkerAdapterFactory" },
+  },
+  ["prisma|packages/adapter-d1/src/d1.ts|33-35"] = {
+    must_include_files = { "packages/adapter-d1/src/d1.ts" },
+    must_include_symbols = { "PrismaD1Interface", "SqlDriverAdapterFactory", "connectToShadowDb", "D1HttpParams" },
+  },
+  ["nest|integration/discovery/src/webhooks.explorer.ts|1-39"] = {
+    must_include_files = { "integration/discovery/src/webhooks.explorer.ts", "integration/discovery/src/decorators/webhook.decorators.ts" },
+    must_include_symbols = { "WebhooksExplorer", "Injectable", "DiscoveryService", "MetadataScanner", "getMetadataByDecorator" },
+  },
+  ["svelte|packages/svelte/src/compiler/index.js|23-57"] = {
+    must_include_files = { "packages/svelte/src/compiler/index.js", "packages/svelte/src/compiler/phases/1-parse/remove_typescript_nodes.js", "packages/svelte/src/compiler/phases/2-analyze/index.js", "packages/svelte/src/compiler/phases/3-transform/index.js" },
+    must_include_symbols = { "compile", "state.reset", "remove_typescript_nodes", "analyze_component", "transform_component" },
+  },
+  ["lodash|fp/_baseConvert.js|16-35"] = {
+    must_include_files = { "fp/_baseConvert.js" },
+    must_include_symbols = { "baseArity", "baseAry", "func.apply", "return func" },
+  },
+  ["date-fns|src/_lib/defaultOptions/index.ts|12-20"] = {
+    must_include_files = { "src/_lib/defaultOptions/index.ts" },
+    must_include_symbols = { "defaultOptions", "getDefaultOptions", "setDefaultOptions", "DefaultOptions" },
+  },
+  ["gin|gin.go|340-354"] = {
+    must_include_files = { "gin.go" },
+    must_include_symbols = { "OptionFunc", "With", "opt(engine)" },
+  },
+  ["gin|gin.go|662-675"] = {
+    must_include_files = { "gin.go", "context.go" },
+    must_include_symbols = { "ServeHTTP", "routeTreesUpdated", "pool.Get" },
+  },
+  ["gin|context.go|60-96"] = {
+    must_include_files = { "context.go" },
+    must_include_symbols = { "Context", "sync.RWMutex", "Keys" },
+  },
+  ["gin|binding/binding.go|28-89"] = {
+    must_include_files = { "binding/binding.go" },
+    must_include_symbols = { "Binding", "BindingBody", "Default" },
+  },
+  ["cobra|command.go|50-150"] = {
+    must_include_files = { "command.go" },
+    must_include_symbols = { "Command", "PersistentPreRun", "RunE" },
+  },
+  ["cobra|args.go|74-100"] = {
+    must_include_files = { "args.go" },
+    must_include_symbols = { "PositionalArgs", "MinimumNArgs", "ExactArgs" },
+  },
+  ["cobra|command.go|312-374"] = {
+    must_include_files = { "command.go" },
+    must_include_symbols = { "SetUsageFunc", "SetHelpFunc", "SetVersionTemplate" },
+  },
+  ["bubbletea|commands.go|15-54"] = {
+    must_include_files = { "commands.go", "tea.go" },
+    must_include_symbols = { "Batch", "compactCmds", "BatchMsg" },
+  },
+  ["bubbletea|tea.go|110-132"] = {
+    must_include_files = { "tea.go" },
+    must_include_symbols = { "channelHandlers", "add", "shutdown" },
+  },
+  ["bubbletea|tea.go|39-56"] = {
+    must_include_files = { "tea.go" },
+    must_include_symbols = { "Msg", "Model", "Cmd" },
+  },
+  ["fzf|src/core.go|23-52"] = {
+    must_include_files = { "src/core.go", "src/item.go" },
+    must_include_symbols = { "revision", "buildItemTransformer", "acceptNth" },
+  },
+  ["fzf|src/matcher.go|37-70"] = {
+    must_include_files = { "src/matcher.go", "src/util/eventbox.go" },
+    must_include_symbols = { "Matcher", "NewMatcher", "NewEventBox" },
+  },
+  ["fzf|src/matcher.go|72-100"] = {
+    must_include_files = { "src/matcher.go", "src/util/eventbox.go" },
+    must_include_symbols = { "Loop", "reqBox.Wait", "MatchRequest" },
+  },
+  ["lazygit|pkg/app/app.go|32-100"] = {
+    must_include_files = { "pkg/app/app.go", "pkg/gui/gui.go" },
+    must_include_symbols = { "App", "Run", "NewCommon" },
+  },
+  ["fiber|app.go|67-112"] = {
+    must_include_files = { "app.go" },
+    must_include_symbols = { "App", "pool", "mutex" },
+  },
+  ["fiber|router.go|70-110"] = {
+    must_include_files = { "router.go" },
+    must_include_symbols = { "match", "routeParser", "hasPartialMatchBoundary" },
+  },
+  ["fiber|ctx.go|49-77"] = {
+    must_include_files = { "ctx.go" },
+    must_include_symbols = { "DefaultCtx", "io.Writer", "context.Context" },
+  },
+  ["mux|mux.go|54-79"] = {
+    must_include_files = { "mux.go", "middleware.go" },
+    must_include_symbols = { "Router", "NotFoundHandler", "middleware" },
+  },
+  ["mux|route.go|46-102"] = {
+    must_include_files = { "route.go", "mux.go" },
+    must_include_symbols = { "Match", "ErrMethodMismatch", "RouteMatch" },
+  },
+  ["testify|mock/mock.go|36-95"] = {
+    must_include_files = { "mock/mock.go" },
+    must_include_symbols = { "Call", "Repeatability", "newCall" },
+  },
+  ["axum|axum-core/src/response/into_response.rs|17-62"] = {
+    must_include_files = { "axum-core/src/response/into_response.rs", "axum-core/src/response/mod.rs" },
+    must_include_symbols = { "IntoResponse", "Response", "impl IntoResponse" },
+  },
+  ["axum|axum-core/src/extract/mod.rs|39-63"] = {
+    must_include_files = { "axum-core/src/extract/mod.rs", "axum-core/src/extract/rejection.rs" },
+    must_include_symbols = { "FromRequestParts", "FromRequest", "IntoResponse" },
+  },
+  ["axum|axum/src/routing/mod.rs|60-80"] = {
+    must_include_files = { "axum/src/routing/mod.rs", "axum/src/routing/route.rs" },
+    must_include_symbols = { "Router", "RouterInner", "Arc::clone" },
+  },
+  ["tokio|tokio/src/sync/rwlock.rs|88-100"] = {
+    must_include_files = { "tokio/src/sync/rwlock.rs", "tokio/src/sync/batch_semaphore.rs" },
+    must_include_symbols = { "RwLock", "Semaphore", "UnsafeCell" },
+  },
+  ["tokio|tokio/src/sync/mutex.rs|1-50"] = {
+    must_include_files = { "tokio/src/sync/mutex.rs", "tokio/src/sync/batch_semaphore.rs" },
+    must_include_symbols = { "Mutex", "UnsafeCell", "PhantomData" },
+  },
+  ["tokio|tokio/src/sync/broadcast.rs|24-60"] = {
+    must_include_files = { "tokio/src/sync/broadcast.rs" },
+    must_include_symbols = { "Sender", "Receiver", "RecvError" },
+  },
+  ["clap|clap_builder/src/builder/value_parser.rs|63-80"] = {
+    must_include_files = { "clap_builder/src/builder/value_parser.rs", "clap_builder/src/builder/arg.rs" },
+    must_include_symbols = { "ValueParser", "ValueParserInner", "AnyValueParser" },
+  },
+  ["clap|clap_builder/src/builder/command.rs|36-80"] = {
+    must_include_files = { "clap_builder/src/builder/command.rs", "clap_builder/src/builder/arg.rs" },
+    must_include_symbols = { "Command", "Parser", "get_matches" },
+  },
+  ["ripgrep|crates/printer/src/standard.rs|30-85"] = {
+    must_include_files = { "crates/printer/src/standard.rs", "crates/printer/src/color.rs" },
+    must_include_symbols = { "Config", "StandardBuilder", "Arc" },
+  },
+  ["ripgrep|crates/ignore/src/walk.rs|25-100"] = {
+    must_include_files = { "crates/ignore/src/walk.rs", "crates/ignore/src/dir.rs" },
+    must_include_symbols = { "DirEntry", "DirEntryInner", "Error" },
+  },
+  ["ripgrep|crates/searcher/src/searcher/mod.rs|54-80"] = {
+    must_include_files = { "crates/searcher/src/searcher/mod.rs", "crates/searcher/src/line_buffer.rs" },
+    must_include_symbols = { "BinaryDetection", "line_buffer", "quit" },
+  },
+  ["serde|serde_derive/src/de.rs|25-80"] = {
+    must_include_files = { "serde_derive/src/de.rs", "serde_derive/src/internals/ast.rs" },
+    must_include_symbols = { "expand_derive_deserialize", "Container::from_ast", "quote" },
+  },
+  ["serde|serde_core/src/de/mod.rs|1-80"] = {
+    must_include_files = { "serde_core/src/de/mod.rs", "serde_core/src/ser/mod.rs" },
+    must_include_symbols = { "Deserialize", "Deserializer", "serde_derive" },
+  },
+  ["zls|src/analyser/string_pool.zig|25-54"] = {
+    must_include_files = { "src/analyser/string_pool.zig" },
+    must_include_symbols = { "StringPool", "OptionalString", "comptime" },
+  },
+  ["zls|src/analyser/string_pool.zig|62-86"] = {
+    must_include_files = { "src/analyser/string_pool.zig" },
+    must_include_symbols = { "pool.mutex.lock", "defer pool.mutex.unlock", "getOrPutString" },
+  },
+  ["zls|src/DocumentStore.zig|20-50"] = {
+    must_include_files = { "src/DocumentStore.zig", "src/BuildAssociatedConfig.zig" },
+    must_include_symbols = { "DocumentStore", "Mutex", "supports_build_system" },
+  },
+  ["tigerbeetle|src/counting_allocator.zig|1-72"] = {
+    must_include_files = { "src/counting_allocator.zig" },
+    must_include_symbols = { "CountingAllocator", "allocator", "std.mem.Allocator" },
+  },
+  ["tigerbeetle|src/lsm/cache_map.zig|26-60"] = {
+    must_include_files = { "src/lsm/cache_map.zig", "src/lsm/set_associative_cache.zig" },
+    must_include_symbols = { "CacheMapType", "SetAssociativeCacheType", "comptime Key" },
+  },
+  ["tigerbeetle|src/lsm/cache_map.zig|84-112"] = {
+    must_include_files = { "src/lsm/cache_map.zig" },
+    must_include_symbols = { "init", "errdefer", "scope_rollback_log" },
+  },
+  ["tigerbeetle|src/io.zig|9-14"] = {
+    must_include_files = { "src/io.zig", "src/io/linux.zig", "src/io/darwin.zig", "src/io/windows.zig" },
+    must_include_symbols = { "IO", "builtin.target.os.tag", "compileError" },
+  },
+  ["tigerbeetle|src/io/linux.zig|21-62"] = {
+    must_include_files = { "src/io/linux.zig", "src/queue.zig" },
+    must_include_symbols = { "IO", "cancel_all_status", "union(enum)" },
+  },
+  ["ghostty|pkg/fontconfig/pattern.zig|12-68"] = {
+    must_include_files = { "pkg/fontconfig/pattern.zig", "pkg/fontconfig/main.zig" },
+    must_include_symbols = { "Pattern", "opaque", "cval" },
+  },
+  ["ghostty|pkg/freetype/face.zig|54-80"] = {
+    must_include_files = { "pkg/freetype/face.zig", "pkg/freetype/errors.zig" },
+    must_include_symbols = { "Face", "intToError", "Error!void" },
+  },
+  ["ghostty|pkg/harfbuzz/buffer.zig|16-27"] = {
+    must_include_files = { "pkg/harfbuzz/buffer.zig", "pkg/harfbuzz/errors.zig" },
+    must_include_symbols = { "Buffer", "create", "destroy" },
+  },
+  ["zig|doc/langref/error_union_parsing_u64.zig|4-25"] = {
+    must_include_files = { "doc/langref/error_union_parsing_u64.zig" },
+    must_include_symbols = { "parseU64", "mulWithOverflow", "OverFlow" },
+  },
+  ["lazy.nvim|lua/lazy/async.lua|119-133"] = {
+    must_include_files = { "lua/lazy/async.lua" },
+    must_include_symbols = { "Async:step", "coroutine.status", "coroutine.resume", "Async:_emit" },
+  },
+  ["lazy.nvim|lua/lazy/async.lua|147-172"] = {
+    must_include_files = { "lua/lazy/async.lua" },
+    must_include_symbols = { "M.step", "M.BUDGET", "hrtime", "M._active", "M._suspended" },
+  },
+  ["lazy.nvim|lua/lazy/core/handler/event.lua|40-63"] = {
+    must_include_files = { "lua/lazy/core/handler/event.lua", "lua/lazy/core/util.lua" },
+    must_include_symbols = { "M:_parse", "M.mappings", "Util.is_list", "LazyEvent" },
+  },
+  ["lazy.nvim|lua/lazy/core/loader.lua|313-371"] = {
+    must_include_files = { "lua/lazy/core/loader.lua", "lua/lazy/core/handler/init.lua", "lua/lazy/core/util.lua" },
+    must_include_symbols = { "M._load", "Handler.enable", "Handler.disable", "M.load", "M.packadd" },
+  },
+  ["telescope.nvim|lua/telescope/algos/fzy.lua|58-80"] = {
+    must_include_files = { "lua/telescope/algos/fzy.lua" },
+    must_include_symbols = { "precompute_bonus", "SCORE_MATCH_SLASH", "SCORE_MATCH_WORD", "Path.path.sep" },
+  },
+  ["telescope.nvim|lua/telescope/algos/fzy.lua|82-124"] = {
+    must_include_files = { "lua/telescope/algos/fzy.lua" },
+    must_include_symbols = { "compute", "SCORE_MATCH_CONSECUTIVE", "SCORE_GAP_INNER" },
+  },
+  ["telescope.nvim|lua/telescope/algos/fzy.lua|126-140"] = {
+    must_include_files = { "lua/telescope/algos/fzy.lua" },
+    must_include_symbols = { "fzy.score", "SCORE_MIN", "SCORE_MAX", "MATCH_MAX_LENGTH" },
+  },
+  ["nvim-lspconfig|lua/lspconfig.lua|13-61"] = {
+    must_include_files = { "lua/lspconfig.lua" },
+    must_include_symbols = { "aliases", "server_aliases", "sumneko_lua", "tsserver" },
+  },
+  ["nvim-lspconfig|lua/lspconfig.lua|77-100"] = {
+    must_include_files = { "lua/lspconfig.lua", "lua/lspconfig/configs.lua" },
+    must_include_symbols = { "__index", "server_aliases", "vim.deprecate", "pcall" },
+  },
+  ["nvim-treesitter|lua/nvim-treesitter/config.lua|1-50"] = {
+    must_include_files = { "lua/nvim-treesitter/config.lua" },
+    must_include_symbols = { "M.setup", "get_install_dir", "joinpath", "tbl_deep_extend" },
+  },
+  ["nvim-treesitter|lua/nvim-treesitter/parsers.lua|1-100"] = {
+    must_include_files = { "lua/nvim-treesitter/parsers.lua" },
+    must_include_symbols = { "install_info", "revision", "maintainers", "tier" },
+  },
+  ["which-key.nvim|lua/which-key/node.lua|10-25"] = {
+    must_include_files = { "lua/which-key/node.lua", "lua/which-key/util.lua" },
+    must_include_symbols = { "M.new", "setmetatable", "parent", "_children", "path" },
+  },
+  ["which-key.nvim|lua/which-key/node.lua|53-80"] = {
+    must_include_files = { "lua/which-key/node.lua" },
+    must_include_symbols = { "__index", "rawget", "mapping", "keymap", "__tostring" },
+  },
+  ["redis|src/adlist.h|16-50"] = {
+    must_include_files = { "src/adlist.h" },
+    must_include_symbols = { "listNode", "listIter", "list", "listSetFreeMethod", "listGetMatchMethod" },
+  },
+  ["redis|src/adlist.c|37-63"] = {
+    must_include_files = { "src/adlist.c", "src/adlist.h" },
+    must_include_symbols = { "listEmpty", "listRelease", "free", "zfree" },
+  },
+  ["redis|src/ae.h|45-93"] = {
+    must_include_files = { "src/ae.h" },
+    must_include_symbols = { "aeFileProc", "aeTimeProc", "aeFileEvent", "aeTimeEvent", "aeEventLoop" },
+  },
+  ["redis|src/ae.h|59-70"] = {
+    must_include_files = { "src/ae.h", "src/ae.c" },
+    must_include_symbols = { "aeTimeEvent", "timeProc", "finalizerProc", "refcount" },
+  },
+  ["jq|src/jv.h|30-43"] = {
+    must_include_files = { "src/jv.h" },
+    must_include_symbols = { "jv_refcnt", "jv", "kind_flags", "union", "ptr" },
+  },
+  ["jq|src/jv.h|92-111"] = {
+    must_include_files = { "src/jv.h" },
+    must_include_symbols = { "jv_array_foreach", "jv_array_length", "jv_array_get", "JV_ARRAY" },
+  },
+  ["jq|src/execute.c|22-54"] = {
+    must_include_files = { "src/execute.c" },
+    must_include_symbols = { "jq_state", "nomem_handler", "jq_msg_cb", "jq_input_cb" },
+  },
+  ["git|alloc.c|20-37"] = {
+    must_include_files = { "alloc.c", "alloc.h" },
+    must_include_symbols = { "BLOCKING", "any_object", "alloc_state", "slabs", "slab_alloc" },
+  },
+  ["git|alloc.c|60-77"] = {
+    must_include_files = { "alloc.c" },
+    must_include_symbols = { "alloc_node", "xmalloc", "ALLOC_GROW", "memset", "node_size" },
+  },
+  ["tmux|alerts.c|42-68"] = {
+    must_include_files = { "alerts.c", "tmux.h" },
+    must_include_symbols = { "alerts_timer", "alerts_callback", "TAILQ_FOREACH_SAFE", "TAILQ_REMOVE", "window_remove_ref" },
+  },
+  ["htop|Object.h|18-46"] = {
+    must_include_files = { "Object.h", "RichString.h", "XUtils.h" },
+    must_include_symbols = { "Object", "Object_Display", "Object_Delete", "ObjectClass", "Object_getClass" },
+  },
+  ["googletest|googletest/include/gtest/gtest-matchers.h|78-100"] = {
+    must_include_files = { "googletest/include/gtest/gtest-matchers.h" },
+    must_include_symbols = { "MatchResultListener", "std::ostream", "stream", "operator<<" },
+  },
+  ["spdlog|include/spdlog/async_logger.h|33-56"] = {
+    must_include_files = { "include/spdlog/async_logger.h", "include/spdlog/logger.h" },
+    must_include_symbols = { "async_logger", "enable_shared_from_this", "weak_ptr", "async_overflow_policy" },
+  },
+  ["fmt|include/fmt/format.h|80-93"] = {
+    must_include_files = { "include/fmt/format.h" },
+    must_include_symbols = { "FMT_USE_NONTYPE_TEMPLATE_ARGS", "FMT_GCC_VERSION", "FMT_CPLUSPLUS", "__cpp_nontype_template_args" },
+  },
+  ["grpc|src/compiler/cpp_plugin.cc|1-50"] = {
+    must_include_files = { "src/compiler/cpp_plugin.cc", "src/compiler/cpp_plugin.h" },
+    must_include_symbols = { "CppGrpcGenerator", "PluginMain", "main" },
+  },
+  ["grpc|examples/cpp/default_event_engine/wrapping_event_engine.h|1-50"] = {
+    must_include_files = { "examples/cpp/default_event_engine/wrapping_event_engine.h" },
+    must_include_symbols = { "WrappingEventEngine", "EventEngine", "Run", "wrapped_engine_", "run_count_" },
+  },
+  ["Catch2|src/catch2/benchmark/catch_benchmark.hpp|39-100"] = {
+    must_include_files = { "src/catch2/benchmark/catch_benchmark.hpp" },
+    must_include_symbols = { "Benchmark", "ExecutionPlan", "prepare", "run", "CATCH_TRY" },
+  },
+}
+
+local function golden_key(tc)
+  return string.format("%s|%s|%d-%d", tc.repo, tc.file, tc.lines[1], tc.lines[2])
+end
+
+local function attach_golden_expectations()
+  for _, tc in ipairs(M.TEST_CASES) do
+    local expected = M.GOLDEN_EXPECTATIONS[golden_key(tc)]
+    if expected then
+      tc.expected = vim.tbl_deep_extend("force", tc.expected or {}, expected)
+    end
+  end
+end
+
+attach_golden_expectations()
+
 function M.get_by_language(lang)
   local result = {}
   for _, tc in ipairs(M.TEST_CASES) do
