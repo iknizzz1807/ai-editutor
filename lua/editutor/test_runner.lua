@@ -593,6 +593,13 @@ function M.run(opts)
     cases_to_run = test_cases.get_by_repo(opts.repo)
   elseif opts.pattern then
     cases_to_run = test_cases.get_by_pattern(opts.pattern)
+  elseif opts.golden then
+    cases_to_run = {}
+    for _, tc in ipairs(test_cases.TEST_CASES) do
+      if tc.expected then
+        table.insert(cases_to_run, tc)
+      end
+    end
   elseif opts.limit then
     cases_to_run = {}
     for i = 1, math.min(opts.limit, #test_cases.TEST_CASES) do
@@ -972,6 +979,10 @@ end
 
 function M.quick_test()
   M.run({ limit = 5 })
+end
+
+function M.golden_test()
+  M.run({ golden = true })
 end
 
 function M.test_lang(lang)

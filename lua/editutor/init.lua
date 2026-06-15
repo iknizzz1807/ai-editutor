@@ -185,6 +185,8 @@ function M._create_commands()
 
     if cmd == "quick" then
       test_runner.quick_test()
+    elseif cmd == "golden" then
+      test_runner.golden_test()
     elseif cmd == "lang" and args[2] then
       test_runner.test_lang(args[2])
     elseif cmd == "repo" and args[2] then
@@ -204,7 +206,7 @@ function M._create_commands()
     nargs = "*",
     complete = function()
       return {
-        "quick", "stats", "validate",
+        "quick", "golden", "stats", "validate",
         "lang typescript", "lang python", "lang rust", "lang go", "lang lua", "lang zig", "lang c", "lang cpp",
         "repo zod", "repo fastapi", "repo axum", "repo gin", "repo lazy.nvim",
         "pattern async_handling", "pattern error_handling", "pattern metaprogramming",
