@@ -148,6 +148,94 @@ M.EXT_TO_LANG = {
 -- Import Extraction
 -- =============================================================================
 
+local function add_unique(list, seen, value)
+  if value and value ~= "" and not seen[value] then
+    seen[value] = true
+    table.insert(list, value)
+  end
+end
+
+local function normalize_rust_use_path(import_path)
+  import_path = import_path:gsub("%s+as%s+[%w_]+$", "")
+  import_path = import_path:gsub("%s+", "")
+
+  local brace_prefix = import_path:match("^(.-)::%b{}")
+  if brace_prefix then
+    return brace_prefix
+  end
+
+  return import_path
+end
+
+local function extract_rust_imports(content)
+  local imports = {}
+  local seen = {}
+  local use_block_prefix = nil
+
+  for line in content:gmatch("[^\n]+") do
+    if use_block_prefix then
+      if line:match("^%s*};") then
+        use_block_prefix = nil
+      else
+        local module = line:match("^%s*([%w_]+)::") or line:match("^%s*([%w_]+)%s*,")
+        if module then
+          add_unique(imports, seen, use_block_prefix .. "::" .. module)
+        end
+      end
+    else
+      use_block_prefix = line:match("^%s*use%s+([%w_:]+)::%s*{%s*$")
+        or line:match("^%s*pub%([^)]*%)%s+use%s+([%w_:]+)::%s*{%s*$")
+        or line:match("^%s*pub%s+use%s+([%w_:]+)::%s*{%s*$")
+
+      local use_path = line:match("^%s*use%s+([^;]+);")
+        or line:match("^%s*pub%([^)]*%)%s+use%s+([^;]+);")
+        or line:match("^%s*pub%s+use%s+([^;]+);")
+      if use_path then
+        add_unique(imports, seen, normalize_rust_use_path(use_path))
+      end
+
+      local mod_path = line:match("^%s*mod%s+([%w_]+)%s*;")
+        or line:match("^%s*pub%([^)]*%)%s+mod%s+([%w_]+)%s*;")
+        or line:match("^%s*pub%s+mod%s+([%w_]+)%s*;")
+      if mod_path then
+        add_unique(imports, seen, mod_path)
+      end
+    end
+  end
+
+  return imports
+end
+
+local function extract_python_imports(content)
+  local imports = {}
+  local seen = {}
+
+  for line in content:gmatch("[^\n]+") do
+    local direct = line:match("^%s*import%s+(.+)")
+    if direct then
+      direct = direct:gsub("#.*$", "")
+      for item in direct:gmatch("[^,]+") do
+        local module = item:gsub("%s+as%s+[%w_]+", ""):match("^%s*([%w_%.]+)")
+        add_unique(imports, seen, module)
+      end
+    end
+
+    local from_module, names = line:match("^%s*from%s+([%w_%.]+)%s+import%s+(.+)")
+    if from_module then
+      add_unique(imports, seen, from_module)
+      names = names:gsub("#.*$", ""):gsub("[()]", "")
+      for item in names:gmatch("[^,]+") do
+        local name = item:gsub("%s+as%s+[%w_]+", ""):match("^%s*([%w_]+)")
+        if name and name ~= "*" then
+          add_unique(imports, seen, from_module .. "." .. name)
+        end
+      end
+    end
+  end
+
+  return imports
+end
+
 ---Get language from file extension
 ---@param filepath string
 ---@return string|nil
@@ -174,6 +262,14 @@ end
 ---@param lang string
 ---@return string[] List of imported module/path strings
 function M.extract_imports(content, lang)
+  if lang == "python" then
+    return extract_python_imports(content)
+  end
+
+  if lang == "rust" then
+    return extract_rust_imports(content)
+  end
+
   local patterns = M.get_patterns(lang)
   if not patterns then return {} end
 
@@ -182,10 +278,7 @@ function M.extract_imports(content, lang)
 
   for _, pattern in ipairs(patterns) do
     for import_path in content:gmatch(pattern) do
-      if not seen[import_path] then
-        seen[import_path] = true
-        table.insert(imports, import_path)
-      end
+      add_unique(imports, seen, import_path)
     end
   end
 
@@ -465,26 +558,57 @@ end
 
 ---Resolve Rust import
 function M._resolve_rust_import(import_path, source_dir, project_root)
-  -- Handle crate:: and super:: prefixes
-  local path = import_path
-    :gsub("^crate::", "")
-    :gsub("^super::", "../")
-    :gsub("::", "/")
+  local function find_crate_root()
+    local dir = source_dir
+    while dir and dir ~= "" do
+      if vim.fn.filereadable(dir .. "/Cargo.toml") == 1 and vim.fn.isdirectory(dir .. "/src") == 1 then
+        return dir
+      end
+      if dir == project_root then
+        break
+      end
+      local parent = vim.fn.fnamemodify(dir, ":h")
+      if parent == dir then
+        break
+      end
+      dir = parent
+    end
+    return project_root
+  end
 
-  local candidates = {
-    project_root .. "/src/" .. path .. ".rs",
-    project_root .. "/src/" .. path .. "/mod.rs",
-    source_dir .. "/" .. path .. ".rs",
-  }
-
-  for _, p in ipairs(candidates) do
-    local normalized = vim.fn.fnamemodify(p, ":p")
-    if vim.fn.filereadable(normalized) == 1 then
-      return normalized
+  local function resolve_module(base_dir, module_path)
+    module_path = module_path:gsub("::", "/")
+    local parts = vim.split(module_path, "/", { plain = true, trimempty = true })
+    for i = #parts, 1, -1 do
+      local prefix = table.concat(vim.list_slice(parts, 1, i), "/")
+      local candidates = {
+        base_dir .. "/" .. prefix .. ".rs",
+        base_dir .. "/" .. prefix .. "/mod.rs",
+      }
+      for _, candidate in ipairs(candidates) do
+        local normalized = vim.fn.fnamemodify(candidate, ":p")
+        if vim.fn.filereadable(normalized) == 1 then
+          return normalized
+        end
+      end
     end
   end
 
-  return nil
+  local crate_root = find_crate_root()
+
+  if import_path:match("^crate::") then
+    return resolve_module(crate_root .. "/src", import_path:gsub("^crate::", ""))
+  end
+
+  if import_path:match("^super::") then
+    return resolve_module(source_dir .. "/..", import_path:gsub("^super::", ""))
+  end
+
+  if import_path:match("^self::") then
+    return resolve_module(source_dir, import_path:gsub("^self::", ""))
+  end
+
+  return resolve_module(source_dir, import_path) or resolve_module(crate_root .. "/src", import_path)
 end
 
 ---Resolve C/C++ include

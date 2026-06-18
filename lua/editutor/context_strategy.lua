@@ -215,7 +215,7 @@ local function extract_mentioned_idents(bufnr, question_lines)
       if #ident >= 3 and not noise[ident] and not seen[ident] then
         seen[ident] = true
         table.insert(idents, ident)
-        if #idents >= 30 then
+        if #idents >= 100 then
           return idents
         end
       end
@@ -223,6 +223,46 @@ local function extract_mentioned_idents(bufnr, question_lines)
   end
 
   return idents
+end
+
+---Direct dependencies should not be displaced by broad graph signals.
+---@param relationship? string
+---@return number
+local function relationship_priority(relationship)
+  if relationship == "outgoing" then
+    return 4
+  elseif relationship == "incoming" then
+    return 3
+  elseif relationship == "transitive" then
+    return 2
+  elseif relationship == "repo_rank" then
+    return 1
+  end
+  return 0
+end
+
+local function path_matches_ident(filepath, idents)
+  if not idents or #idents == 0 then
+    return false
+  end
+
+  local basename = vim.fn.fnamemodify(filepath, ":t:r")
+  local ident_set = {}
+  for _, ident in ipairs(idents) do
+    ident_set[ident] = true
+  end
+
+  if ident_set[basename] then
+    return true
+  end
+
+  for part in filepath:gmatch("[^/%.]+") do
+    if ident_set[part] then
+      return true
+    end
+  end
+
+  return false
 end
 
 ---Get file content based on chunking mode and threshold
@@ -565,17 +605,23 @@ local function build_context_for_level(current_file, project_root, level, budget
   local import_files = {}
   local repo_rank_metadata = nil
   if level.import_depth > 0 then
+    local bufnr = vim.api.nvim_get_current_buf()
+    local mentioned_idents = extract_mentioned_idents(bufnr, question_lines)
     import_files = get_imports_with_depth(current_file, project_root, level.import_depth)
 
     -- Score and sort by relevance
     import_files = relevance_scorer.score_and_sort(import_files, current_file)
+    for _, file_info in ipairs(import_files) do
+      if file_info.relationship == "outgoing" and path_matches_ident(file_info.path, mentioned_idents) then
+        file_info.relevance_score = (file_info.relevance_score or 0) + 10
+      end
+    end
 
     -- Add Aider-style repo-wide symbol graph ranking as an extra signal.
     -- This complements import edges with def/ref relationships discovered via Tree-sitter.
     local ok_rank, rank_result = pcall(function()
-      local bufnr = vim.api.nvim_get_current_buf()
       local ranked_files, rank_meta = repo_rank.rank_project(current_file, project_root, scan_result, {
-        mentioned_idents = extract_mentioned_idents(bufnr, question_lines),
+        mentioned_idents = mentioned_idents,
         top_files = math.max(level.max_import_files or 20, 20),
       })
       return { files = ranked_files, meta = rank_meta }
@@ -615,6 +661,12 @@ local function build_context_for_level(current_file, project_root, level, budget
       end
 
       table.sort(import_files, function(a, b)
+        local priority_a = relationship_priority(a.relationship)
+        local priority_b = relationship_priority(b.relationship)
+        if priority_a ~= priority_b then
+          return priority_a > priority_b
+        end
+
         local score_a = a.combined_score or a.relevance_score or 0
         local score_b = b.combined_score or b.relevance_score or 0
         if score_a == score_b then
@@ -654,6 +706,22 @@ local function build_context_for_level(current_file, project_root, level, budget
     local content, metadata = get_file_content_for_level(filepath, level)
     if content then
       local file_tokens = project_scanner.estimate_tokens(content)
+
+      if import_tokens + file_tokens > import_budget and file_info.relationship == "outgoing" then
+        local fallback_content, fallback_metadata = semantic_chunking.get_file_content(filepath, {
+          threshold = math.min(level.chunking_threshold or 300, 200),
+          mode = "semantic",
+          max_tokens = 2000,
+        })
+        if fallback_content then
+          local fallback_tokens = project_scanner.estimate_tokens(fallback_content)
+          if fallback_tokens < file_tokens then
+            content = fallback_content
+            metadata = fallback_metadata or metadata
+            file_tokens = fallback_tokens
+          end
+        end
+      end
 
       if import_tokens + file_tokens <= import_budget then
         local file_ext = filepath:match("%.([^.]+)$") or ""
