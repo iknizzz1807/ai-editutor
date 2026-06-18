@@ -10,12 +10,14 @@ local project_scanner = require("editutor.project_scanner")
 M.config = {
   max_auto_import_checks = 5,
   min_import_recall = 0.2,
-  forbidden_context_patterns = {
-    "/.git/",
-    "node_modules/",
-    "/dist/",
-    "/build/",
-    "__pycache__/",
+  forbidden_path_parts = {
+    ".git",
+    "node_modules",
+    "dist",
+    "build",
+    "__pycache__",
+  },
+  forbidden_file_extensions = {
     ".png",
     ".jpg",
     ".jpeg",
@@ -40,7 +42,8 @@ end
 
 local function normalize_path(path)
   if not path then return "" end
-  return path:gsub("\\", "/"):gsub("//+", "/")
+  local normalized = path:gsub("\\", "/"):gsub("//+", "/")
+  return normalized
 end
 
 local function contains_path(context_text, path)
@@ -55,6 +58,41 @@ end
 local function contains_pattern(context_text, pattern)
   if not context_text or not pattern then return false end
   return context_text:find(pattern, 1, true) ~= nil or context_text:match(pattern) ~= nil
+end
+
+local function iter_included_files(context_text)
+  local files = {}
+  if not context_text then return files end
+
+  for file in context_text:gmatch("// File: ([^\n]+)") do
+    file = file:gsub("%s+%([^)]*%)$", "")
+    local normalized = normalize_path(file)
+    table.insert(files, normalized)
+  end
+
+  return files
+end
+
+local function has_path_part(path, part)
+  path = "/" .. normalize_path(path) .. "/"
+  return path:find("/" .. part .. "/", 1, true) ~= nil
+end
+
+local function find_forbidden_included_file(context_text)
+  for _, file in ipairs(iter_included_files(context_text)) do
+    for _, part in ipairs(M.config.forbidden_path_parts) do
+      if has_path_part(file, part) then
+        return file, part
+      end
+    end
+
+    local lower = file:lower()
+    for _, ext in ipairs(M.config.forbidden_file_extensions) do
+      if lower:sub(-#ext) == ext then
+        return file, ext
+      end
+    end
+  end
 end
 
 local function get_budget()
@@ -131,12 +169,12 @@ function M.run_heuristics(tc, result, context_text, metadata)
     })
   end
 
-  for _, pattern in ipairs(M.config.forbidden_context_patterns) do
-    if context_text and context_text:find(pattern, 1, true) then
-      add(assertions, "error", "forbidden_content", "Context contains excluded path or binary-like content", {
-        pattern = pattern,
-      })
-    end
+  local forbidden_file, forbidden_pattern = find_forbidden_included_file(context_text)
+  if forbidden_file then
+    add(assertions, "error", "forbidden_content", "Context includes excluded path or binary-like file", {
+      pattern = forbidden_pattern,
+      file = forbidden_file,
+    })
   end
 
   local local_imports = get_resolved_local_imports(filepath, project_root)
