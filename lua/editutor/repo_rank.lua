@@ -129,6 +129,7 @@ end
 local function build_graph(tags, current_rel, mentioned_idents)
   local defines = {}
   local references = {}
+  local definitions = {}
   local nodes = {}
   local mentioned = {}
 
@@ -141,6 +142,9 @@ local function build_graph(tags, current_rel, mentioned_idents)
     if tag.kind == "def" then
       defines[tag.name] = defines[tag.name] or {}
       defines[tag.name][tag.rel_fname] = true
+      local def_key = tag.rel_fname .. "\n" .. tag.name
+      definitions[def_key] = definitions[def_key] or {}
+      table.insert(definitions[def_key], tag)
     elseif tag.kind == "ref" then
       references[tag.name] = references[tag.name] or {}
       references[tag.name][tag.rel_fname] = (references[tag.name][tag.rel_fname] or 0) + 1
@@ -193,7 +197,71 @@ local function build_graph(tags, current_rel, mentioned_idents)
     end
   end
 
-  return nodes, edges, edge_idents
+  return nodes, edges, edge_idents, definitions
+end
+
+local function sorted_ranked_symbols(rank, edges, edge_idents, definitions, opts)
+  opts = opts or {}
+  local limit = opts.limit or 120
+  local ranked_definitions = {}
+
+  for src, outgoing in pairs(edges or {}) do
+    local src_rank = rank[src] or 0
+    local total_weight = 0
+    for _, weight in pairs(outgoing or {}) do
+      total_weight = total_weight + weight
+    end
+
+    if total_weight > 0 then
+      for dst, weight in pairs(outgoing) do
+        local edge_key = src .. "\n" .. dst
+        local idents = edge_idents[edge_key]
+        if idents then
+          local contribution = src_rank * weight / total_weight
+          for ident in pairs(idents) do
+            local def_key = dst .. "\n" .. ident
+            ranked_definitions[def_key] = (ranked_definitions[def_key] or 0) + contribution
+          end
+        end
+      end
+    end
+  end
+
+  local ranked = {}
+  for def_key, score in pairs(ranked_definitions) do
+    local tags = definitions[def_key]
+    if tags then
+      for _, tag in ipairs(tags) do
+        table.insert(ranked, {
+          rel_path = tag.rel_fname,
+          name = tag.name,
+          kind = tag.kind,
+          type = tag.type,
+          line = tag.line,
+          score = score,
+        })
+      end
+    end
+  end
+
+  table.sort(ranked, function(a, b)
+    if a.score == b.score then
+      if a.rel_path == b.rel_path then
+        if a.line == b.line then
+          return a.name < b.name
+        end
+        return a.line < b.line
+      end
+      return a.rel_path < b.rel_path
+    end
+    return a.score > b.score
+  end)
+
+  if #ranked > limit then
+    ranked = vim.list_slice(ranked, 1, limit)
+  end
+
+  return ranked
 end
 
 local function sorted_rank(rank, project_root, opts)
@@ -245,7 +313,7 @@ function M.rank_project(current_file, project_root, scan_result, opts)
   end
 
   local current_rel = rel_path(current_file, project_root)
-  local nodes, edges = build_graph(graph_data.tags, current_rel, opts.mentioned_idents)
+  local nodes, edges, edge_idents, definitions = build_graph(graph_data.tags, current_rel, opts.mentioned_idents)
   nodes[current_rel] = true
 
   local seed_nodes = { [current_rel] = 100 }
@@ -256,6 +324,9 @@ function M.rank_project(current_file, project_root, scan_result, opts)
   local personalization = normalize_personalization(nodes, seed_nodes)
   local rank = pagerank(nodes, edges, personalization, opts)
   local ranked = sorted_rank(rank, project_root, { limit = opts.top_files or M.config.top_files })
+  local ranked_symbols = sorted_ranked_symbols(rank, edges, edge_idents, definitions, {
+    limit = opts.top_symbols or (opts.top_files or M.config.top_files) * 5,
+  })
 
   local scores_by_path = {}
   for _, item in ipairs(ranked) do
@@ -268,6 +339,7 @@ function M.rank_project(current_file, project_root, scan_result, opts)
     nodes = vim.tbl_count(nodes),
     ranked = #ranked,
     scores_by_path = scores_by_path,
+    ranked_symbols = ranked_symbols,
   }
 end
 

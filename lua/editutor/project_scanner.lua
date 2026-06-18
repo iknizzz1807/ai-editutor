@@ -383,6 +383,35 @@ local function is_config_file(name)
   return false
 end
 
+---Check if a path/name is an important project file worth surfacing in context.
+---This intentionally reuses CONFIG_FILES so the scanner and context ranking agree.
+---@param path string Relative path or filename
+---@return boolean
+function M.is_important_file(path)
+  if not path or path == "" then
+    return false
+  end
+
+  local normalized = path:gsub("\\", "/")
+  local name = vim.fn.fnamemodify(normalized, ":t")
+
+  if normalized:match("^%.github/workflows/[^/]+%.ya?ml$") then
+    return true
+  end
+
+  -- Keep this as a root-level safety net, like Aider's important-file filter.
+  -- Nested READMEs/configs are common in vendored docs/examples and add noise.
+  if normalized:find("/", 1, true) then
+    return false
+  end
+
+  if is_config_file(name) then
+    return true
+  end
+
+  return false
+end
+
 ---Check if extension is source code
 ---@param ext string
 ---@return boolean

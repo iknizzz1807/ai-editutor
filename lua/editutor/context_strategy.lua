@@ -13,6 +13,7 @@ local relevance_scorer = require("editutor.relevance_scorer")
 local cache = require("editutor.cache")
 local async = require("editutor.async")
 local repo_rank = require("editutor.repo_rank")
+local repo_map = require("editutor.repo_map")
 
 -- =============================================================================
 -- Configuration
@@ -32,6 +33,7 @@ M.LEVELS = {
     max_import_files = 50,
     max_lsp_files = 30,
     chunking_threshold = 9999, -- Never chunk (full files)
+    repo_map_tokens = 1200,
   },
   {
     name = "semantic_all",
@@ -42,6 +44,7 @@ M.LEVELS = {
     max_import_files = 50,
     max_lsp_files = 30,
     chunking_threshold = 300,
+    repo_map_tokens = 1800,
   },
   {
     name = "depth1_with_lsp",
@@ -52,6 +55,7 @@ M.LEVELS = {
     max_import_files = 30,
     max_lsp_files = 20,
     chunking_threshold = 200,
+    repo_map_tokens = 2200,
   },
   {
     name = "depth1_no_lsp",
@@ -61,6 +65,7 @@ M.LEVELS = {
     chunking = "semantic",
     max_import_files = 20,
     chunking_threshold = 150,
+    repo_map_tokens = 2500,
   },
   {
     name = "limited_imports",
@@ -70,6 +75,7 @@ M.LEVELS = {
     chunking = "semantic",
     max_import_files = 10,
     chunking_threshold = 100,
+    repo_map_tokens = 3000,
   },
   {
     name = "types_only",
@@ -80,6 +86,7 @@ M.LEVELS = {
     max_import_files = 10,
     types_only = true,
     chunking_threshold = 100,
+    repo_map_tokens = 3000,
   },
   {
     name = "minimal",
@@ -88,6 +95,7 @@ M.LEVELS = {
     lsp = false,
     chunking = "none",
     max_import_files = 0,
+    repo_map_tokens = 3500,
   },
 }
 
@@ -589,6 +597,8 @@ local function build_context_for_level(current_file, project_root, level, budget
 
   local tree_content = scan_result.tree_structure
   local tree_tokens = project_scanner.estimate_tokens(tree_content)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local mentioned_idents = extract_mentioned_idents(bufnr, question_lines)
 
   -- Truncate tree if needed
   if tree_tokens > tree_budget then
@@ -605,8 +615,6 @@ local function build_context_for_level(current_file, project_root, level, budget
   local import_files = {}
   local repo_rank_metadata = nil
   if level.import_depth > 0 then
-    local bufnr = vim.api.nvim_get_current_buf()
-    local mentioned_idents = extract_mentioned_idents(bufnr, question_lines)
     import_files = get_imports_with_depth(current_file, project_root, level.import_depth)
 
     -- Score and sort by relevance
@@ -770,8 +778,31 @@ local function build_context_for_level(current_file, project_root, level, budget
 
   total_tokens = total_tokens + import_tokens
 
-  -- 4. LSP definitions (if enabled and budget allows)
-  local lsp_budget = remaining_budget - import_tokens
+  -- 4. Compact repo map: broad outline after concrete related code.
+  local repo_map_tokens = 0
+  local repo_map_metadata = { tokens = 0, files = 0, symbols = 0 }
+  local repo_map_budget = math.min(
+    level.repo_map_tokens or 0,
+    math.max(0, remaining_budget - import_tokens) * 0.35
+  )
+
+  if repo_map_budget > 300 then
+    local map_text, map_meta = repo_map.render(current_file, project_root, scan_result, {
+      max_tokens = repo_map_budget,
+      mentioned_idents = mentioned_idents,
+      max_files = math.max(level.max_import_files or 20, 20),
+    })
+    if map_text and map_text ~= "" then
+      table.insert(parts, map_text)
+      table.insert(parts, "")
+      repo_map_metadata = map_meta or repo_map_metadata
+      repo_map_tokens = repo_map_metadata.tokens or project_scanner.estimate_tokens(map_text)
+      total_tokens = total_tokens + repo_map_tokens
+    end
+  end
+
+  -- 5. LSP definitions (if enabled and budget allows)
+  local lsp_budget = remaining_budget - import_tokens - repo_map_tokens
   local lsp_count = 0
 
   if level.lsp and lsp_budget > 500 then
@@ -845,6 +876,7 @@ local function build_context_for_level(current_file, project_root, level, budget
     lsp_count = lsp_count,
     tree_tokens = tree_tokens,
     repo_rank = repo_rank_metadata,
+    repo_map = repo_map_metadata,
   }
 end
 
@@ -901,6 +933,7 @@ function M.build_context_with_strategy_async(current_file, opts)
         import_count = metadata.import_count,
         lsp_count = metadata.lsp_count,
         repo_rank = metadata.repo_rank,
+        repo_map = metadata.repo_map,
       }
     end
   end
@@ -920,6 +953,7 @@ function M.build_context_with_strategy_async(current_file, opts)
     },
     files_included = best.metadata.files,
     repo_rank = best.metadata.repo_rank,
+    repo_map = best.metadata.repo_map,
     warning = best.tokens > budget and "all_levels_exceeded_budget" or nil,
   }
 end
