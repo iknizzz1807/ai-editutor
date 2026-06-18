@@ -1,14 +1,3 @@
-### Done: improve prompt engineering so it fits the plugin
-  - AI phải stick với thiết kế hệ thống hiện tại.
-  - AI phải xác định khi nào cần trả lời dài, khi nào chỉ cần trả lời ngắn gọn.
-  - AI phải chủ động chỉ ra bug, bad practice, technical debt, thiết kế tồi, kể cả khi user không hỏi trực tiếp.
-  - Hạn chế đưa ra câu trả lời khiến user mắc nợ kỹ thuật; nếu phải shortcut thì nói rõ tradeoff và hướng cải thiện.
-  - Khi không chắc chắn vì thiếu context thì phải nói rõ với user.
-  - Không tin chắc vào knowledge cutoff; ưu tiên context local, LSP docs, diagnostics, library info, project files.
-  - Nói rõ cho LLM ý nghĩa các context được cung cấp: current file, related files, LSP definitions, library info, diagnostics, project tree.
-  - Nói rõ với LLM rằng các comment hỏi/trả lời cũ trong context là lịch sử conversation trước đó, có thể dùng để follow-up nếu relevant.
-  - Code prompt: nếu có bug/bad practice/missing context/risky assumption thì sneak feedback vào comment block hoặc inline comment trong code trả về, không viết explanation ngoài marker.
-
 ### TODO: improve context extraction
   - Đảm bảo logic trích xuất cây thư mục thật tốt và chuẩn, không bị phình to khi có nhiều file (ví dụ có folder /data có rất nhiều file), luôn tránh node_modules, venv, cache, build output, generated files thật chuẩn xác và nhạy cảm.
   - Tham khảo cách ignore/filter của gitignore generator hoặc Neo-tree nếu hữu ích.
