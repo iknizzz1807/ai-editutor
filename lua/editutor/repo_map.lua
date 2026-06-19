@@ -116,12 +116,16 @@ function M.render(current_file, project_root, scan_result, opts)
   end
 
   local current_rel = rel_path(current_file, project_root)
-  local ranked_files, rank_meta = repo_rank.rank_project(current_file, project_root, scan_result, {
-    mentioned_idents = opts.mentioned_idents,
-    mentioned_files = opts.mentioned_files,
-    top_files = opts.max_files or M.config.max_files,
-    top_symbols = opts.max_symbols or M.config.max_symbols,
-  })
+  local ranked_files = opts.ranked_files
+  local rank_meta = opts.rank_meta
+  if not ranked_files or not rank_meta then
+    ranked_files, rank_meta = repo_rank.rank_project(current_file, project_root, scan_result, {
+      mentioned_idents = opts.mentioned_idents,
+      mentioned_files = opts.mentioned_files,
+      top_files = opts.max_files or M.config.max_files,
+      top_symbols = opts.max_symbols or M.config.max_symbols,
+    })
+  end
 
   local symbols_by_file = {}
   local file_order = {}
@@ -161,8 +165,10 @@ function M.render(current_file, project_root, scan_result, opts)
 
   local files_rendered = 0
   local symbols_rendered = 0
+  local important_files_rendered = 0
 
-  for _, file in ipairs(collect_important_files(scan_result, current_rel, opts.max_important_files or M.config.max_important_files)) do
+  local important_files = collect_important_files(scan_result, current_rel, opts.max_important_files or M.config.max_important_files)
+  for _, file in ipairs(important_files) do
     local entry = {
       file.path .. ":",
       string.format("  important project file%s", file.lines and string.format(" (%d lines)", file.lines) or ""),
@@ -172,6 +178,7 @@ function M.render(current_file, project_root, scan_result, opts)
     lines, ok = append_if_fits(lines, entry, max_tokens)
     if ok then
       files_rendered = files_rendered + 1
+      important_files_rendered = important_files_rendered + 1
     end
   end
 
@@ -204,7 +211,7 @@ function M.render(current_file, project_root, scan_result, opts)
     tokens = project_scanner.estimate_tokens(text),
     files = files_rendered,
     symbols = symbols_rendered,
-    important_files = math.min(#collect_important_files(scan_result, current_rel, opts.max_important_files or M.config.max_important_files), files_rendered),
+    important_files = important_files_rendered,
     ranked_symbols = symbol_count,
     rank = rank_meta and {
       tags = rank_meta.tags,

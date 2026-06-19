@@ -90,12 +90,12 @@ M.LEVELS = {
   },
   {
     name = "minimal",
-    description = "Current file only, no imports",
+    description = "Current file and project tree only",
     import_depth = 0,
     lsp = false,
     chunking = "none",
     max_import_files = 0,
-    repo_map_tokens = 3500,
+    repo_map_tokens = 0,
   },
 }
 
@@ -614,6 +614,8 @@ local function build_context_for_level(current_file, project_root, level, budget
   -- 3. Import files
   local import_files = {}
   local repo_rank_metadata = nil
+  local ranked_files_for_map = nil
+  local rank_meta_for_map = nil
   if level.import_depth > 0 then
     import_files = get_imports_with_depth(current_file, project_root, level.import_depth)
 
@@ -638,6 +640,8 @@ local function build_context_for_level(current_file, project_root, level, budget
     if ok_rank and rank_result and rank_result.files then
       local ranked_files = rank_result.files
       local rank_meta = rank_result.meta or {}
+      ranked_files_for_map = ranked_files
+      rank_meta_for_map = rank_meta
       repo_rank_metadata = rank_meta
       local seen_imports = { [current_file] = true }
       for _, file_info in ipairs(import_files) do
@@ -791,6 +795,8 @@ local function build_context_for_level(current_file, project_root, level, budget
       max_tokens = repo_map_budget,
       mentioned_idents = mentioned_idents,
       max_files = math.max(level.max_import_files or 20, 20),
+      ranked_files = ranked_files_for_map,
+      rank_meta = rank_meta_for_map,
     })
     if map_text and map_text ~= "" then
       table.insert(parts, map_text)
