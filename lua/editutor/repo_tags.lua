@@ -20,6 +20,7 @@ M.EXT_TO_LANG = {
   tsx = "typescript",
   go = "go",
   rs = "rust",
+  odin = "odin",
 }
 
 M.QUERIES = {
@@ -176,6 +177,13 @@ M.QUERIES = {
     (impl_item trait: (type_identifier) @name.reference.implementation) @reference.implementation
     (impl_item type: (type_identifier) @name.reference.implementation !trait) @reference.implementation
   ]],
+
+  odin = [[
+    (procedure_declaration name: (identifier) @name.definition.function) @definition.function
+    (type_declaration name: (identifier) @name.definition.type) @definition.type
+    (constant_declaration name: (identifier) @name.definition.constant) @definition.constant
+    (call_expression function: (identifier) @name.reference.call) @reference.call
+  ]],
 }
 
 M.QUERIES.tsx = M.QUERIES.typescript
@@ -209,6 +217,69 @@ local function read_file(filepath)
   return table.concat(lines, "\n")
 end
 
+local function extract_odin_tags_from_content(content, filepath, project_root)
+  local rel_fname = get_display_path(filepath, project_root)
+  local tags = {}
+  local seen = {}
+  local noise = {
+    proc = true,
+    struct = true,
+    enum = true,
+    union = true,
+    bit_set = true,
+    distinct = true,
+    import = true,
+    package = true,
+    ["return"] = true,
+    ["if"] = true,
+    ["for"] = true,
+    ["switch"] = true,
+    ["when"] = true,
+  }
+
+  local function add(kind, tag_type, name, line)
+    if not name or name == "" or noise[name] then
+      return
+    end
+    local key = kind .. ":" .. name .. ":" .. line
+    if seen[key] then
+      return
+    end
+    seen[key] = true
+    table.insert(tags, {
+      rel_fname = rel_fname,
+      fname = filepath,
+      line = line,
+      name = name,
+      kind = kind,
+      type = tag_type,
+    })
+  end
+
+  local line_no = 0
+  for line in content:gmatch("[^\n]+") do
+    local name, rhs = line:match("^%s*([%a_][%w_]*)%s*::%s*(.*)$")
+    if name and rhs then
+      local rhs_unwrapped = rhs:gsub("^%(%s*", "")
+      if rhs_unwrapped:match("^proc%f[%W]") then
+        add("def", "function", name, line_no)
+      elseif rhs_unwrapped:match("^struct%f[%W]") or rhs_unwrapped:match("^enum%f[%W]") or rhs_unwrapped:match("^union%f[%W]") or rhs_unwrapped:match("^bit_set%f[%W]") or rhs_unwrapped:match("^distinct%f[%W]") then
+        add("def", "type", name, line_no)
+      else
+        add("def", "constant", name, line_no)
+      end
+    end
+
+    for call_name in line:gmatch("([%a_][%w_]*)%s*%(") do
+      add("ref", "call", call_name, line_no)
+    end
+
+    line_no = line_no + 1
+  end
+
+  return tags
+end
+
 local function tag_kind(capture_name)
   if capture_name:match("^name%.definition%.") then
     return "def", capture_name:gsub("^name%.definition%.", "")
@@ -233,6 +304,13 @@ function M.extract_file_tags(filepath, project_root)
   local content = read_file(filepath)
   if not content or content == "" then
     return {}
+  end
+
+  if lang == "odin" then
+    local tags = extract_odin_tags_from_content(content, filepath, project_root)
+    if #tags > 0 then
+      return tags
+    end
   end
 
   local ok_parser, parser = pcall(vim.treesitter.get_string_parser, content, lang)

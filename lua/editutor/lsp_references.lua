@@ -84,6 +84,8 @@ local function extract_symbols_below_question(bufnr, question)
     query_string = "[(identifier) (attribute)] @id"
   elseif lang == "go" or lang == "rust" or lang == "c" then
     query_string = "[(identifier) (type_identifier) (field_identifier)] @id"
+  elseif lang == "odin" then
+    query_string = "(identifier) @id"
   elseif lang == "cpp" then
     query_string = "[(identifier) (type_identifier) (field_identifier) (namespace_identifier) (qualified_identifier)] @id"
   end
@@ -113,6 +115,8 @@ local function extract_symbols_below_question(bufnr, question)
         or line_text:match("class%s+" .. vim.pesc(name) .. "%f[^%w_]")
         or line_text:match("interface%s+" .. vim.pesc(name) .. "%f[^%w_]")
         or line_text:match("type%s+" .. vim.pesc(name) .. "%f[^%w_]")
+        or line_text:match(vim.pesc(name) .. "%s*::%s*proc%f[^%w_]")
+        or line_text:match(vim.pesc(name) .. "%s*::%s*%(%s*proc%f[^%w_]")
       then
         score = score + 50
       end

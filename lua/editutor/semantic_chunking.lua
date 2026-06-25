@@ -265,6 +265,18 @@ M.QUERIES = {
     ; Comptime blocks
     (ComptimeExpr) @comptime
   ]],
+
+  -- Odin parser node names vary across tree-sitter grammars. Semantic summaries
+  -- use a regex extractor; these queries are kept for definition-at-location.
+  odin = [[
+    (procedure_declaration) @function
+    (foreign_procedure_declaration) @function
+    (type_declaration) @type
+    (struct_declaration) @struct
+    (enum_declaration) @enum
+    (union_declaration) @union
+    (constant_declaration) @const
+  ]],
 }
 
 -- Aliases
@@ -297,6 +309,7 @@ M.EXT_TO_LANG = {
   hxx = "cpp",
   java = "java",
   zig = "zig",
+  odin = "odin",
 }
 
 ---Get tree-sitter language from file extension
@@ -326,6 +339,7 @@ function M.get_parser_lang(lang)
     cpp = "cpp",
     java = "java",
     zig = "zig",
+    odin = "odin",
   }
   return parser_names[lang] or lang
 end
@@ -344,6 +358,102 @@ local function read_file(filepath)
     return nil, 0
   end
   return table.concat(lines, "\n"), #lines
+end
+
+local function extract_braced_block(lines, start_index, max_lines)
+  local parts = {}
+  local depth = 0
+  local started = false
+
+  for i = start_index, math.min(#lines, start_index + max_lines - 1) do
+    local line = lines[i]
+    table.insert(parts, line)
+
+    for char in line:gmatch("[{}]") do
+      if char == "{" then
+        depth = depth + 1
+        started = true
+      elseif char == "}" then
+        depth = depth - 1
+      end
+    end
+
+    if started and depth <= 0 then
+      break
+    end
+  end
+
+  return table.concat(parts, "\n")
+end
+
+local function extract_odin_summary(filepath, max_tokens, types_only)
+  local content, line_count = read_file(filepath)
+  if not content then
+    return nil, { error = "cannot_read_file" }
+  end
+
+  local lines = vim.split(content, "\n")
+  local parts = {}
+  local total_tokens = 0
+  local included = 0
+
+  local function add(text)
+    local tokens = project_scanner.estimate_tokens(text)
+    if total_tokens + tokens > max_tokens then
+      return false
+    end
+    table.insert(parts, text)
+    total_tokens = total_tokens + tokens
+    included = included + 1
+    return true
+  end
+
+  for i, line in ipairs(lines) do
+    local rhs = line:match("^%s*[%a_][%w_]*%s*::%s*(.*)$")
+    local rhs_unwrapped = rhs and rhs:gsub("^%(%s*", "") or nil
+
+    if not types_only and (line:match("^%s*package%s+") or line:match("^%s*import%s+")) then
+      if not add(line) then break end
+    elseif rhs_unwrapped and rhs_unwrapped:match("^proc%f[%W]") then
+      if not types_only then
+        local signature = line:gsub("%s*{%s*$", " { ... }")
+        if not signature:find("{", 1, true) then
+          signature = signature .. " { ... }"
+        end
+        if not add(signature) then break end
+      end
+    elseif rhs_unwrapped and (
+      rhs_unwrapped:match("^struct%f[%W]")
+      or rhs_unwrapped:match("^enum%f[%W]")
+      or rhs_unwrapped:match("^union%f[%W]")
+      or rhs_unwrapped:match("^bit_set%f[%W]")
+      or rhs_unwrapped:match("^distinct%f[%W]")
+    )
+    then
+      local block = extract_braced_block(lines, i, 80)
+      if not add(block) then break end
+    elseif not types_only and rhs then
+      if not add(line) then break end
+    end
+  end
+
+  if #parts == 0 then
+    local sliced = vim.list_slice(lines, 1, math.min(#lines, M.DEFAULT_THRESHOLD))
+    local text = table.concat(sliced, "\n")
+    if #sliced < #lines then
+      text = text .. "\n// ... (truncated, " .. line_count .. " total lines)"
+    end
+    return text, { mode = "truncated", language = "odin", reason = "no_declarations", original_lines = line_count }
+  end
+
+  return table.concat(parts, "\n\n"), {
+    mode = types_only and "types_only" or "semantic",
+    language = "odin",
+    total_tokens = total_tokens,
+    included_captures = included,
+    original_lines = line_count,
+    parser = "regex",
+  }
 end
 
 ---Extract function/method signature only (without body)
@@ -414,7 +524,7 @@ local function extract_signature_only(node, content, lang)
     -- Keep signature, replace body
     local signature = node_text:gsub("%s*%b{}%s*$", ";")
     return signature
-  elseif lang == "java" then
+  elseif lang == "java" or lang == "odin" then
     -- Keep signature, replace body
     local signature = node_text:gsub("%s*%b{}%s*$", " { ... }")
     return signature
@@ -438,6 +548,7 @@ local function is_function_node(node_type, lang)
     c = { "function" },
     cpp = { "function" },
     java = { "method", "constructor" },
+    odin = { "function", "procedure_declaration", "foreign_procedure_declaration" },
   }
 
   local types = function_types[lang] or {}
@@ -471,6 +582,10 @@ function M.extract_semantic_summary(filepath, max_tokens)
       content = table.concat(lines, "\n") .. "\n-- ... (truncated)"
     end
     return content, { mode = "truncated", reason = "unsupported_language" }
+  end
+
+  if lang == "odin" then
+    return extract_odin_summary(filepath, max_tokens, false)
   end
 
   local query_string = M.QUERIES[lang]
@@ -606,6 +721,10 @@ function M.extract_types_only(filepath, max_tokens)
   local lang = M.get_language(filepath)
   if not lang then
     return nil, { error = "unsupported_language" }
+  end
+
+  if lang == "odin" then
+    return extract_odin_summary(filepath, max_tokens, true)
   end
 
   -- Type-specific queries
@@ -818,6 +937,14 @@ function M.extract_definition_at(filepath, line, col, context_lines)
     "interface_declaration",
     "method_declaration",
     "enum_declaration",
+    -- Odin
+    "procedure_declaration",
+    "foreign_procedure_declaration",
+    "type_declaration",
+    "struct_declaration",
+    "enum_declaration",
+    "union_declaration",
+    "constant_declaration",
   }
 
   local declaration_set = {}

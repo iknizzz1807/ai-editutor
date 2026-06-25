@@ -27,6 +27,7 @@ M.SOURCE_EXTENSIONS = {
   "lua",
   "go",
   "rs",
+  "odin",
   "c", "h", "cpp", "cc", "hpp",
   "java", "kt",
   "rb",

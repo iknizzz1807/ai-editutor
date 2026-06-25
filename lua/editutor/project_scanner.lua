@@ -638,7 +638,7 @@ function M.get_language_for_ext(ext)
     -- Systems
     c = "c", h = "c",
     cpp = "cpp", cc = "cpp", cxx = "cpp", hpp = "cpp", hxx = "cpp",
-    rs = "rust", go = "go", zig = "zig",
+    rs = "rust", go = "go", zig = "zig", odin = "odin",
     -- JVM
     java = "java", kt = "kotlin", kts = "kotlin", scala = "scala",
     clj = "clojure", cljs = "clojure", groovy = "groovy",

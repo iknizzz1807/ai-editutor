@@ -19,6 +19,7 @@ M.COMMENT_STYLES = {
   typescriptreact = { line = "//", block = { "/*", "*/" } },
   go = { line = "//", block = { "/*", "*/" } },
   rust = { line = "//", block = { "/*", "*/" } },
+  odin = { line = "//", block = { "/*", "*/" } },
   swift = { line = "//", block = { "/*", "*/" } },
   kotlin = { line = "//", block = { "/*", "*/" } },
   zig = { line = "//", block = nil },

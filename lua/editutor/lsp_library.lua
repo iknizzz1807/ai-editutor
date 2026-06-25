@@ -117,6 +117,10 @@ local function looks_like_library_hover(hover_text, lang)
       "pub fn", "pub struct", "pub enum", "pub trait", "pub type", "pub mod",
       "impl%s", "extern crate", "#%[derive",
     },
+    odin = {
+      "core:", "base:", "vendor:", "::%s*proc", "::%s*struct", "::%s*enum",
+      "package%s+%w+", "import%s+\"",
+    },
     go = {
       "^func %(%w+ %*?%w+%)", -- Method receiver
       "^func %w+%(", -- Function
@@ -220,6 +224,8 @@ function M.extract_identifiers_in_range(bufnr, start_line, end_line)
     query_string = "[(identifier) (selector_expression)] @id"
   elseif lang == "rust" then
     query_string = "[(identifier) (field_expression)] @id"
+  elseif lang == "odin" then
+    query_string = "(identifier) @id"
   end
 
   local ok_query, query = pcall(vim.treesitter.query.parse, lang, query_string)

@@ -108,6 +108,12 @@ local function get_import_patterns()
       -- @import("std"), @import("file.zig"), @import("path/to/file.zig")
       "@import%s*%(%s*\"([^\"]+)\"%s*%)",
     },
+
+    -- Odin
+    odin = {
+      -- Fallback patterns; extract_odin_imports() handles Odin precisely.
+      "import%s+[%w_]*%s*\"([^\"]+)\"",
+    },
   }
 end
 
@@ -142,6 +148,7 @@ M.EXT_TO_LANG = {
   ex = "elixir",
   exs = "elixir",
   zig = "zig",
+  odin = "odin",
 }
 
 -- =============================================================================
@@ -236,6 +243,34 @@ local function extract_python_imports(content)
   return imports
 end
 
+local function extract_odin_imports(content)
+  local imports = {}
+  local seen = {}
+  local in_block = false
+
+  for line in content:gmatch("[^\n]+") do
+    local trimmed = vim.trim(line:gsub("//.*$", ""))
+
+    if in_block then
+      if trimmed:match("^%)") then
+        in_block = false
+      else
+        local import_path = trimmed:match("^[%w_]*%s*\"([^\"]+)\"")
+        add_unique(imports, seen, import_path)
+      end
+    else
+      if trimmed:match("^import%s*%(") then
+        in_block = true
+      else
+        local import_path = trimmed:match("^import%s+[%w_]*%s*\"([^\"]+)\"")
+        add_unique(imports, seen, import_path)
+      end
+    end
+  end
+
+  return imports
+end
+
 ---Get language from file extension
 ---@param filepath string
 ---@return string|nil
@@ -268,6 +303,10 @@ function M.extract_imports(content, lang)
 
   if lang == "rust" then
     return extract_rust_imports(content)
+  end
+
+  if lang == "odin" then
+    return extract_odin_imports(content)
   end
 
   local patterns = M.get_patterns(lang)
@@ -381,6 +420,12 @@ function M.is_library_import(import_path, lang)
     if import_path == "std" then
       return true
     end
+  elseif lang == "odin" then
+    -- Odin standard/vendor collections use collection:path syntax.
+    local collection = import_path:match("^([^:]+):")
+    if collection == "core" or collection == "base" or collection == "vendor" then
+      return true
+    end
   end
 
   return false
@@ -416,6 +461,8 @@ function M.resolve_import(import_path, source_file, project_root, lang)
     resolved = M._resolve_c_import(import_path, source_dir, project_root)
   elseif lang == "zig" then
     resolved = M._resolve_zig_import(import_path, source_dir, project_root)
+  elseif lang == "odin" then
+    resolved = M._resolve_odin_import(import_path, source_dir, project_root)
   else
     -- Generic: try relative resolution
     resolved = M._resolve_generic_import(import_path, source_dir, project_root)
@@ -427,6 +474,27 @@ function M.resolve_import(import_path, source_file, project_root, lang)
   end
 
   return resolved
+end
+
+local function first_source_file_in_dir(dir, ext)
+  if vim.fn.isdirectory(dir) ~= 1 then
+    return nil
+  end
+
+  local handle = vim.loop.fs_scandir(dir)
+  if not handle then
+    return nil
+  end
+
+  while true do
+    local name, ftype = vim.loop.fs_scandir_next(handle)
+    if not name then break end
+    if ftype == "file" and name:match("%." .. ext .. "$") and not name:match("_test%." .. ext .. "$") then
+      return dir .. "/" .. name
+    end
+  end
+
+  return nil
 end
 
 ---Try multiple file extensions
@@ -665,6 +733,33 @@ function M._resolve_zig_import(import_path, source_dir, project_root)
     local normalized = vim.fn.fnamemodify(path, ":p")
     if vim.fn.filereadable(normalized) == 1 then
       return normalized
+    end
+  end
+
+  return nil
+end
+
+---Resolve Odin import.
+---Odin imports packages, not single files. For project context, returning one
+---representative .odin file from the package directory is enough to connect the graph.
+function M._resolve_odin_import(import_path, source_dir, project_root)
+  local package_path = import_path:gsub("^%w+:", "")
+  local candidates = {
+    source_dir .. "/" .. package_path,
+    project_root .. "/" .. package_path,
+    project_root .. "/src/" .. package_path,
+    project_root .. "/pkg/" .. package_path,
+    project_root .. "/vendor/" .. package_path,
+  }
+
+  for _, base in ipairs(candidates) do
+    local normalized = vim.fn.fnamemodify(base, ":p"):gsub("/$", "")
+    if vim.fn.filereadable(normalized .. ".odin") == 1 then
+      return normalized .. ".odin"
+    end
+    local package_file = first_source_file_in_dir(normalized, "odin")
+    if package_file then
+      return package_file
     end
   end
 

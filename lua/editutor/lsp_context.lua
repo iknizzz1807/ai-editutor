@@ -129,6 +129,8 @@ function M.extract_all_identifiers(bufnr)
     query_string = "[(identifier) (type_identifier) (field_identifier)] @id"
   elseif lang == "rust" then
     query_string = "[(identifier) (type_identifier) (field_identifier)] @id"
+  elseif lang == "odin" then
+    query_string = "(identifier) @id"
   elseif lang == "c" then
     query_string = "[(identifier) (type_identifier) (field_identifier)] @id"
   elseif lang == "cpp" then
@@ -291,6 +293,24 @@ function M._is_builtin(name, lang)
       "f32", "f64", "bool", "char",
     }
     for _, builtin in ipairs(rust_builtins) do
+      if name == builtin then
+        return true
+      end
+    end
+  elseif lang == "odin" then
+    local odin_builtins = {
+      "proc", "struct", "enum", "union", "bit_set", "distinct", "package", "import",
+      "when", "switch", "case", "defer", "using", "foreign", "where", "or_else", "or_return",
+      "bool", "b8", "b16", "b32", "b64",
+      "int", "i8", "i16", "i32", "i64", "i128",
+      "uint", "u8", "u16", "u32", "u64", "u128", "uintptr",
+      "f16", "f32", "f64", "complex32", "complex64", "complex128",
+      "string", "cstring", "rawptr", "rune", "byte", "any", "typeid",
+      "len", "cap", "size_of", "align_of", "offset_of", "type_of", "type_info_of",
+      "new", "make", "delete", "free", "copy", "append", "clear", "panic", "assert",
+      "core", "base", "vendor",
+    }
+    for _, builtin in ipairs(odin_builtins) do
       if name == builtin then
         return true
       end
