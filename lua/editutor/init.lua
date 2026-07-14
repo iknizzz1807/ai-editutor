@@ -15,7 +15,7 @@ local cache = require("editutor.cache")
 local loading = require("editutor.loading")
 local debug_log = require("editutor.debug_log")
 
-local REQUEST_TIMEOUT_MS = 20000
+local REQUEST_TIMEOUT_MS = 60000
 
 local function run_with_loading_cleanup(fn, loading_token)
   local ok, err = xpcall(fn, debug.traceback)
