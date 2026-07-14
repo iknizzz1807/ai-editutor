@@ -472,12 +472,18 @@ function M._process_questions(questions, filepath, bufnr, full_context, metadata
       return
     end
 
-    -- Parse marker-based response
+    -- Parse marker-based response; fallback to raw if no markers found
     local responses = M._parse_response(response)
     if not responses then
-      debug_log.log("Failed to parse response: " .. response:sub(1, 500))
-      if on_done then on_done(0, #questions) end
-      return
+      local trimmed = response:gsub("^%s*", ""):gsub("%s*$", "")
+      if #questions == 1 and trimmed ~= "" then
+        debug_log.log("No markers found, using raw response as fallback")
+        responses = { [questions[1].id] = trimmed }
+      else
+        debug_log.log("Failed to parse response: " .. response:sub(1, 500))
+        if on_done then on_done(0, #questions) end
+        return
+      end
     end
 
     -- Replace pending markers with responses
