@@ -1,5 +1,5 @@
 -- editutor/provider.lua
--- LLM API client for Gemini
+-- LLM API client for Gemini and DeepSeek
 
 local M = {}
 
@@ -85,6 +85,45 @@ M.PROVIDERS = {
 		stream_in_body = false,
 	},
 
+	deepseek = {
+		__inherited_from = "BASE_PROVIDER",
+		name = "deepseek",
+		url = "https://api.deepseek.com/chat/completions",
+		model = "deepseek-v4-flash",
+		headers = {
+			["content-type"] = "application/json",
+			["Authorization"] = "Bearer ${api_key}",
+		},
+		api_key = function()
+			return os.getenv("DEEPSEEK_API_KEY")
+		end,
+		format_request = function(data)
+			return {
+				model = data.model,
+				messages = {
+					{ role = "system", content = data.system },
+					{ role = "user", content = data.message },
+				},
+				max_tokens = data.max_tokens or 16384,
+				thinking = { type = "disabled" },
+				stream = true,
+			}
+		end,
+		format_response = function(response)
+			if response.choices and response.choices[1] then
+				return response.choices[1].message.content
+			end
+			return nil
+		end,
+		format_error = function(response)
+			if response.error then
+				return response.error.message or "Unknown error"
+			end
+			return "Unknown error"
+		end,
+		stream_enabled = true,
+		stream_in_body = true,
+	},
 }
 
 ---Resolve provider with inheritance
@@ -307,7 +346,7 @@ function M.query_async(system_prompt, user_message, callback)
 	local api_key = get_api_key(provider)
 
 	if not api_key then
-		callback(nil, "API key not found. Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable.")
+		callback(nil, "API key not found. Set GEMINI_API_KEY, GOOGLE_API_KEY, or DEEPSEEK_API_KEY environment variable.")
 		return
 	end
 
@@ -351,7 +390,7 @@ function M.query(system_prompt, user_message)
 	local api_key = get_api_key(provider)
 
 	if not api_key then
-		return nil, "API key not found. Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable."
+		return nil, "API key not found. Set GEMINI_API_KEY, GOOGLE_API_KEY, or DEEPSEEK_API_KEY environment variable."
 	end
 
 	local headers = build_headers(provider.headers, api_key)
@@ -384,7 +423,7 @@ function M.check_provider()
 
 	local api_key = get_api_key(provider)
 	if not api_key then
-		return false, "API key not found. Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable."
+		return false, "API key not found. Set GEMINI_API_KEY, GOOGLE_API_KEY, or DEEPSEEK_API_KEY environment variable."
 	end
 
 	return true, nil
@@ -491,7 +530,7 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
 	local api_key = get_api_key(prov)
 
 	if not api_key then
-		on_done(nil, "API key not found. Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable.")
+		on_done(nil, "API key not found. Set GEMINI_API_KEY, GOOGLE_API_KEY, or DEEPSEEK_API_KEY environment variable.")
 		return
 	end
 
