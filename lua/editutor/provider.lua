@@ -106,7 +106,6 @@ M.PROVIDERS = {
 				},
 				max_tokens = data.max_tokens or 16384,
 				thinking = { type = "disabled" },
-				stream = true,
 			}
 		end,
 		format_response = function(response)
@@ -228,8 +227,13 @@ local function process_response(response, provider)
 		return nil, "Failed to connect to API (network error or timeout)"
 	end
 
-	local ok, body = pcall(vim.json.decode, response.body)
+	local body_str = response.body
+	if type(body_str) == "table" then
+		body_str = vim.json.encode(body_str)
+	end
+	local ok, body = pcall(vim.json.decode, body_str)
 	if not ok or not body then
+		vim.notify("Editutor: raw response body: " .. (body_str or "nil"):sub(1, 300), vim.log.levels.WARN)
 		return nil, "Failed to parse API response"
 	end
 
