@@ -227,13 +227,8 @@ local function process_response(response, provider)
 		return nil, "Failed to connect to API (network error or timeout)"
 	end
 
-	local body_str = response.body
-	if type(body_str) == "table" then
-		body_str = vim.json.encode(body_str)
-	end
-	local ok, body = pcall(vim.json.decode, body_str)
+	local ok, body = pcall(vim.json.decode, response.body)
 	if not ok or not body then
-		vim.notify("Editutor: raw response body: " .. (body_str or "nil"):sub(1, 300), vim.log.levels.WARN)
 		return nil, "Failed to parse API response"
 	end
 
