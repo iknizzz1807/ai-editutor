@@ -5,7 +5,7 @@
 local M = {}
 
 ---@class EditutorConfig
----@field provider string LLM provider ("claude" | "openai" | "ollama")
+---@field provider string LLM provider ("gemini")
 ---@field api_key string|function API key or function returning key
 ---@field model string Model identifier
 ---@field keymaps EditutorKeymaps Keymap configuration
