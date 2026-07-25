@@ -245,30 +245,50 @@ local function process_response(response, provider)
 	return nil, "Unexpected response format from API"
 end
 
+---Write JSON body to temp file, return path
+---Avoids E2BIG (argument list too long) when body exceeds OS arg limit
+---@param data table Request body to encode
+---@return string temp_file_path
+local function write_body_tempfile(data)
+  local json_str = vim.json.encode(data)
+  local tmp = vim.fn.tempname()
+  local ok, err = pcall(function()
+    local f = io.open(tmp, "w")
+    f:write(json_str)
+    f:close()
+  end)
+  if not ok then
+    vim.notify("[ai-editutor] Failed to write request body: " .. tostring(err), vim.log.levels.ERROR)
+  end
+  return tmp
+end
+
 ---Make async HTTP request
 ---@param url string API URL
 ---@param headers table Headers
 ---@param body table Request body
 ---@param callback function Callback(response, error)
 local function make_request_async(url, headers, body, callback)
-	local curl_ok, curl = pcall(require, "plenary.curl")
-	if not curl_ok then
-		vim.schedule(function()
-			callback(nil, "plenary.nvim is required for HTTP requests")
-		end)
-		return
-	end
+  local curl_ok, curl = pcall(require, "plenary.curl")
+  if not curl_ok then
+    vim.schedule(function()
+      callback(nil, "plenary.nvim is required for HTTP requests")
+    end)
+    return
+  end
 
-	curl.post(url, {
-		headers = headers,
-		body = vim.json.encode(body),
-		timeout = 60000,
-		callback = function(response)
-			vim.schedule(function()
-				callback(response, nil)
-			end)
-		end,
-	})
+  local tmpfile = write_body_tempfile(body)
+  curl.post(url, {
+    headers = headers,
+    body = tmpfile,
+    timeout = 60000,
+    callback = function(response)
+      vim.loop.fs_unlink(tmpfile)
+      vim.schedule(function()
+        callback(response, nil)
+      end)
+    end,
+  })
 end
 
 ---Make sync HTTP request (using coroutine)
@@ -282,20 +302,25 @@ local function make_request_sync(url, headers, body)
 		return nil
 	end
 
+	local tmpfile = write_body_tempfile(body)
+
 	local co = coroutine.running()
 	if not co then
-		return curl.post(url, {
+		local resp = curl.post(url, {
 			headers = headers,
-			body = vim.json.encode(body),
+			body = tmpfile,
 			timeout = 60000,
 		})
+		vim.loop.fs_unlink(tmpfile)
+		return resp
 	end
 
 	curl.post(url, {
 		headers = headers,
-		body = vim.json.encode(body),
+		body = tmpfile,
 		timeout = 60000,
 		callback = function(response)
+			vim.loop.fs_unlink(tmpfile)
 			vim.schedule(function()
 				coroutine.resume(co, response)
 			end)
@@ -619,13 +644,16 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
 		end
 	end)
 
+	local tmpfile = write_body_tempfile(request_body)
+
 	local job = curl.post(url, {
 		headers = headers,
-		body = vim.json.encode(request_body),
+		body = tmpfile,
 		stream = stream_callback,
 		compressed = false,
 		raw = { "--no-buffer", "-sS" },
 		callback = function(response)
+			vim.loop.fs_unlink(tmpfile)
 			vim.schedule(function()
 				stream_done = true
 				if debounce_timer then
