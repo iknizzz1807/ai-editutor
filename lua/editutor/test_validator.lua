@@ -96,7 +96,7 @@ local function find_forbidden_included_file(context_text)
 end
 
 local function get_budget()
-  return config.options.context and config.options.context.token_budget or 25000
+  return config.options.context and config.options.context.token_budget or 100000
 end
 
 local function relpath(path, root)

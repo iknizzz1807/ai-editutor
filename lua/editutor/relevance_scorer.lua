@@ -161,12 +161,6 @@ local line_count_cache = {}
 local line_count_cache_time = {}
 local LINE_COUNT_CACHE_TTL = 60 -- Cache for 60 seconds
 
----Clear line count cache (called when files change)
-function M.clear_line_count_cache()
-  line_count_cache = {}
-  line_count_cache_time = {}
-end
-
 ---Get line count for a file (cached)
 ---@param filepath string
 ---@return number
@@ -305,46 +299,6 @@ function M.score_and_sort(files, current_file, opts)
   return scored
 end
 
----Filter files to only include types and high-relevance files
----@param files table[] List of files
----@param current_file string Current file path
----@param max_files? number Maximum files to return
----@return table[] Filtered and sorted files
-function M.filter_types_and_high_relevance(files, current_file, max_files)
-  max_files = max_files or 10
-
-  local scored = M.score_and_sort(files, current_file, { min_score = 0 })
-
-  -- Prioritize type files
-  local result = {}
-  local type_files = {}
-  local other_files = {}
-
-  for _, file in ipairs(scored) do
-    local filepath = file.path or file.filepath or file
-    if matches_patterns(filepath, M.TYPE_FILE_PATTERNS) then
-      table.insert(type_files, file)
-    else
-      table.insert(other_files, file)
-    end
-  end
-
-  -- Add type files first, then other high-relevance files
-  for _, file in ipairs(type_files) do
-    if #result < max_files then
-      table.insert(result, file)
-    end
-  end
-
-  for _, file in ipairs(other_files) do
-    if #result < max_files then
-      table.insert(result, file)
-    end
-  end
-
-  return result
-end
-
 -- =============================================================================
 -- Utility Functions
 -- =============================================================================
@@ -375,25 +329,6 @@ end
 ---@return boolean
 function M.is_generated_file(filepath)
   return matches_patterns(filepath, M.GENERATED_FILE_PATTERNS)
-end
-
----Get all scoring criteria for a file (for debugging)
----@param filepath string
----@param current_file string
----@param relationship? string
----@return table
-function M.analyze_file(filepath, current_file, relationship)
-  local score, breakdown = M.score_file(filepath, current_file, relationship)
-
-  return {
-    filepath = filepath,
-    score = score,
-    breakdown = breakdown,
-    is_type_file = M.is_type_file(filepath),
-    is_test_file = M.is_test_file(filepath),
-    is_generated_file = M.is_generated_file(filepath),
-    should_exclude = M.should_exclude(filepath),
-  }
 end
 
 return M

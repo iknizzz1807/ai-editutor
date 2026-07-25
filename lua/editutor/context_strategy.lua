@@ -19,7 +19,7 @@ local repo_map = require("editutor.repo_map")
 -- Configuration
 -- =============================================================================
 
-M.DEFAULT_BUDGET = 25000
+M.DEFAULT_BUDGET = 100000
 
 -- Backtracking levels - from maximum context to minimal
 -- Each level reduces context until it fits budget
@@ -594,6 +594,14 @@ local function build_context_for_level(current_file, project_root, level, budget
   local scan_result = cache.get_project(project_root, function()
     return project_scanner.scan_project({ root = project_root })
   end)
+
+  if not scan_result then
+    return table.concat(parts, "\n"), total_tokens, {
+      level = level.name,
+      files = files_metadata,
+      warning = "scan_failed_no_tree",
+    }
+  end
 
   local tree_content = scan_result.tree_structure
   local tree_tokens = project_scanner.estimate_tokens(tree_content)

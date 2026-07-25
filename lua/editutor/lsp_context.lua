@@ -68,18 +68,6 @@ function M.is_project_file(filepath)
   return false
 end
 
----Read entire file content
----@param filepath string
----@return string|nil content
----@return number|nil line_count
-function M.read_file(filepath)
-  local ok, lines = pcall(vim.fn.readfile, filepath)
-  if not ok or not lines then
-    return nil, nil
-  end
-  return table.concat(lines, "\n"), #lines
-end
-
 ---Get definition location for a symbol at position using LSP (async version)
 ---Must be called from within an async context (async.run)
 ---@param bufnr number Buffer number

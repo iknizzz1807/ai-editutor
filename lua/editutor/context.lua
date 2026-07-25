@@ -17,7 +17,7 @@ local async = require("editutor.async")
 -- Token Budget
 -- =============================================================================
 
-local TOKEN_BUDGET = 25000 -- 25k tokens max
+local TOKEN_BUDGET = 100000 -- 100k tokens max
 local LIBRARY_INFO_BUDGET = 2000 -- 2k tokens for library API info
 local DIAGNOSTICS_BUDGET = 2000 -- 2k tokens for LSP diagnostics
 
@@ -177,7 +177,13 @@ function M.detect_mode(project_root)
     return project_scanner.scan_project({ root = project_root })
   end)
 
-  local project_tokens = scan_result.total_tokens
+  if not scan_result or not scan_result.total_tokens then
+    return { mode = "adaptive", project_tokens = 0, budget = budget }
+  end
+
+  -- Use source_tokens (source code only) for mode decision,
+  -- so non-source files don't push us into adaptive mode when actual code fits.
+  local project_tokens = scan_result.source_tokens or scan_result.total_tokens
 
   if project_tokens <= budget then
     return {
@@ -578,14 +584,6 @@ end
 -- Utility Functions
 -- =============================================================================
 
-function M.has_lsp()
-  return lsp_context.is_available()
-end
-
-function M.get_project_root()
-  return project_scanner.get_project_root()
-end
-
 function M.estimate_tokens(text)
   return project_scanner.estimate_tokens(text)
 end
@@ -594,15 +592,6 @@ end
 ---@return table[]
 function M.get_strategy_levels()
   return context_strategy.get_levels()
-end
-
----Estimate which strategy level would be used
----@param current_file? string
----@return string level_name
----@return table estimation
-function M.estimate_strategy_level(current_file)
-  current_file = current_file or vim.api.nvim_buf_get_name(0)
-  return context_strategy.estimate_level(current_file, M.get_token_budget())
 end
 
 return M

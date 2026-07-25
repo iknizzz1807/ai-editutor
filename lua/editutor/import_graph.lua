@@ -57,51 +57,11 @@ local function get_import_patterns()
       "extern%s+crate%s+([%w_]+)",
     },
 
-    -- Ruby
-    ruby = {
-      "require%s+['\"]([^'\"]+)['\"]",
-      "require_relative%s+['\"]([^'\"]+)['\"]",
-      "load%s+['\"]([^'\"]+)['\"]",
-    },
-
-    -- PHP
-    php = {
-      "require%s+['\"]([^'\"]+)['\"]",
-      "require_once%s+['\"]([^'\"]+)['\"]",
-      "include%s+['\"]([^'\"]+)['\"]",
-      "include_once%s+['\"]([^'\"]+)['\"]",
-      "use%s+([%w_\\]+)",
-    },
-
     -- C/C++
     c = {
       "#include%s*[\"<]([^\"'>]+)[\">]",
     },
     cpp = "c",
-
-    -- Java
-    java = {
-      "import%s+([%w_.]+)%s*;",
-      "import%s+static%s+([%w_.]+)%s*;",
-    },
-
-    -- Kotlin
-    kotlin = {
-      "import%s+([%w_.]+)",
-    },
-
-    -- Swift
-    swift = {
-      "import%s+([%w_]+)",
-    },
-
-    -- Elixir
-    elixir = {
-      "alias%s+([%w_.]+)",
-      "import%s+([%w_.]+)",
-      "use%s+([%w_.]+)",
-      "require%s+([%w_.]+)",
-    },
 
     -- Zig
     zig = {
@@ -119,37 +79,7 @@ end
 
 M.IMPORT_PATTERNS = get_import_patterns()
 
--- Extension to language mapping
-M.EXT_TO_LANG = {
-  js = "javascript",
-  jsx = "javascript",
-  mjs = "javascript",
-  cjs = "javascript",
-  ts = "typescript",
-  tsx = "typescript",
-  py = "python",
-  pyw = "python",
-  lua = "lua",
-  go = "go",
-  rs = "rust",
-  rb = "ruby",
-  rake = "ruby",
-  php = "php",
-  c = "c",
-  h = "c",
-  cpp = "cpp",
-  cc = "cpp",
-  cxx = "cpp",
-  hpp = "cpp",
-  java = "java",
-  kt = "kotlin",
-  kts = "kotlin",
-  swift = "swift",
-  ex = "elixir",
-  exs = "elixir",
-  zig = "zig",
-  odin = "odin",
-}
+
 
 -- =============================================================================
 -- Import Extraction
@@ -277,7 +207,7 @@ end
 function M.get_language(filepath)
   local ext = filepath:match("%.([^.]+)$")
   if not ext then return nil end
-  return M.EXT_TO_LANG[ext:lower()]
+  return project_scanner.get_language_for_ext(ext:lower())
 end
 
 ---Get import patterns for a language
@@ -803,6 +733,10 @@ end
 -- Cached import index: maps resolved filepath -> list of files that import it
 M._import_index = nil
 M._import_index_root = nil
+M._import_index_time = nil
+
+-- Import index TTL in seconds (10 minutes)
+local IMPORT_INDEX_TTL = 600
 
 ---Build import index for entire project (done once, cached)
 ---@param project_root string
@@ -851,14 +785,17 @@ end
 ---@param scan_result table
 ---@return table<string, string[]>
 local function get_import_index(project_root, scan_result)
-  -- Check if we have a valid cached index
-  if M._import_index and M._import_index_root == project_root then
-    return M._import_index
+  -- Check if we have a valid cached index (TTL-based)
+  if M._import_index and M._import_index_root == project_root and M._import_index_time then
+    if os.time() - M._import_index_time < IMPORT_INDEX_TTL then
+      return M._import_index
+    end
   end
 
   -- Build new index
   M._import_index = build_import_index(project_root, scan_result)
   M._import_index_root = project_root
+  M._import_index_time = os.time()
 
   return M._import_index
 end
@@ -867,6 +804,7 @@ end
 function M.invalidate_index()
   M._import_index = nil
   M._import_index_root = nil
+  M._import_index_time = nil
 end
 
 ---Get files that import current file (incoming edges)

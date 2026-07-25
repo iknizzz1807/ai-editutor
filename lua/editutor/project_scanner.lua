@@ -195,6 +195,12 @@ M.DATA_EXTENSIONS = {
   "map",
   -- Lock files
   "lock",
+  -- Tabular data
+  "csv", "tsv",
+  -- Line-delimited data
+  "jsonl", "ndjson",
+  -- Columnar/ML data
+  "parquet", "arrow", "feather", "avro", "orc",
 }
 
 -- =============================================================================
@@ -477,6 +483,11 @@ local EXCLUDED_FILES = {
   "^deprecat",         -- DEPRECATED.md
   -- Localized READMEs (keep main README but skip translations)
   "^readme%..+%.", -- README.zh-CN.md, README.ko.md, etc. (has dot before extension)
+  -- Data files (large, not useful for code understanding)
+  "%.data%.",         -- *.data.json, *.data.yaml, etc.
+  "%.sample%.",       -- *.sample.json, *.sample.yml, etc.
+  "^dataset",         -- dataset.json, datasets/
+  "^data%-",           -- data-config.json, etc.
 }
 
 ---Check if filename should be excluded
@@ -574,7 +585,8 @@ end
 ---@field root string Project root path
 ---@field files ProjectFile[] All scanned files
 ---@field folders ProjectFolder[] Folder information
----@field total_tokens number Estimated total tokens
+---@field total_tokens number Estimated total tokens (source + config)
+---@field source_tokens number Estimated tokens for source code only
 ---@field tree_structure string Formatted tree structure
 
 ---Get project root from a specific file path (or current buffer)
@@ -826,21 +838,29 @@ function M.scan_project(opts)
   -- Build tree structure
   local tree = M.build_tree_structure(root, files, folders)
 
-  -- Calculate total tokens
+  -- Calculate tokens: separate source code from config/docs
   -- Rough estimate: average 40 chars per line, 4 chars per token = 10 tokens per line
   local total_tokens = 0
+  local source_tokens = 0
   for _, file in ipairs(files) do
     if file.lines then
-      total_tokens = total_tokens + (file.lines * 10)
+      local file_tokens = file.lines * 10
+      total_tokens = total_tokens + file_tokens
+      if file.type == "source" then
+        source_tokens = source_tokens + file_tokens
+      end
     end
   end
-  total_tokens = total_tokens + M.estimate_tokens(tree)
+  local tree_token_est = M.estimate_tokens(tree)
+  total_tokens = total_tokens + tree_token_est
+  source_tokens = source_tokens + tree_token_est
 
   return {
     root = root,
     files = files,
     folders = folders,
     total_tokens = total_tokens,
+    source_tokens = source_tokens,
     tree_structure = tree,
   }
 end

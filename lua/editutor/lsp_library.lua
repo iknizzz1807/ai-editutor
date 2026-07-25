@@ -367,7 +367,7 @@ local function process_identifier_async(bufnr, ident, lang)
   local debug_log = require("editutor.debug_log")
 
   -- Skip if no position
-  if not ident.line then
+  if not ident.line or not ident.col then
     return nil
   end
 

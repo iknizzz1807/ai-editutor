@@ -19,7 +19,7 @@ local M = {}
 ---@field execute string Execute all pending code requests
 
 ---@class EditutorContextConfig
----@field token_budget number Max tokens for context (default 25000)
+---@field token_budget number Max tokens for context (default 100000)
 ---@field library_info_budget number Max tokens for library API info (default 2000)
 ---@field diagnostics_budget number Max tokens for LSP diagnostics (default 2000)
 ---@field library_scan_radius number Lines before/after question to scan (default 50)
@@ -41,7 +41,7 @@ M.defaults = {
 
   -- Context extraction
   context = {
-    token_budget = 25000, -- 25k tokens max for total context
+    token_budget = 100000, -- 100k tokens max for total context
     library_info_budget = 2000, -- 2k tokens max for library API info
     diagnostics_budget = 2000, -- 2k tokens max for LSP diagnostics
     library_scan_radius = 50, -- Lines before/after question to scan for library usage

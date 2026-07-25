@@ -7,22 +7,6 @@ local project_scanner = require("editutor.project_scanner")
 
 M.MAX_FILE_SIZE = 100 * 1024
 
-M.EXT_TO_LANG = {
-  lua = "lua",
-  py = "python",
-  pyw = "python",
-  pyi = "python",
-  js = "javascript",
-  jsx = "javascript",
-  mjs = "javascript",
-  cjs = "javascript",
-  ts = "typescript",
-  tsx = "typescript",
-  go = "go",
-  rs = "rust",
-  odin = "odin",
-}
-
 M.QUERIES = {
   lua = [[
     (function_declaration
@@ -201,7 +185,7 @@ function M.get_language(filepath)
   if not ext then
     return nil
   end
-  return M.EXT_TO_LANG[ext:lower()]
+  return project_scanner.get_language_for_ext(ext:lower())
 end
 
 local function read_file(filepath)

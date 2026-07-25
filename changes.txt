@@ -1,0 +1,1510 @@
+diff --git a/lua/editutor/comment_writer.lua b/lua/editutor/comment_writer.lua
+index 8e4d92d..db03888 100644
+--- a/lua/editutor/comment_writer.lua
++++ b/lua/editutor/comment_writer.lua
+@@ -10,9 +10,6 @@ local parser = require("editutor.parser")
+ -- Comment Styles (reuse from parser)
+ -- =============================================================================
+ 
+-M.comment_styles = parser.COMMENT_STYLES
+-M.default_style = parser.DEFAULT_STYLE
+-
+ ---Get comment style for current buffer
+ ---@param bufnr? number Buffer number
+ ---@return table style Comment style { line, block }
+@@ -45,11 +42,9 @@ function M.spawn_question_block(bufnr, selected_code)
+ 	local block_lines = {}
+ 
+ 	if style.block then
+-		-- Block comment format
+ 		table.insert(block_lines, "")
+ 		table.insert(block_lines, indent .. style.block[1] .. " [Q:" .. id .. "]")
+ 
+-		-- Add selected code if provided
+ 		if selected_code and selected_code ~= "" then
+ 			table.insert(block_lines, indent .. "Regarding this code:")
+ 			table.insert(block_lines, indent .. "```")
+@@ -60,19 +55,14 @@ function M.spawn_question_block(bufnr, selected_code)
+ 			table.insert(block_lines, indent .. "")
+ 		end
+ 
+-		-- Placeholder for user's question
+ 		table.insert(block_lines, indent .. "")
+-
+-		-- PENDING marker and close
+ 		table.insert(block_lines, indent .. "[PENDING:" .. id .. "]")
+ 		table.insert(block_lines, indent .. style.block[2])
+ 	else
+-		-- Line comment format (for languages without block comments)
+ 		local prefix = style.line .. " "
+ 		table.insert(block_lines, "")
+ 		table.insert(block_lines, indent .. prefix .. "[Q:" .. id .. "]")
+ 
+-		-- Add selected code if provided
+ 		if selected_code and selected_code ~= "" then
+ 			table.insert(block_lines, indent .. prefix .. "Regarding this code:")
+ 			for line in selected_code:gmatch("[^\n]+") do
+@@ -81,21 +71,15 @@ function M.spawn_question_block(bufnr, selected_code)
+ 			table.insert(block_lines, indent .. prefix .. "")
+ 		end
+ 
+-		-- Placeholder for user's question
+ 		table.insert(block_lines, indent .. prefix .. "")
+-
+-		-- PENDING marker
+ 		table.insert(block_lines, indent .. prefix .. "[PENDING:" .. id .. "]")
+ 	end
+ 
+-	-- Insert block into buffer
+ 	vim.api.nvim_buf_set_lines(bufnr, cursor_line, cursor_line, false, block_lines)
+ 
+-	-- Calculate line where user should type their question
+-	-- It's the empty line before [PENDING:id]
+ 	local question_input_line
+ 	if style.block then
+-		question_input_line = cursor_line + #block_lines - 2 -- Line before [PENDING:id]
++		question_input_line = cursor_line + #block_lines - 2
+ 	else
+ 		question_input_line = cursor_line + #block_lines - 1
+ 	end
+diff --git a/lua/editutor/config.lua b/lua/editutor/config.lua
+index 0a09d57..da72daf 100644
+--- a/lua/editutor/config.lua
++++ b/lua/editutor/config.lua
+@@ -17,9 +17,13 @@ local M = {}
+ ---@field ask string Process all pending questions
+ ---@field code string Spawn a new code request block
+ ---@field execute string Execute all pending code requests
++---@field remove_block string Remove question block under cursor
++---@field remove_answers string Remove all answered blocks
++---@field next_block string Jump to next block
++---@field prev_block string Jump to previous block
+ 
+ ---@class EditutorContextConfig
+----@field token_budget number Max tokens for context (default 25000)
++---@field token_budget number Max tokens for context (default 100000)
+ ---@field library_info_budget number Max tokens for library API info (default 2000)
+ ---@field diagnostics_budget number Max tokens for LSP diagnostics (default 2000)
+ ---@field library_scan_radius number Lines before/after question to scan (default 50)
+@@ -41,7 +45,7 @@ M.defaults = {
+ 
+   -- Context extraction
+   context = {
+-    token_budget = 25000, -- 25k tokens max for total context
++    token_budget = 100000, -- 100k tokens max for total context
+     library_info_budget = 2000, -- 2k tokens max for library API info
+     diagnostics_budget = 2000, -- 2k tokens max for LSP diagnostics
+     library_scan_radius = 50, -- Lines before/after question to scan for library usage
+@@ -53,6 +57,10 @@ M.defaults = {
+     ask = "<leader>ma", -- Process all pending questions
+     code = "<leader>mc", -- Spawn a new code request block
+     execute = "<leader>mx", -- Execute all pending code requests
++    remove_block = "<leader>md", -- Remove block under cursor
++    remove_answers = "<leader>mda", -- Remove all answered blocks
++    next_block = "]q", -- Jump to next block
++    prev_block = "[q", -- Jump to previous block
+   },
+ 
+   -- Custom provider overrides (built-in providers are in provider.lua)
+diff --git a/lua/editutor/context.lua b/lua/editutor/context.lua
+index 07618c6..df62f08 100644
+--- a/lua/editutor/context.lua
++++ b/lua/editutor/context.lua
+@@ -17,7 +17,7 @@ local async = require("editutor.async")
+ -- Token Budget
+ -- =============================================================================
+ 
+-local TOKEN_BUDGET = 25000 -- 25k tokens max
++local TOKEN_BUDGET = 100000 -- 100k tokens max
+ local LIBRARY_INFO_BUDGET = 2000 -- 2k tokens for library API info
+ local DIAGNOSTICS_BUDGET = 2000 -- 2k tokens for LSP diagnostics
+ 
+@@ -177,6 +177,10 @@ function M.detect_mode(project_root)
+     return project_scanner.scan_project({ root = project_root })
+   end)
+ 
++  if not scan_result or not scan_result.total_tokens then
++    return { mode = "adaptive", project_tokens = 0, budget = budget }
++  end
++
+   local project_tokens = scan_result.total_tokens
+ 
+   if project_tokens <= budget then
+@@ -578,14 +582,6 @@ end
+ -- Utility Functions
+ -- =============================================================================
+ 
+-function M.has_lsp()
+-  return lsp_context.is_available()
+-end
+-
+-function M.get_project_root()
+-  return project_scanner.get_project_root()
+-end
+-
+ function M.estimate_tokens(text)
+   return project_scanner.estimate_tokens(text)
+ end
+@@ -596,13 +592,4 @@ function M.get_strategy_levels()
+   return context_strategy.get_levels()
+ end
+ 
+----Estimate which strategy level would be used
+----@param current_file? string
+----@return string level_name
+----@return table estimation
+-function M.estimate_strategy_level(current_file)
+-  current_file = current_file or vim.api.nvim_buf_get_name(0)
+-  return context_strategy.estimate_level(current_file, M.get_token_budget())
+-end
+-
+ return M
+diff --git a/lua/editutor/context_strategy.lua b/lua/editutor/context_strategy.lua
+index bb93eaf..5d2989f 100644
+--- a/lua/editutor/context_strategy.lua
++++ b/lua/editutor/context_strategy.lua
+@@ -14,12 +14,13 @@ local cache = require("editutor.cache")
+ local async = require("editutor.async")
+ local repo_rank = require("editutor.repo_rank")
+ local repo_map = require("editutor.repo_map")
++local util = require("editutor.util")
+ 
+ -- =============================================================================
+ -- Configuration
+ -- =============================================================================
+ 
+-M.DEFAULT_BUDGET = 25000
++M.DEFAULT_BUDGET = 100000
+ 
+ -- Backtracking levels - from maximum context to minimal
+ -- Each level reduces context until it fits budget
+@@ -103,18 +104,6 @@ M.LEVELS = {
+ -- Helper Functions
+ -- =============================================================================
+ 
+----Read file content
+----@param filepath string
+----@return string|nil content
+----@return number line_count
+-local function read_file(filepath)
+-  local ok, lines = pcall(vim.fn.readfile, filepath)
+-  if not ok or not lines then
+-    return nil, 0
+-  end
+-  return table.concat(lines, "\n"), #lines
+-end
+-
+ ---@param filepath string
+ ---@return string|nil content
+ ---@return number line_count
+@@ -125,7 +114,7 @@ local function read_current_file_content(filepath)
+     return table.concat(lines, "\n"), #lines
+   end
+ 
+-  return read_file(filepath)
++  return util.read_file(filepath)
+ end
+ 
+ ---@param content string
+@@ -595,6 +584,14 @@ local function build_context_for_level(current_file, project_root, level, budget
+     return project_scanner.scan_project({ root = project_root })
+   end)
+ 
++  if not scan_result then
++    return table.concat(parts, "\n"), total_tokens, {
++      level = level.name,
++      files = files_metadata,
++      warning = "scan_failed_no_tree",
++    }
++  end
++
+   local tree_content = scan_result.tree_structure
+   local tree_tokens = project_scanner.estimate_tokens(tree_content)
+   local bufnr = vim.api.nvim_get_current_buf()
+@@ -984,7 +981,7 @@ function M.estimate_level(current_file, budget)
+     return project_scanner.scan_project({ root = project_root })
+   end)
+ 
+-  local current_content = read_file(current_file)
++  local current_content = util.read_file(current_file)
+   local current_tokens = current_content and project_scanner.estimate_tokens(current_content) or 0
+ 
+   local import_files = get_imports_with_depth(current_file, project_root, 2)
+diff --git a/lua/editutor/import_graph.lua b/lua/editutor/import_graph.lua
+index 21d0052..e2e2b3b 100644
+--- a/lua/editutor/import_graph.lua
++++ b/lua/editutor/import_graph.lua
+@@ -57,52 +57,12 @@ local function get_import_patterns()
+       "extern%s+crate%s+([%w_]+)",
+     },
+ 
+-    -- Ruby
+-    ruby = {
+-      "require%s+['\"]([^'\"]+)['\"]",
+-      "require_relative%s+['\"]([^'\"]+)['\"]",
+-      "load%s+['\"]([^'\"]+)['\"]",
+-    },
+-
+-    -- PHP
+-    php = {
+-      "require%s+['\"]([^'\"]+)['\"]",
+-      "require_once%s+['\"]([^'\"]+)['\"]",
+-      "include%s+['\"]([^'\"]+)['\"]",
+-      "include_once%s+['\"]([^'\"]+)['\"]",
+-      "use%s+([%w_\\]+)",
+-    },
+-
+     -- C/C++
+     c = {
+       "#include%s*[\"<]([^\"'>]+)[\">]",
+     },
+     cpp = "c",
+ 
+-    -- Java
+-    java = {
+-      "import%s+([%w_.]+)%s*;",
+-      "import%s+static%s+([%w_.]+)%s*;",
+-    },
+-
+-    -- Kotlin
+-    kotlin = {
+-      "import%s+([%w_.]+)",
+-    },
+-
+-    -- Swift
+-    swift = {
+-      "import%s+([%w_]+)",
+-    },
+-
+-    -- Elixir
+-    elixir = {
+-      "alias%s+([%w_.]+)",
+-      "import%s+([%w_.]+)",
+-      "use%s+([%w_.]+)",
+-      "require%s+([%w_.]+)",
+-    },
+-
+     -- Zig
+     zig = {
+       -- @import("std"), @import("file.zig"), @import("path/to/file.zig")
+@@ -119,37 +79,7 @@ end
+ 
+ M.IMPORT_PATTERNS = get_import_patterns()
+ 
+--- Extension to language mapping
+-M.EXT_TO_LANG = {
+-  js = "javascript",
+-  jsx = "javascript",
+-  mjs = "javascript",
+-  cjs = "javascript",
+-  ts = "typescript",
+-  tsx = "typescript",
+-  py = "python",
+-  pyw = "python",
+-  lua = "lua",
+-  go = "go",
+-  rs = "rust",
+-  rb = "ruby",
+-  rake = "ruby",
+-  php = "php",
+-  c = "c",
+-  h = "c",
+-  cpp = "cpp",
+-  cc = "cpp",
+-  cxx = "cpp",
+-  hpp = "cpp",
+-  java = "java",
+-  kt = "kotlin",
+-  kts = "kotlin",
+-  swift = "swift",
+-  ex = "elixir",
+-  exs = "elixir",
+-  zig = "zig",
+-  odin = "odin",
+-}
++
+ 
+ -- =============================================================================
+ -- Import Extraction
+@@ -277,7 +207,7 @@ end
+ function M.get_language(filepath)
+   local ext = filepath:match("%.([^.]+)$")
+   if not ext then return nil end
+-  return M.EXT_TO_LANG[ext:lower()]
++  return project_scanner.get_language_for_ext(ext:lower())
+ end
+ 
+ ---Get import patterns for a language
+@@ -803,6 +733,10 @@ end
+ -- Cached import index: maps resolved filepath -> list of files that import it
+ M._import_index = nil
+ M._import_index_root = nil
++M._import_index_time = nil
++
++-- Import index TTL in seconds (10 minutes)
++local IMPORT_INDEX_TTL = 600
+ 
+ ---Build import index for entire project (done once, cached)
+ ---@param project_root string
+@@ -851,14 +785,17 @@ end
+ ---@param scan_result table
+ ---@return table<string, string[]>
+ local function get_import_index(project_root, scan_result)
+-  -- Check if we have a valid cached index
+-  if M._import_index and M._import_index_root == project_root then
+-    return M._import_index
++  -- Check if we have a valid cached index (TTL-based)
++  if M._import_index and M._import_index_root == project_root and M._import_index_time then
++    if os.time() - M._import_index_time < IMPORT_INDEX_TTL then
++      return M._import_index
++    end
+   end
+ 
+   -- Build new index
+   M._import_index = build_import_index(project_root, scan_result)
+   M._import_index_root = project_root
++  M._import_index_time = os.time()
+ 
+   return M._import_index
+ end
+@@ -867,6 +804,7 @@ end
+ function M.invalidate_index()
+   M._import_index = nil
+   M._import_index_root = nil
++  M._import_index_time = nil
+ end
+ 
+ ---Get files that import current file (incoming edges)
+diff --git a/lua/editutor/init.lua b/lua/editutor/init.lua
+index e39d2c3..4aa4b99 100644
+--- a/lua/editutor/init.lua
++++ b/lua/editutor/init.lua
+@@ -161,6 +161,21 @@ function M._create_commands()
+     desc = "Browse knowledge by date",
+   })
+ 
++  -- Analyse question block under cursor
++  vim.api.nvim_create_user_command("EditutorAnalyseBlock", function()
++    M.analyse_block()
++  end, { desc = "Analyse the block under cursor" })
++
++  -- Remove all answer blocks
++  vim.api.nvim_create_user_command("EditutorRemoveAnswers", function()
++    M.remove_answers()
++  end, { desc = "Remove all answered blocks" })
++
++  -- Remove current block under cursor
++  vim.api.nvim_create_user_command("EditutorRemoveBlock", function()
++    M.remove_current_block()
++  end, { desc = "Remove question block under cursor" })
++
+   -- Cache command
+   vim.api.nvim_create_user_command("EditutorClearCache", function()
+     cache.clear()
+@@ -219,6 +234,18 @@ function M._create_commands()
+     local test_runner = require("editutor.test_runner")
+     test_runner.view_results()
+   end, { desc = "View test results" })
++
++  vim.api.nvim_create_user_command("EditutorAnalyseBlock", function()
++    M.analyse_block()
++  end, { desc = "Analyse the block under cursor" })
++
++  vim.api.nvim_create_user_command("EditutorRemoveBlock", function()
++    M.remove_current_block()
++  end, { desc = "Remove question block under cursor" })
++
++  vim.api.nvim_create_user_command("EditutorRemoveAnswers", function()
++    M.remove_answers()
++  end, { desc = "Remove all answered blocks" })
+ end
+ 
+ -- =============================================================================
+@@ -278,6 +305,33 @@ function M._setup_keymaps()
+       desc = "ai-editutor: Execute pending code requests",
+     })
+   end
++
++  -- Remove current question/answer block under cursor
++  if keymaps.remove_block then
++    vim.keymap.set("n", keymaps.remove_block, M.remove_current_block, {
++      desc = "ai-editutor: Remove block under cursor",
++    })
++  end
++
++  -- Remove all answered blocks
++  if keymaps.remove_answers then
++    vim.keymap.set("n", keymaps.remove_answers, M.remove_answers, {
++      desc = "ai-editutor: Remove all answered blocks",
++    })
++  end
++
++  -- Jump to next/previous question block
++  if keymaps.next_block then
++    vim.keymap.set("n", keymaps.next_block, function()
++      M.jump_to_block(1)
++    end, { desc = "ai-editutor: Jump to next block" })
++  end
++
++  if keymaps.prev_block then
++    vim.keymap.set("n", keymaps.prev_block, function()
++      M.jump_to_block(-1)
++    end, { desc = "ai-editutor: Jump to previous block" })
++  end
+ end
+ 
+ -- =============================================================================
+@@ -773,6 +827,197 @@ function M._parse_code_response(response)
+   return nil
+ end
+ 
++-- =============================================================================
++-- Block Management
++-- =============================================================================
++
++---Remove the question/answer block under cursor
++function M.remove_current_block()
++  local bufnr = vim.api.nvim_get_current_buf()
++  local cursor = vim.api.nvim_win_get_cursor(0)
++  local line = cursor[1]
++  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
++
++  -- Look forward and backward to find enclosing [ANSWER:id] or [Q:id]
++  local block_start, block_end
++
++  for i = line, 1, -1 do
++    if lines[i]:match("%[ANSWER:q_%d+%]") or lines[i]:match("%[Q:q_%d+%]") or lines[i]:match("%[C:q_%d+%]") or lines[i]:match("%[PENDING:q_%d+%]") then
++      block_start = i
++      break
++    end
++  end
++
++  if not block_start then
++    vim.notify("[ai-editutor] No question block found under cursor", vim.log.levels.INFO)
++    return
++  end
++
++  for i = line, #lines do
++    if lines[i]:match("%[/ANSWER:q_%d+%]") or lines[i]:match("%[/CODE:q_%d+%]") or (i > line and (lines[i]:match("%[Q:q_%d+%]") or lines[i]:match("%[C:q_%d+%]") or lines[i]:match("%[PENDING:q_%d+%]"))) then
++      block_end = i
++      break
++    end
++    if i == #lines then
++      block_end = i
++    end
++  end
++
++  if not block_end then
++    return
++  end
++
++  -- Remove block lines (keep empty line before if it would leave a gap)
++  local start_remove = block_start - 1 >= 1 and lines[block_start - 1] == "" and block_start - 1 or block_start
++  vim.api.nvim_buf_set_lines(bufnr, start_remove - 1, block_end, false, {})
++  vim.notify("[ai-editutor] Block removed", vim.log.levels.INFO)
++end
++
++---Remove all answered blocks, keeping pending ones intact
++function M.remove_answers()
++  local bufnr = vim.api.nvim_get_current_buf()
++  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
++  local remove_ranges = {}
++
++  local i = 1
++  while i <= #lines do
++    if lines[i]:match("%[ANSWER:q_%d+%]") then
++      local start = i
++      local end_line = i
++      for j = i, #lines do
++        if lines[j]:match("%[/ANSWER:q_%d+%]") then
++          end_line = j
++          break
++        end
++      end
++      -- Include empty line before block for clean removal
++      local remove_start = start - 1 >= 1 and lines[start - 1] == "" and start - 1 or start
++      table.insert(remove_ranges, { remove_start, end_line })
++      i = end_line + 1
++    else
++      i = i + 1
++    end
++  end
++
++  if #remove_ranges == 0 then
++    vim.notify("[ai-editutor] No answered blocks found", vim.log.levels.INFO)
++    return
++  end
++
++  -- Remove from bottom to top to preserve line numbers
++  table.sort(remove_ranges, function(a, b) return a[1] > b[1] end)
++  for _, range in ipairs(remove_ranges) do
++    vim.api.nvim_buf_set_lines(bufnr, range[1] - 1, range[2], false, {})
++  end
++
++  vim.notify("[ai-editutor] Removed " .. #remove_ranges .. " answered block(s)", vim.log.levels.INFO)
++end
++
++---Jump to next/previous question block
++---@param direction number 1 for next, -1 for previous
++function M.jump_to_block(direction)
++  local bufnr = vim.api.nvim_get_current_buf()
++  local cursor = vim.api.nvim_win_get_cursor(0)
++  local current_line = cursor[1]
++  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
++
++  local target = nil
++  if direction == 1 then
++    for i = current_line + 1, #lines do
++      if lines[i]:match("%[Q:q_%d+%]") or lines[i]:match("%[C:q_%d+%]") then
++        target = i
++        break
++      end
++    end
++    if not target and current_line ~= 1 then
++      for i = 1, current_line do
++        if lines[i]:match("%[Q:q_%d+%]") or lines[i]:match("%[C:q_%d+%]") then
++          target = i
++          break
++        end
++      end
++    end
++  else
++    for i = current_line - 1, 1, -1 do
++      if lines[i]:match("%[Q:q_%d+%]") or lines[i]:match("%[C:q_%d+%]") then
++        target = i
++        break
++      end
++    end
++    if not target and current_line ~= #lines then
++      for i = #lines, current_line, -1 do
++        if lines[i]:match("%[Q:q_%d+%]") or lines[i]:match("%[C:q_%d+%]") then
++          target = i
++          break
++        end
++      end
++    end
++  end
++
++  if target then
++    vim.api.nvim_win_set_cursor(0, { target, 0 })
++    vim.cmd("normal! zz")
++  else
++    vim.notify("[ai-editutor] No question blocks found", vim.log.levels.INFO)
++  end
++end
++
++---Analyse block under cursor
++function M.analyse_block()
++  local bufnr = vim.api.nvim_get_current_buf()
++  local cursor = vim.api.nvim_win_get_cursor(0)
++  local line = cursor[1]
++  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
++
++  local block = { start = nil, ["end"] = nil, has_q = false, has_pending = false, has_answer = false }
++  for i = line, 1, -1 do
++    if lines[i]:match("%[ANSWER:q_%d+%]") or lines[i]:match("%[Q:q_%d+%]") or lines[i]:match("%[C:q_%d+%]") or lines[i]:match("%[PENDING:q_%d+%]") then
++      block.start = i
++      break
++    end
++  end
++  if not block.start then
++    vim.notify("[ai-editutor] No question block found under cursor", vim.log.levels.WARN)
++    return
++  end
++
++  for i = block.start, #lines do
++    if lines[i]:match("%[/ANSWER:q_%d+%]") or lines[i]:match("%[/CODE:q_%d+%]") or (i > line and (lines[i]:match("%[Q:q_%d+%]") or lines[i]:match("%[C:q_%d+%]") or lines[i]:match("%[PENDING:q_%d+%]"))) then
++      block["end"] = i
++      break
++    end
++    if i == #lines then
++      block["end"] = i
++    end
++  end
++
++  for i = block.start, block["end"] or block.start do
++    if lines[i]:match("%[Q:q_%d+%]") then block.has_q = true end
++    if lines[i]:match("%[PENDING:q_%d+%]") then block.has_pending = true end
++    if lines[i]:match("%[ANSWER:q_%d+%]") then block.has_answer = true end
++  end
++
++  local parts = { "=== Block Analysis ===", "" }
++  table.insert(parts, "Lines: " .. block.start .. "-" .. (block["end"] or block.start))
++  table.insert(parts, "Has [Q:id]: " .. tostring(block.has_q))
++  table.insert(parts, "Has [PENDING:id]: " .. tostring(block.has_pending))
++  table.insert(parts, "Has [ANSWER:id]: " .. tostring(block.has_answer))
++  if block.has_q and not block.has_pending and not block.has_answer then
++    table.insert(parts, "Status: EMPTY (just spawned)")
++  elseif block.has_q and block.has_pending and not block.has_answer then
++    table.insert(parts, "Status: PENDING (awaiting answer)")
++  elseif block.has_answer then
++    table.insert(parts, "Status: ANSWERED")
++  end
++  table.insert(parts, "")
++  table.insert(parts, "Commands:")
++  table.insert(parts, "  <leader>md        - Remove this block")
++  table.insert(parts, "  <leader>mda      - Remove all answered blocks")
++  table.insert(parts, "  [q / ]q          - Jump between blocks")
++
++  print(table.concat(parts, "\n"))
++end
++
+ -- =============================================================================
+ -- Utility Functions
+ -- =============================================================================
+diff --git a/lua/editutor/lsp_context.lua b/lua/editutor/lsp_context.lua
+index dabbfec..620da26 100644
+--- a/lua/editutor/lsp_context.lua
++++ b/lua/editutor/lsp_context.lua
+@@ -68,18 +68,6 @@ function M.is_project_file(filepath)
+   return false
+ end
+ 
+----Read entire file content
+----@param filepath string
+----@return string|nil content
+----@return number|nil line_count
+-function M.read_file(filepath)
+-  local ok, lines = pcall(vim.fn.readfile, filepath)
+-  if not ok or not lines then
+-    return nil, nil
+-  end
+-  return table.concat(lines, "\n"), #lines
+-end
+-
+ ---Get definition location for a symbol at position using LSP (async version)
+ ---Must be called from within an async context (async.run)
+ ---@param bufnr number Buffer number
+diff --git a/lua/editutor/lsp_library.lua b/lua/editutor/lsp_library.lua
+index e4b71b1..780d17f 100644
+--- a/lua/editutor/lsp_library.lua
++++ b/lua/editutor/lsp_library.lua
+@@ -341,11 +341,9 @@ end
+ 
+ ---@class LibraryInfo
+ ---@field identifier string The identifier name
+----@field type string|nil The type (if known)
+ ---@field hover string|nil Hover documentation
+----@field methods table[]|nil Available methods
+ ---@field source string "hover"|"completion"|"both"
+----@field error string|nil Error message if failed
++---@field tokens number Token count of the hover text
+ 
+ ---@class LibraryInfoResult
+ ---@field items LibraryInfo[]
+@@ -367,7 +365,7 @@ local function process_identifier_async(bufnr, ident, lang)
+   local debug_log = require("editutor.debug_log")
+ 
+   -- Skip if no position
+-  if not ident.line then
++  if not ident.line or not ident.col then
+     return nil
+   end
+ 
+@@ -567,17 +565,6 @@ function M.format_for_prompt(info_result)
+       table.insert(parts, hover_clean)
+     end
+ 
+-    if item.methods and #item.methods > 0 then
+-      table.insert(parts, "Available methods:")
+-      for _, method in ipairs(item.methods) do
+-        local method_str = "  - " .. method.name
+-        if method.detail and method.detail ~= "" then
+-          method_str = method_str .. ": " .. method.detail
+-        end
+-        table.insert(parts, method_str)
+-      end
+-    end
+-
+     table.insert(parts, "")
+   end
+ 
+diff --git a/lua/editutor/lsp_references.lua b/lua/editutor/lsp_references.lua
+index c04530e..2416e5b 100644
+--- a/lua/editutor/lsp_references.lua
++++ b/lua/editutor/lsp_references.lua
+@@ -58,13 +58,15 @@ local function question_mentions(question_text, name)
+   return question_text:match("%f[%w_]" .. vim.pesc(name) .. "%f[^%w_]") ~= nil
+ end
+ 
+-local function extract_symbols_below_question(bufnr, question)
++local function extract_symbols_around_question(bufnr, question)
+   local symbols = {}
+   local seen = {}
+-  local start_line = (question.block_end or question.pending_line or question.block_start or 1) -- 1-indexed
++  local block_start_line = (question.block_start or 1) - 1
++  local block_end_line = (question.block_end or question.block_start or 1) - 1
+   local total_lines = vim.api.nvim_buf_line_count(bufnr)
+-  local scan_start = math.min(total_lines - 1, start_line)
+-  local scan_end = math.min(total_lines, scan_start + M.config.lookahead_lines)
++  local lookahead = M.config.lookahead_lines
++  local scan_start = math.max(0, block_start_line - lookahead)
++  local scan_end = math.min(total_lines, block_end_line + lookahead + 1)
+ 
+   local ok_parser, parser = pcall(vim.treesitter.get_parser, bufnr)
+   if not ok_parser or not parser then
+@@ -176,7 +178,7 @@ function M.extract_async(bufnr, questions)
+   local seen_refs = {}
+ 
+   for _, question in ipairs(questions or {}) do
+-    local symbols = extract_symbols_below_question(bufnr, question)
++    local symbols = extract_symbols_around_question(bufnr, question)
+     for _, symbol in ipairs(symbols) do
+       if total_refs >= M.config.max_total_refs then
+         break
+diff --git a/lua/editutor/parser.lua b/lua/editutor/parser.lua
+index 1eb5d90..467b9ca 100644
+--- a/lua/editutor/parser.lua
++++ b/lua/editutor/parser.lua
+@@ -1,90 +1,65 @@
+--- editutor/parser.lua
+--- Question block parsing for ai-editutor v3.0
+--- Detects [Q:id] blocks and [PENDING:id] markers
+-
+ local M = {}
+ 
+--- =============================================================================
+--- Comment Styles
+--- =============================================================================
+-
+-M.COMMENT_STYLES = {
+-  -- C-style: // and /* */
+-  c = { line = "//", block = { "/*", "*/" } },
+-  cpp = { line = "//", block = { "/*", "*/" } },
+-  java = { line = "//", block = { "/*", "*/" } },
+-  javascript = { line = "//", block = { "/*", "*/" } },
+-  javascriptreact = { line = "//", block = { "/*", "*/" } },
+-  typescript = { line = "//", block = { "/*", "*/" } },
+-  typescriptreact = { line = "//", block = { "/*", "*/" } },
+-  go = { line = "//", block = { "/*", "*/" } },
+-  rust = { line = "//", block = { "/*", "*/" } },
+-  odin = { line = "//", block = { "/*", "*/" } },
+-  swift = { line = "//", block = { "/*", "*/" } },
+-  kotlin = { line = "//", block = { "/*", "*/" } },
+-  zig = { line = "//", block = nil },
+-  scala = { line = "//", block = { "/*", "*/" } },
+-  dart = { line = "//", block = { "/*", "*/" } },
+-  php = { line = "//", block = { "/*", "*/" } },
+-  css = { line = nil, block = { "/*", "*/" } },
+-  scss = { line = "//", block = { "/*", "*/" } },
+-
+-  -- Hash-style: #
+-  python = { line = "#", block = { '"""', '"""' } },
+-  ruby = { line = "#", block = { "=begin", "=end" } },
+-  sh = { line = "#", block = nil },
+-  bash = { line = "#", block = nil },
+-  zsh = { line = "#", block = nil },
+-  yaml = { line = "#", block = nil },
+-  toml = { line = "#", block = nil },
+-  dockerfile = { line = "#", block = nil },
+-
+-  -- Dash-style: --
+-  lua = { line = "--", block = { "--[[", "]]" } },
+-  sql = { line = "--", block = { "/*", "*/" } },
+-  haskell = { line = "--", block = { "{-", "-}" } },
+-
+-  -- HTML/XML: <!-- -->
+-  html = { line = nil, block = { "<!--", "-->" } },
+-  xml = { line = nil, block = { "<!--", "-->" } },
+-  vue = { line = "//", block = { "<!--", "-->" } },
+-  svelte = { line = "//", block = { "<!--", "-->" } },
+-
+-  -- Lisp-style: ;
+-  lisp = { line = ";", block = { "#|", "|#" } },
+-  clojure = { line = ";", block = nil },
+-
+-  -- Other
+-  vim = { line = '"', block = nil },
+-  tex = { line = "%", block = nil },
+-  latex = { line = "%", block = nil },
+-}
+-
+-M.DEFAULT_STYLE = { line = "//", block = { "/*", "*/" } }
++local config = require("editutor.config")
+ 
+ -- =============================================================================
+--- Helper Functions
++-- Comment Style Detection
+ -- =============================================================================
+ 
+----Get comment style for filetype
+----@param bufnr? number
+----@return table style
++---@class CommentStyle
++---@field line string|nil Line comment prefix (e.g., "//", "--", "#")
++---@field block table|nil Block comment delimiters {open, close}
++
++---Detect comment style based on filetype
++---@param bufnr number Buffer number
++---@return CommentStyle style
+ function M.get_comment_style(bufnr)
+-  bufnr = bufnr or vim.api.nvim_get_current_buf()
+   local ft = vim.bo[bufnr].filetype
+-  return M.COMMENT_STYLES[ft] or M.DEFAULT_STYLE
++
++  local styles = {
++    -- C-style
++    c = { line = "//", block = { "/*", "*/" } },
++    cpp = { line = "//", block = { "/*", "*/" } },
++    csharp = { line = "//", block = { "/*", "*/" } },
++    java = { line = "//", block = { "/*", "*/" } },
++    javascript = { line = "//", block = { "/*", "*/" } },
++    javascriptreact = { line = "//", block = { "/*", "*/" } },
++    typescript = { line = "//", block = { "/*", "*/" } },
++    typescriptreact = { line = "//", block = { "/*", "*/" } },
++    go = { line = "//", block = { "/*", "*/" } },
++    rust = { line = "//", block = { "/*", "*/" } },
++    swift = { line = "//", block = { "/*", "*/" } },
++    kotlin = { line = "//", block = { "/*", "*/" } },
++    scala = { line = "//", block = { "/*", "*/" } },
++    dart = { line = "//", block = { "/*", "*/" } },
++    zig = { line = "//", block = { "/*", "*/" } },
++    odin = { line = "//", block = { "/*", "*/" } },
++    php = { line = "//", block = { "/*", "*/" } },
++    -- Lua-style
++    lua = { line = "--", block = { "--[[", "--]]" } },
++    -- Python/Ruby/Shell
++    python = { line = "#", block = { '"""', '"""' } },
++    ruby = { line = "#", block = { "=begin", "=end" } },
++    bash = { line = "#" },
++    zsh = { line = "#" },
++    fish = { line = "#" },
++    sh = { line = "#" },
++    -- Other
++    haskell = { line = "--", block = { "{-", "-}" } },
++    elixir = { line = "#" },
++    erlang = { line = "%" },
++    sql = { line = "--", block = { "/*", "*/" } },
++    -- Nim
++    nim = { line = "#", block = { "#[", "]#" } },
++  }
++
++  return styles[ft] or { line = "//", block = { "/*", "*/" } }
+ end
+ 
+----Generate unique ID based on timestamp (milliseconds)
+----@return string id Format: "q_<timestamp_ms>"
+-function M.generate_id()
+-  -- Get current time in milliseconds
+-  local time_ms = vim.loop.hrtime() / 1000000
+-  return string.format("q_%d", math.floor(time_ms))
+-end
++-- =============================================================================
++-- Marker Detection
++-- =============================================================================
+ 
+----Escape pattern special characters
+----@param str string
+ ---@return string
+ local function escape_pattern(str)
+   return str:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
+@@ -113,15 +88,13 @@ function M.find_pending_blocks(bufnr, mode)
+   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+   local style = M.get_comment_style(bufnr)
+ 
+-  -- For languages without block comments (Python, Shell, etc.), use line comment parser
+   if not style.block and style.line then
+     return M._find_pending_line_comments(lines, style, mode)
+   end
+ 
+   local blocks = {}
+ 
+-  -- First pass: find all [PENDING:id] markers
+-  local pending_markers = {} -- id -> line_number
++  local pending_markers = {}
+   for i, line in ipairs(lines) do
+     local id = line:match("%[PENDING:(q_%d+)%]")
+     if id then
+@@ -129,12 +102,10 @@ function M.find_pending_blocks(bufnr, mode)
+     end
+   end
+ 
+-  -- If no pending markers, return empty
+   if vim.tbl_isempty(pending_markers) then
+     return blocks
+   end
+ 
+-  -- Second pass: find [MODE:id] and match with pending
+   local mode_pattern = "%[" .. mode .. ":(q_%d+)%]"
+   for i, line in ipairs(lines) do
+     local id = line:match(mode_pattern)
+@@ -144,7 +115,6 @@ function M.find_pending_blocks(bufnr, mode)
+       local block_end = pending_line
+       local indent = line:match("^(%s*)") or ""
+ 
+-      -- Look backwards for block comment start (/* or similar)
+       if style.block then
+         for j = i, math.max(1, i - 10), -1 do
+           if lines[j]:match(escape_pattern(style.block[1])) then
+@@ -154,7 +124,6 @@ function M.find_pending_blocks(bufnr, mode)
+           end
+         end
+ 
+-        -- Look forwards for block comment end (*/ or similar)
+         for j = pending_line, math.min(#lines, pending_line + 10) do
+           if lines[j]:match(escape_pattern(style.block[2])) then
+             block_end = j
+@@ -163,7 +132,6 @@ function M.find_pending_blocks(bufnr, mode)
+         end
+       end
+ 
+-      -- Extract text (between [MODE:id] line and [PENDING:id] line)
+       local text_lines = {}
+       for j = i + 1, pending_line - 1 do
+         local content = lines[j]:gsub("^%s*", ""):gsub("%s*$", "")
+@@ -187,61 +155,116 @@ function M.find_pending_blocks(bufnr, mode)
+   return blocks
+ end
+ 
+----Find pending blocks in line-comment style (for languages without block comments)
+----@param lines string[]
+----@param style table
+----@param mode string "Q" or "C"
+----@return PendingBlock[]
+-function M._find_pending_line_comments(lines, style, mode)
++---Find all answer blocks ([ANSWER:id]...[/ANSWER:id]) in current buffer
++---@param bufnr? number Buffer number
++---@return table[] List of {id, answer_start, answer_end}
++function M.find_answer_blocks(bufnr)
++  bufnr = bufnr or vim.api.nvim_get_current_buf()
++  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+   local blocks = {}
+-  local prefix_pattern = escape_pattern(style.line)
++
++  for i, line in ipairs(lines) do
++    local id = line:match("%[ANSWER:(q_%d+)%]")
++    if id then
++      local answer_start = i
++      local answer_end = i
++      for j = i + 1, #lines do
++        local close_id = lines[j]:match("%[/ANSWER:(q_%d+)%]")
++        if close_id == id then
++          answer_end = j
++          break
++        elseif close_id then
++          break
++        end
++      end
++      table.insert(blocks, {
++        id = id,
++        answer_start = answer_start,
++        answer_end = answer_end,
++      })
++    end
++  end
++
++  return blocks
++end
++
++---Find all completed blocks (either ANSWER or [Q] without PENDING) in current buffer
++---@param bufnr? number Buffer number
++---@param mode string "Q" for questions, "C" for code requests
++---@return table[] List of {id, block_start, block_end}
++function M.find_all_blocks(bufnr, mode)
++  mode = mode or "Q"
++  bufnr = bufnr or vim.api.nvim_get_current_buf()
++  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
++  local blocks = {}
++
+   local mode_pattern = "%[" .. mode .. ":(q_%d+)%]"
+-
+-  local i = 1
+-  while i <= #lines do
+-    local line = lines[i]
+-
+-    -- Check for line comment with [MODE:id]
++  for i, line in ipairs(lines) do
+     local id = line:match(mode_pattern)
+-    if id and line:match("^%s*" .. prefix_pattern) then
+-      local indent = line:match("^(%s*)") or ""
++    if id then
+       local block_start = i
+       local block_end = i
+-      local pending_line = nil
+-      local text_lines = {}
+-
+-      -- Search consecutive comment lines for content and [PENDING:id]
+       for j = i + 1, #lines do
+-        local check_line = lines[j]
+-
+-        -- Check if still a comment line
+-        if not check_line:match("^%s*" .. prefix_pattern) then
++        if lines[j]:match(mode_pattern) or lines[j]:match("%[PENDING:q_%d+%]") or lines[j]:match("%[/ANSWER:q_%d+%]") or lines[j]:match("%[/CODE:q_%d+%]") then
+           block_end = j - 1
+           break
+         end
++        if j == #lines then
++          block_end = j
++        end
++      end
++      table.insert(blocks, {
++        id = id,
++        block_start = block_start,
++        block_end = block_end,
++      })
++    end
++  end
+ 
+-        block_end = j
++  return blocks
++end
+ 
+-        -- Check for [PENDING:id]
+-        if check_line:match("%[PENDING:" .. escape_pattern(id) .. "%]") then
++function M._find_pending_line_comments(lines, style, mode)
++  local blocks = {}
++  local mode_pattern = "%[" .. mode .. ":(q_%d+)%]"
++  local pending_pattern = "%[PENDING:(q_%d+)%]"
++
++  local i = 1
++  while i <= #lines do
++    local id = lines[i]:match(mode_pattern)
++    if id then
++      local block_start = i
++      local block_end = i
++      local pending_line = nil
++
++      for j = i + 1, math.min(#lines, i + 20) do
++        local pending_id = lines[j]:match(pending_pattern)
++        if pending_id == id then
+           pending_line = j
+-        elseif not pending_line then
+-          -- Collect text
+-          local content = check_line:gsub("^%s*" .. prefix_pattern .. "%s*", "")
+-          if content ~= "" then
+-            table.insert(text_lines, content)
+-          end
++          block_end = j
++          break
++        elseif lines[j]:match(mode_pattern) or lines[j]:match(pending_pattern) then
++          block_end = j - 1
++          break
+         end
+       end
+ 
+       if pending_line then
++        local text_lines = {}
++        for j = i + 1, pending_line - 1 do
++          local content = lines[j]:gsub("^%s*", ""):gsub("%s*$", "")
++          if content ~= "" then
++            table.insert(text_lines, content)
++          end
++        end
++
+         table.insert(blocks, {
+           id = id,
+           question = table.concat(text_lines, "\n"),
+           block_start = block_start,
+           block_end = block_end,
+           pending_line = pending_line,
+-          indent = indent,
++          indent = lines[block_start]:match("^(%s*)") or "",
+           mode = mode,
+         })
+       end
+@@ -256,20 +279,13 @@ function M._find_pending_line_comments(lines, style, mode)
+ end
+ 
+ -- =============================================================================
+--- QA Mode (backward compatible)
++-- Finding all blocks (completed + pending)
+ -- =============================================================================
+ 
+----Find all pending questions in current buffer
+----@param bufnr? number Buffer number
+----@return PendingBlock[] questions List of pending questions
+ function M.find_pending_questions(bufnr)
+   return M.find_pending_blocks(bufnr, "Q")
+ end
+ 
+----Find a specific question block by ID
+----@param id string Question ID
+----@param bufnr? number Buffer number
+----@return PendingBlock|nil
+ function M.find_question_by_id(id, bufnr)
+   local questions = M.find_pending_questions(bufnr)
+   for _, q in ipairs(questions) do
+@@ -280,35 +296,18 @@ function M.find_question_by_id(id, bufnr)
+   return nil
+ end
+ 
+----Check if buffer has any pending questions
+----@param bufnr? number Buffer number
+----@return boolean
+ function M.has_pending_questions(bufnr)
+   return #M.find_pending_questions(bufnr) > 0
+ end
+ 
+----Get count of pending questions
+----@param bufnr? number Buffer number
+----@return number
+ function M.count_pending_questions(bufnr)
+   return #M.find_pending_questions(bufnr)
+ end
+ 
+--- =============================================================================
+--- Code Mode
+--- =============================================================================
+-
+----Find all pending code requests in current buffer
+----@param bufnr? number Buffer number
+----@return PendingBlock[] code_requests List of pending code requests
+ function M.find_pending_code_requests(bufnr)
+   return M.find_pending_blocks(bufnr, "C")
+ end
+ 
+----Find a specific code request block by ID
+----@param id string Block ID
+----@param bufnr? number Buffer number
+----@return PendingBlock|nil
+ function M.find_code_request_by_id(id, bufnr)
+   local requests = M.find_pending_code_requests(bufnr)
+   for _, r in ipairs(requests) do
+@@ -319,18 +318,16 @@ function M.find_code_request_by_id(id, bufnr)
+   return nil
+ end
+ 
+----Check if buffer has any pending code requests
+----@param bufnr? number Buffer number
+----@return boolean
+ function M.has_pending_code_requests(bufnr)
+   return #M.find_pending_code_requests(bufnr) > 0
+ end
+ 
+----Get count of pending code requests
+----@param bufnr? number Buffer number
+----@return number
+ function M.count_pending_code_requests(bufnr)
+   return #M.find_pending_code_requests(bufnr)
+ end
+ 
++function M.generate_id()
++  return "q_" .. tostring(vim.loop.now())
++end
++
+ return M
+diff --git a/lua/editutor/relevance_scorer.lua b/lua/editutor/relevance_scorer.lua
+index 0c730eb..df72105 100644
+--- a/lua/editutor/relevance_scorer.lua
++++ b/lua/editutor/relevance_scorer.lua
+@@ -161,12 +161,6 @@ local line_count_cache = {}
+ local line_count_cache_time = {}
+ local LINE_COUNT_CACHE_TTL = 60 -- Cache for 60 seconds
+ 
+----Clear line count cache (called when files change)
+-function M.clear_line_count_cache()
+-  line_count_cache = {}
+-  line_count_cache_time = {}
+-end
+-
+ ---Get line count for a file (cached)
+ ---@param filepath string
+ ---@return number
+@@ -305,46 +299,6 @@ function M.score_and_sort(files, current_file, opts)
+   return scored
+ end
+ 
+----Filter files to only include types and high-relevance files
+----@param files table[] List of files
+----@param current_file string Current file path
+----@param max_files? number Maximum files to return
+----@return table[] Filtered and sorted files
+-function M.filter_types_and_high_relevance(files, current_file, max_files)
+-  max_files = max_files or 10
+-
+-  local scored = M.score_and_sort(files, current_file, { min_score = 0 })
+-
+-  -- Prioritize type files
+-  local result = {}
+-  local type_files = {}
+-  local other_files = {}
+-
+-  for _, file in ipairs(scored) do
+-    local filepath = file.path or file.filepath or file
+-    if matches_patterns(filepath, M.TYPE_FILE_PATTERNS) then
+-      table.insert(type_files, file)
+-    else
+-      table.insert(other_files, file)
+-    end
+-  end
+-
+-  -- Add type files first, then other high-relevance files
+-  for _, file in ipairs(type_files) do
+-    if #result < max_files then
+-      table.insert(result, file)
+-    end
+-  end
+-
+-  for _, file in ipairs(other_files) do
+-    if #result < max_files then
+-      table.insert(result, file)
+-    end
+-  end
+-
+-  return result
+-end
+-
+ -- =============================================================================
+ -- Utility Functions
+ -- =============================================================================
+@@ -377,23 +331,4 @@ function M.is_generated_file(filepath)
+   return matches_patterns(filepath, M.GENERATED_FILE_PATTERNS)
+ end
+ 
+----Get all scoring criteria for a file (for debugging)
+----@param filepath string
+----@param current_file string
+----@param relationship? string
+----@return table
+-function M.analyze_file(filepath, current_file, relationship)
+-  local score, breakdown = M.score_file(filepath, current_file, relationship)
+-
+-  return {
+-    filepath = filepath,
+-    score = score,
+-    breakdown = breakdown,
+-    is_type_file = M.is_type_file(filepath),
+-    is_test_file = M.is_test_file(filepath),
+-    is_generated_file = M.is_generated_file(filepath),
+-    should_exclude = M.should_exclude(filepath),
+-  }
+-end
+-
+ return M
+diff --git a/lua/editutor/repo_tags.lua b/lua/editutor/repo_tags.lua
+index e2125e0..d7a2749 100644
+--- a/lua/editutor/repo_tags.lua
++++ b/lua/editutor/repo_tags.lua
+@@ -7,22 +7,6 @@ local project_scanner = require("editutor.project_scanner")
+ 
+ M.MAX_FILE_SIZE = 100 * 1024
+ 
+-M.EXT_TO_LANG = {
+-  lua = "lua",
+-  py = "python",
+-  pyw = "python",
+-  pyi = "python",
+-  js = "javascript",
+-  jsx = "javascript",
+-  mjs = "javascript",
+-  cjs = "javascript",
+-  ts = "typescript",
+-  tsx = "typescript",
+-  go = "go",
+-  rs = "rust",
+-  odin = "odin",
+-}
+-
+ M.QUERIES = {
+   lua = [[
+     (function_declaration
+@@ -201,7 +185,7 @@ function M.get_language(filepath)
+   if not ext then
+     return nil
+   end
+-  return M.EXT_TO_LANG[ext:lower()]
++  return project_scanner.get_language_for_ext(ext:lower())
+ end
+ 
+ local function read_file(filepath)
+diff --git a/lua/editutor/semantic_chunking.lua b/lua/editutor/semantic_chunking.lua
+index c33130b..1017406 100644
+--- a/lua/editutor/semantic_chunking.lua
++++ b/lua/editutor/semantic_chunking.lua
+@@ -5,6 +5,7 @@
+ local M = {}
+ 
+ local project_scanner = require("editutor.project_scanner")
++local util = require("editutor.util")
+ 
+ -- =============================================================================
+ -- Configuration
+@@ -287,40 +288,13 @@ M.QUERIES.jsx = M.QUERIES.javascript
+ -- Language Detection
+ -- =============================================================================
+ 
+-M.EXT_TO_LANG = {
+-  ts = "typescript",
+-  tsx = "typescript",
+-  js = "javascript",
+-  jsx = "javascript",
+-  mjs = "javascript",
+-  cjs = "javascript",
+-  py = "python",
+-  pyw = "python",
+-  lua = "lua",
+-  go = "go",
+-  rs = "rust",
+-  c = "c",
+-  h = "c",
+-  cpp = "cpp",
+-  cc = "cpp",
+-  cxx = "cpp",
+-  hpp = "cpp",
+-  hh = "cpp",
+-  hxx = "cpp",
+-  java = "java",
+-  zig = "zig",
+-  odin = "odin",
+-}
+-
+----Get tree-sitter language from file extension
+----@param filepath string
+----@return string|nil
+ function M.get_language(filepath)
+   local ext = filepath:match("%.([^.]+)$")
+   if not ext then
+     return nil
+   end
+-  return M.EXT_TO_LANG[ext:lower()]
++  local lang = project_scanner.get_language_for_ext(ext:lower())
++  return lang ~= "" and lang or nil
+ end
+ 
+ ---Get tree-sitter parser language name (may differ from our lang key)
+@@ -349,17 +323,6 @@ end
+ -- =============================================================================
+ 
+ ---Read file content
+----@param filepath string
+----@return string|nil content
+----@return number line_count
+-local function read_file(filepath)
+-  local ok, lines = pcall(vim.fn.readfile, filepath)
+-  if not ok or not lines then
+-    return nil, 0
+-  end
+-  return table.concat(lines, "\n"), #lines
+-end
+-
+ local function extract_braced_block(lines, start_index, max_lines)
+   local parts = {}
+   local depth = 0
+@@ -387,7 +350,7 @@ local function extract_braced_block(lines, start_index, max_lines)
+ end
+ 
+ local function extract_odin_summary(filepath, max_tokens, types_only)
+-  local content, line_count = read_file(filepath)
++  local content, line_count = util.read_file(filepath)
+   if not content then
+     return nil, { error = "cannot_read_file" }
+   end
+@@ -568,7 +531,7 @@ end
+ function M.extract_semantic_summary(filepath, max_tokens)
+   max_tokens = max_tokens or M.DEFAULT_MAX_TOKENS
+ 
+-  local content, line_count = read_file(filepath)
++  local content, line_count = util.read_file(filepath)
+   if not content then
+     return nil, { error = "cannot_read_file" }
+   end
+@@ -713,7 +676,7 @@ end
+ function M.extract_types_only(filepath, max_tokens)
+   max_tokens = max_tokens or M.DEFAULT_MAX_TOKENS
+ 
+-  local content, line_count = read_file(filepath)
++  local content, line_count = util.read_file(filepath)
+   if not content then
+     return nil, { error = "cannot_read_file" }
+   end
+@@ -847,7 +810,7 @@ end
+ function M.extract_definition_at(filepath, line, col, context_lines)
+   context_lines = context_lines or 5
+ 
+-  local content, line_count = read_file(filepath)
++  local content, line_count = util.read_file(filepath)
+   if not content then
+     return nil, { error = "cannot_read_file" }
+   end
+@@ -993,7 +956,7 @@ function M.get_file_content(filepath, opts)
+   local max_tokens = opts.max_tokens or M.DEFAULT_MAX_TOKENS
+   local mode = opts.mode or "semantic" -- "semantic", "types_only", "full", "truncate"
+ 
+-  local content, line_count = read_file(filepath)
++  local content, line_count = util.read_file(filepath)
+   if not content then
+     return nil, { error = "cannot_read_file" }
+   end
+@@ -1039,37 +1002,4 @@ end
+ -- Utility Functions
+ -- =============================================================================
+ 
+----Check if file needs chunking based on line count
+----@param filepath string
+----@param threshold? number
+----@return boolean
+-function M.needs_chunking(filepath, threshold)
+-  threshold = threshold or M.DEFAULT_THRESHOLD
+-  local ok, lines = pcall(vim.fn.readfile, filepath)
+-  if not ok or not lines then
+-    return false
+-  end
+-  return #lines > threshold
+-end
+-
+----Check if tree-sitter is available for language
+----@param lang string
+----@return boolean
+-function M.has_parser(lang)
+-  local parser_lang = M.get_parser_lang(lang)
+-  local ok = pcall(vim.treesitter.language.inspect, parser_lang)
+-  return ok
+-end
+-
+----List supported languages
+----@return string[]
+-function M.supported_languages()
+-  local langs = {}
+-  for lang, _ in pairs(M.QUERIES) do
+-    table.insert(langs, lang)
+-  end
+-  table.sort(langs)
+-  return langs
+-end
+-
+ return M
+diff --git a/lua/editutor/test_validator.lua b/lua/editutor/test_validator.lua
+index f1761db..b5d1034 100644
+--- a/lua/editutor/test_validator.lua
++++ b/lua/editutor/test_validator.lua
+@@ -96,7 +96,7 @@ local function find_forbidden_included_file(context_text)
+ end
+ 
+ local function get_budget()
+-  return config.options.context and config.options.context.token_budget or 25000
++  return config.options.context and config.options.context.token_budget or 100000
+ end
+ 
+ local function relpath(path, root)
+diff --git a/lua/editutor/util.lua b/lua/editutor/util.lua
+new file mode 100644
+index 0000000..db06dbb
+--- /dev/null
++++ b/lua/editutor/util.lua
+@@ -0,0 +1,26 @@
++local M = {}
++
++---Read file content from disk
++---@param filepath string
++---@return string|nil content
++---@return number line_count
++function M.read_file(filepath)
++  local ok, lines = pcall(vim.fn.readfile, filepath)
++  if not ok or not lines then
++    return nil, 0
++  end
++  return table.concat(lines, "\n"), #lines
++end
++
++---Get relative display path
++---@param filepath string
++---@param project_root string
++---@return string
++function M.rel_path(filepath, project_root)
++  if filepath:sub(1, #project_root) == project_root then
++    return filepath:sub(#project_root + 2)
++  end
++  return vim.fn.fnamemodify(filepath, ":t")
++end
++
++return M

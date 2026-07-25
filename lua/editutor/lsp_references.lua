@@ -58,13 +58,15 @@ local function question_mentions(question_text, name)
   return question_text:match("%f[%w_]" .. vim.pesc(name) .. "%f[^%w_]") ~= nil
 end
 
-local function extract_symbols_below_question(bufnr, question)
+local function extract_symbols_around_question(bufnr, question)
   local symbols = {}
   local seen = {}
-  local start_line = (question.block_end or question.pending_line or question.block_start or 1) -- 1-indexed
+  local block_start_line = (question.block_start or 1) - 1
+  local block_end_line = (question.block_end or question.block_start or 1) - 1
   local total_lines = vim.api.nvim_buf_line_count(bufnr)
-  local scan_start = math.min(total_lines - 1, start_line)
-  local scan_end = math.min(total_lines, scan_start + M.config.lookahead_lines)
+  local lookahead = M.config.lookahead_lines
+  local scan_start = math.max(0, block_start_line - lookahead)
+  local scan_end = math.min(total_lines, block_end_line + lookahead + 1)
 
   local ok_parser, parser = pcall(vim.treesitter.get_parser, bufnr)
   if not ok_parser or not parser then
@@ -176,7 +178,7 @@ function M.extract_async(bufnr, questions)
   local seen_refs = {}
 
   for _, question in ipairs(questions or {}) do
-    local symbols = extract_symbols_below_question(bufnr, question)
+    local symbols = extract_symbols_around_question(bufnr, question)
     for _, symbol in ipairs(symbols) do
       if total_refs >= M.config.max_total_refs then
         break

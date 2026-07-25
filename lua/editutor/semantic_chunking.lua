@@ -287,31 +287,6 @@ M.QUERIES.jsx = M.QUERIES.javascript
 -- Language Detection
 -- =============================================================================
 
-M.EXT_TO_LANG = {
-  ts = "typescript",
-  tsx = "typescript",
-  js = "javascript",
-  jsx = "javascript",
-  mjs = "javascript",
-  cjs = "javascript",
-  py = "python",
-  pyw = "python",
-  lua = "lua",
-  go = "go",
-  rs = "rust",
-  c = "c",
-  h = "c",
-  cpp = "cpp",
-  cc = "cpp",
-  cxx = "cpp",
-  hpp = "cpp",
-  hh = "cpp",
-  hxx = "cpp",
-  java = "java",
-  zig = "zig",
-  odin = "odin",
-}
-
 ---Get tree-sitter language from file extension
 ---@param filepath string
 ---@return string|nil
@@ -320,7 +295,8 @@ function M.get_language(filepath)
   if not ext then
     return nil
   end
-  return M.EXT_TO_LANG[ext:lower()]
+  local lang = project_scanner.get_language_for_ext(ext:lower())
+  return lang ~= "" and lang or nil
 end
 
 ---Get tree-sitter parser language name (may differ from our lang key)
@@ -1033,43 +1009,6 @@ function M.get_file_content(filepath, opts)
     -- Default: semantic
     return M.extract_semantic_summary(filepath, max_tokens)
   end
-end
-
--- =============================================================================
--- Utility Functions
--- =============================================================================
-
----Check if file needs chunking based on line count
----@param filepath string
----@param threshold? number
----@return boolean
-function M.needs_chunking(filepath, threshold)
-  threshold = threshold or M.DEFAULT_THRESHOLD
-  local ok, lines = pcall(vim.fn.readfile, filepath)
-  if not ok or not lines then
-    return false
-  end
-  return #lines > threshold
-end
-
----Check if tree-sitter is available for language
----@param lang string
----@return boolean
-function M.has_parser(lang)
-  local parser_lang = M.get_parser_lang(lang)
-  local ok = pcall(vim.treesitter.language.inspect, parser_lang)
-  return ok
-end
-
----List supported languages
----@return string[]
-function M.supported_languages()
-  local langs = {}
-  for lang, _ in pairs(M.QUERIES) do
-    table.insert(langs, lang)
-  end
-  table.sort(langs)
-  return langs
 end
 
 return M
