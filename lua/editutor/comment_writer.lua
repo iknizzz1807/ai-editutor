@@ -21,6 +21,105 @@ function M.get_style(bufnr)
 end
 
 -- =============================================================================
+-- Smart Indentation
+-- =============================================================================
+
+---Find indentation of the nearest non-empty line above cursor
+---@param bufnr number
+---@param line number 1-indexed cursor line
+---@param fallback string
+---@return string indent
+function M._find_prev_indent(bufnr, line, fallback)
+	fallback = fallback or ""
+	if line <= 1 then
+		return fallback
+	end
+	for i = line - 2, 0, -1 do
+		local ln = (vim.api.nvim_buf_get_lines(bufnr, i, i + 1, false) or {})[1] or ""
+		local stripped = ln:match("^%s*(.*)") or ""
+		if stripped ~= "" then
+			return ln:match("^(%s*)") or fallback
+		end
+	end
+	return fallback
+end
+
+---Treesitter: detect if cursor is on a block-defining line and return body indent
+---@param bufnr number
+---@param node table Treesitter node at cursor position
+---@param cursor_line number 1-indexed
+---@param current_indent string
+---@return string|nil indent, or nil to fall through to heuristic
+function M._detect_block_start_indent(bufnr, node, cursor_line, current_indent)
+	local node_start_row = node:start()
+	if cursor_line - 1 ~= node_start_row then
+		return nil
+	end
+	local block_starters = {
+		function_definition = true,
+		function_declaration = true,
+		class_definition = true,
+		class_declaration = true,
+		if_statement = true,
+		for_statement = true,
+		while_statement = true,
+		try_statement = true,
+		with_statement = true,
+		except_clause = true,
+		finally_clause = true,
+		elif_clause = true,
+		match_statement = true,
+		case_clause = true,
+		do_statement = true,
+		switch_statement = true,
+		method_definition = true,
+	}
+	if block_starters[node:type()] then
+		local _, start_col = node:start()
+		local sw = vim.bo[bufnr].shiftwidth or 4
+		return string.rep(" ", start_col + sw)
+	end
+	return nil
+end
+
+---Smart indentation: treesitter-aware with heuristic fallback
+---Handles cursor on block-defining lines (def, class, if, etc.) and empty lines
+---@param bufnr number
+---@param cursor_line number 1-indexed
+---@return string indent
+function M.get_smart_indent(bufnr, cursor_line)
+	local current_line = (vim.api.nvim_buf_get_lines(bufnr, cursor_line - 1, cursor_line, false) or {})[1] or ""
+	local indent = current_line:match("^(%s*)") or ""
+
+	-- 1. Treesitter: detect block-starting lines
+	local has_ts, ts = pcall(require, "vim.treesitter")
+	if has_ts then
+		local ok, node = pcall(ts.get_node, { bufnr = bufnr, pos = { cursor_line - 1, 0 } })
+		if ok and node then
+			local ts_indent = M._detect_block_start_indent(bufnr, node, cursor_line, indent)
+			if ts_indent then
+				return ts_indent
+			end
+		end
+	end
+
+	-- 2. Heuristic fallback
+	local ft = vim.bo[bufnr].filetype
+	local stripped = current_line:match("^%s*(.*)") or ""
+
+	if ft == "python" and stripped ~= "" and stripped:match(":$") and not stripped:match("^#") then
+		local sw = vim.bo[bufnr].shiftwidth or 4
+		return indent .. string.rep(" ", sw)
+	end
+
+	if stripped == "" then
+		return M._find_prev_indent(bufnr, cursor_line, indent)
+	end
+
+	return indent
+end
+
+-- =============================================================================
 -- Question Block Spawning
 -- =============================================================================
 
@@ -38,9 +137,7 @@ function M.spawn_question_block(bufnr, selected_code)
 	-- Generate unique ID
 	local id = parser.generate_id()
 
-	-- Get indentation from current line
-	local current_line = vim.api.nvim_buf_get_lines(bufnr, cursor_line - 1, cursor_line, false)[1] or ""
-	local indent = current_line:match("^(%s*)") or ""
+	local indent = M.get_smart_indent(bufnr, cursor_line)
 
 	local block_lines = {}
 
@@ -274,9 +371,7 @@ function M.spawn_code_block(bufnr, selected_code)
 	-- Generate unique ID
 	local id = parser.generate_id()
 
-	-- Get indentation from current line
-	local current_line = vim.api.nvim_buf_get_lines(bufnr, cursor_line - 1, cursor_line, false)[1] or ""
-	local indent = current_line:match("^(%s*)") or ""
+	local indent = M.get_smart_indent(bufnr, cursor_line)
 
 	local block_lines = {}
 
