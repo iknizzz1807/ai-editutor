@@ -24,6 +24,17 @@ end
 -- Smart Indentation
 -- =============================================================================
 
+---Get effective shiftwidth, handling 0 (= follow tabstop) and nil
+---@param bufnr number
+---@return number
+local function _effective_shiftwidth(bufnr)
+	local sw = vim.bo[bufnr].shiftwidth
+	if sw and sw > 0 then
+		return sw
+	end
+	return vim.bo[bufnr].tabstop or 4
+end
+
 ---Find indentation of the nearest non-empty line above cursor
 ---@param bufnr number
 ---@param line number 1-indexed cursor line
@@ -76,7 +87,7 @@ function M._detect_block_start_indent(bufnr, node, cursor_line, current_indent)
 	}
 	if block_starters[node:type()] then
 		local _, start_col = node:start()
-		local sw = vim.bo[bufnr].shiftwidth or 4
+		local sw = _effective_shiftwidth(bufnr)
 		return string.rep(" ", start_col + sw)
 	end
 	return nil
@@ -108,7 +119,7 @@ function M.get_smart_indent(bufnr, cursor_line)
 	local stripped = current_line:match("^%s*(.*)") or ""
 
 	if ft == "python" and stripped ~= "" and stripped:match(":$") and not stripped:match("^#") then
-		local sw = vim.bo[bufnr].shiftwidth or 4
+		local sw = _effective_shiftwidth(bufnr)
 		return indent .. string.rep(" ", sw)
 	end
 
