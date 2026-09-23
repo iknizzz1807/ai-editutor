@@ -503,7 +503,12 @@ end
 ---@param on_complete function Callback(results)
 local function search_brave(query, on_complete)
   local ws_config = (config.options and config.options.web_search) or {}
-  local api_key = ws_config.brave_api_key or os.getenv("BRAVE_API_KEY") or "BSAfRh0OSD0I4F3GArtd6MWVz8bLYMM"
+  local api_key = ws_config.brave_api_key or os.getenv("BRAVE_API_KEY")
+  if not api_key or api_key == "" then
+    debug_log.log("[web_search] Brave search API key not found. Please configure web_search.brave_api_key or set BRAVE_API_KEY environment variable.")
+    on_complete({})
+    return
+  end
   local max_results = ws_config.max_search_results or 3
 
   local params = "q=" .. vim.uri_encode(query) .. "&count=5&extra_snippets=true"

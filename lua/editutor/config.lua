@@ -49,7 +49,7 @@ M.defaults = {
 
   -- Web Search & Smart Fix
   web_search = {
-    brave_api_key = "BSAfRh0OSD0I4F3GArtd6MWVz8bLYMM", -- Brave Search API key
+    brave_api_key = nil, -- string|nil: Brave Search API key (or set BRAVE_API_KEY environment variable)
     provider = "deepseek", -- "deepseek" | "ollama"
     model = "deepseek-flash", -- "deepseek-flash" | "qwen2.5-coder:3b"
     ollama_url = "http://localhost:11434",
