@@ -745,7 +745,7 @@ local function stream_llm_chat(messages, on_token, on_finish)
 
   if provider == "deepseek" and deepseek_key and #deepseek_key > 0 then
     local model = ws_config.model or "deepseek-flash"
-    local max_tokens = ws_config.max_output_tokens or 4096
+    local max_tokens = ws_config.max_output_tokens or (config.options and config.options.max_output_tokens) or 8192
     local payload = vim.json.encode({
       model = model,
       messages = messages,
