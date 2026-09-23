@@ -104,7 +104,7 @@ M.PROVIDERS = {
 					{ role = "system", content = data.system },
 					{ role = "user", content = data.message },
 				},
-				max_tokens = data.max_tokens or 16384,
+				max_tokens = data.max_tokens or 8192,
 				thinking = { type = "disabled" },
 			}
 		end,

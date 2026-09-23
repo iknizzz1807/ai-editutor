@@ -36,13 +36,13 @@ local M = {}
 
 M.defaults = {
   -- LLM Provider
-  provider = "gemini",
-  model = "gemini-3-flash-preview",
+  provider = "deepseek",
+  model = "deepseek-flash",
 
   -- Context extraction
   context = {
-    token_budget = 100000, -- 100k tokens max for total context
-    library_info_budget = 2000, -- 2k tokens max for library API info
+    token_budget = 52000, -- 52k tokens max for total context input (~50k-60k max total ping)
+    library_info_budget = 3000, -- 3k tokens max for library API info
     diagnostics_budget = 2000, -- 2k tokens max for LSP diagnostics
     library_scan_radius = 50, -- Lines before/after question to scan for library usage
   },
