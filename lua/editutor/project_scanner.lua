@@ -1134,8 +1134,15 @@ end
 ---@param root string
 ---@param files ProjectFile[]
 ---@param folders ProjectFolder[]
+---@param opts? table Optional rendering options: symbols_by_file, important_files, max_symbols_per_file, style
 ---@return string
-function M.build_tree_structure(root, files, folders)
+function M.build_tree_structure(root, files, folders, opts)
+  opts = opts or {}
+  local symbols_by_file = opts.symbols_by_file
+  local important_files = opts.important_files or {}
+  local max_symbols_per_file = opts.max_symbols_per_file or 4
+  local style = opts.style or "inline"
+
   local lines = {}
   local root_name = vim.fn.fnamemodify(root, ":t")
   table.insert(lines, root_name .. "/")
@@ -1251,7 +1258,30 @@ function M.build_tree_structure(root, files, folders)
         -- File
         local file = item.data
         local size_info = file.lines and string.format(" (%d lines)", file.lines) or ""
-        table.insert(lines, prefix .. connector .. file.name .. size_info)
+        local symbols = symbols_by_file and (symbols_by_file[file.path] or symbols_by_file[file.name])
+        local is_important = important_files[file.path] or important_files[file.name]
+
+        if symbols and #symbols > 0 then
+          local symbol_labels = {}
+          for s_idx, sym in ipairs(symbols) do
+            if s_idx > max_symbols_per_file then break end
+            local label = type(sym) == "string" and sym or (sym.signature or sym.name)
+            table.insert(symbol_labels, label)
+          end
+          if style == "indent" and #symbol_labels > 1 then
+            table.insert(lines, prefix .. connector .. file.name .. size_info .. ":")
+            local sym_prefix = child_prefix .. "│   "
+            for _, slabel in ipairs(symbol_labels) do
+              table.insert(lines, sym_prefix .. slabel)
+            end
+          else
+            table.insert(lines, prefix .. connector .. file.name .. size_info .. ": " .. table.concat(symbol_labels, ", "))
+          end
+        elseif is_important then
+          table.insert(lines, prefix .. connector .. file.name .. size_info .. " [config]")
+        else
+          table.insert(lines, prefix .. connector .. file.name .. size_info)
+        end
       end
     end
   end

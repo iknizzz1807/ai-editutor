@@ -14,6 +14,7 @@ local knowledge = require("editutor.knowledge")
 local cache = require("editutor.cache")
 local loading = require("editutor.loading")
 local debug_log = require("editutor.debug_log")
+local web_search = require("editutor.web_search")
 
 local REQUEST_TIMEOUT_MS = 60000
 
@@ -219,6 +220,27 @@ function M._create_commands()
     local test_runner = require("editutor.test_runner")
     test_runner.view_results()
   end, { desc = "View test results" })
+
+  -- Web Search & Smart Fix commands
+  vim.api.nvim_create_user_command("EditutorSearch", function(opts)
+    if opts.args and #vim.trim(opts.args) > 0 then
+      web_search.search(opts.args)
+    else
+      web_search.search_blank()
+    end
+  end, { nargs = "*", desc = "Search Web with AI (Right Side Panel)" })
+
+  vim.api.nvim_create_user_command("EditutorSearchInstant", function()
+    web_search.search_instant()
+  end, { desc = "Instant Search word under cursor or selection" })
+
+  vim.api.nvim_create_user_command("EditutorSmartFix", function(opts)
+    web_search.smart_fix(opts.args)
+  end, { nargs = "*", desc = "Auto-diagnose & Fix LSP error with Web Search" })
+
+  vim.api.nvim_create_user_command("EditutorSearchError", function(opts)
+    web_search.smart_fix(opts.args)
+  end, { nargs = "*", desc = "Alias for EditutorSmartFix" })
 end
 
 -- =============================================================================
@@ -278,7 +300,41 @@ function M._setup_keymaps()
       desc = "ai-editutor: Execute pending code requests",
     })
   end
+
+  -- Web Search & Smart Fix keymaps
+  if keymaps.search_instant then
+    vim.keymap.set({ "n", "v" }, keymaps.search_instant, web_search.search_instant, {
+      desc = "ai-editutor: Instant search & explain",
+    })
+  end
+
+  if keymaps.search_prompt then
+    vim.keymap.set({ "n", "v" }, keymaps.search_prompt, web_search.search_prompt, {
+      desc = "ai-editutor: Search web with prompt",
+    })
+  end
+
+  if keymaps.search_blank then
+    vim.keymap.set("n", keymaps.search_blank, web_search.search_blank, {
+      desc = "ai-editutor: Blank web search query",
+    })
+  end
+
+  if keymaps.smart_fix then
+    vim.keymap.set({ "n", "v" }, keymaps.smart_fix, function()
+      web_search.smart_fix()
+    end, {
+      desc = "ai-editutor: Smart auto-diagnose & fix LSP error",
+    })
+  end
 end
+
+-- Export Web Search & Smart Fix methods
+M.search = web_search.search
+M.search_instant = web_search.search_instant
+M.search_prompt = web_search.search_prompt
+M.search_blank = web_search.search_blank
+M.smart_fix = web_search.smart_fix
 
 -- =============================================================================
 -- Spawn Question Block

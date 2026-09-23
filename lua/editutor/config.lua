@@ -47,12 +47,29 @@ M.defaults = {
     library_scan_radius = 50, -- Lines before/after question to scan for library usage
   },
 
+  -- Web Search & Smart Fix
+  web_search = {
+    brave_api_key = "BSAfRh0OSD0I4F3GArtd6MWVz8bLYMM", -- Brave Search API key
+    ollama_url = "http://localhost:11434",
+    model = "qwen2.5-coder:3b",
+    num_ctx = 32768,
+    knapsack_max_chars = 14000,
+    section1_cap_pct = 0.35,
+    panel_width_pct = 0.40,
+    max_search_results = 3,
+    max_deep_docs = 2,
+  },
+
   -- Keymaps
   keymaps = {
     question = "<leader>mq", -- Spawn a new question block
     ask = "<leader>ma", -- Process all pending questions
     code = "<leader>mc", -- Spawn a new code request block
     execute = "<leader>mx", -- Execute all pending code requests
+    search_instant = "<leader>si", -- Instant search & explain word / visual selection
+    search_prompt = "<leader>ss", -- Search with prompt pre-filled
+    search_blank = "<leader>sw", -- Blank web search query
+    smart_fix = "<leader>se", -- Smart auto-diagnose & fix LSP error
   },
 
   -- Custom provider overrides (built-in providers are in provider.lua)

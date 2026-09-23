@@ -603,21 +603,9 @@ local function build_context_for_level(current_file, project_root, level, budget
     }
   end
 
-  local tree_content = scan_result.tree_structure
-  local tree_tokens = project_scanner.estimate_tokens(tree_content)
   local bufnr = vim.api.nvim_get_current_buf()
   local mentioned_idents = extract_mentioned_idents(bufnr, question_lines)
-
-  -- Truncate tree if needed
-  if tree_tokens > tree_budget then
-    local tree_lines = vim.split(tree_content, "\n")
-    local max_lines = math.floor(#tree_lines * (tree_budget / tree_tokens))
-    tree_lines = vim.list_slice(tree_lines, 1, max_lines)
-    tree_content = table.concat(tree_lines, "\n") .. "\n... (truncated)"
-    tree_tokens = project_scanner.estimate_tokens(tree_content)
-  end
-
-  local remaining_budget = budget - total_tokens - tree_tokens
+  local remaining_budget = budget - total_tokens - tree_budget
 
   -- 3. Import files
   local import_files = {}
@@ -790,33 +778,37 @@ local function build_context_for_level(current_file, project_root, level, budget
 
   total_tokens = total_tokens + import_tokens
 
-  -- 4. Compact repo map: broad outline after concrete related code.
-  local repo_map_tokens = 0
-  local repo_map_metadata = { tokens = 0, files = 0, symbols = 0 }
-  local repo_map_budget = math.min(
+  -- 4. Unified Context Map: combined project tree & symbol signatures
+  local map_tokens = 0
+  local map_metadata = { tokens = 0, files = 0, symbols = 0 }
+  local map_budget = tree_budget + math.min(
     level.repo_map_tokens or 0,
-    math.max(0, remaining_budget - import_tokens) * 0.35
+    math.max(0, remaining_budget - import_tokens) * 0.4
   )
 
-  if repo_map_budget > 300 then
-    local map_text, map_meta = repo_map.render(current_file, project_root, scan_result, {
-      max_tokens = repo_map_budget,
+  local map_text = ""
+  if (level.repo_map_tokens or 0) > 0 then
+    map_text, map_metadata = repo_map.render_unified_map(current_file, project_root, scan_result, {
+      max_tokens = map_budget,
       mentioned_idents = mentioned_idents,
       max_files = math.max(level.max_import_files or 20, 20),
       ranked_files = ranked_files_for_map,
       rank_meta = rank_meta_for_map,
+      style = "inline",
     })
-    if map_text and map_text ~= "" then
-      table.insert(parts, map_text)
-      table.insert(parts, "")
-      repo_map_metadata = map_meta or repo_map_metadata
-      repo_map_tokens = repo_map_metadata.tokens or project_scanner.estimate_tokens(map_text)
-      total_tokens = total_tokens + repo_map_tokens
-    end
+  else
+    map_text = scan_result.tree_structure or ""
+    map_metadata = {
+      tokens = project_scanner.estimate_tokens(map_text),
+      files = #(scan_result.files or {}),
+      symbols = 0,
+    }
   end
 
+  map_tokens = map_metadata.tokens or project_scanner.estimate_tokens(map_text)
+
   -- 5. LSP definitions (if enabled and budget allows)
-  local lsp_budget = remaining_budget - import_tokens - repo_map_tokens
+  local lsp_budget = remaining_budget - import_tokens - map_tokens
   local lsp_count = 0
 
   if level.lsp and lsp_budget > 500 then
@@ -874,13 +866,13 @@ local function build_context_for_level(current_file, project_root, level, budget
     total_tokens = total_tokens + lsp_tokens
   end
 
-  -- Add project tree at the end
-  table.insert(parts, "=== PROJECT STRUCTURE ===")
+  -- Add Unified Context Map at the end (combines ASCII tree + symbol signatures)
+  table.insert(parts, "=== UNIFIED CONTEXT MAP (Project Structure & Key Symbols) ===")
   table.insert(parts, "```")
-  table.insert(parts, tree_content)
+  table.insert(parts, map_text)
   table.insert(parts, "```")
 
-  total_tokens = total_tokens + tree_tokens
+  total_tokens = total_tokens + map_tokens
 
   return table.concat(parts, "\n"), total_tokens, {
     level = level.name,
@@ -888,9 +880,10 @@ local function build_context_for_level(current_file, project_root, level, budget
     files = files_metadata,
     import_count = #import_files,
     lsp_count = lsp_count,
-    tree_tokens = tree_tokens,
+    tree_tokens = map_tokens,
     repo_rank = repo_rank_metadata,
-    repo_map = repo_map_metadata,
+    repo_map = map_metadata,
+    unified_map = map_metadata,
   }
 end
 
@@ -946,8 +939,10 @@ function M.build_context_with_strategy_async(current_file, opts)
         files_included = metadata.files,
         import_count = metadata.import_count,
         lsp_count = metadata.lsp_count,
+        tree_tokens = metadata.tree_tokens,
         repo_rank = metadata.repo_rank,
         repo_map = metadata.repo_map,
+        unified_map = metadata.unified_map,
       }
     end
   end
@@ -966,8 +961,10 @@ function M.build_context_with_strategy_async(current_file, opts)
       within_budget = best.tokens <= budget,
     },
     files_included = best.metadata.files,
+    tree_tokens = best.metadata.tree_tokens,
     repo_rank = best.metadata.repo_rank,
     repo_map = best.metadata.repo_map,
+    unified_map = best.metadata.unified_map,
     warning = best.tokens > budget and "all_levels_exceeded_budget" or nil,
   }
 end

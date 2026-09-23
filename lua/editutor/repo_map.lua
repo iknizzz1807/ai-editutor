@@ -60,6 +60,57 @@ local function symbol_label(symbol)
   return typ .. " " .. symbol.name
 end
 
+---Clean a raw source code line to extract a concise signature
+---@param raw_line string
+---@param symbol table {name: string, type: string}
+---@return string signature
+local function clean_signature_line(raw_line, symbol)
+  if not raw_line or raw_line == "" then
+    return symbol_label(symbol)
+  end
+  local clean = vim.trim(raw_line)
+  -- Remove comments
+  clean = clean:gsub("%s*%-%-.*$", ""):gsub("%s*//.*$", ""):gsub("%s*#.*$", "")
+  -- Remove trailing block openers, colons, semicolons, dos, thens
+  clean = clean:gsub("%s*[{};:]%s*$", ""):gsub("%s+do%s*$", ""):gsub("%s+then%s*$", "")
+  -- Remove module/self qualifiers before symbol name: M.foo -> foo, self.foo -> foo
+  clean = clean:gsub("[%w_]+%.(" .. vim.pesc(symbol.name) .. ")", "%1")
+  -- Remove visibility / storage modifiers
+  clean = clean:gsub("^export%s+", ""):gsub("^pub%s+", ""):gsub("^async%s+", ""):gsub("^static%s+", ""):gsub("^local%s+", "")
+  -- Remove function keyword for cleaner compact display
+  clean = clean:gsub("^function%s+", ""):gsub("^def%s+", ""):gsub("^fn%s+", ""):gsub("^func%s+", "")
+  clean = vim.trim(clean)
+
+  -- Truncate overly long parameter lists
+  if #clean > 60 then
+    clean = clean:sub(1, 57) .. "..."
+  end
+
+  if #clean == 0 or not clean:find(symbol.name, 1, true) then
+    return symbol_label(symbol)
+  end
+  return clean
+end
+
+---Extract signature for a symbol from file on disk
+---@param filepath string Absolute file path
+---@param line number 0-indexed line number
+---@param symbol table
+---@param file_cache table<string, string[]>
+---@return string
+local function get_symbol_signature(filepath, line, symbol, file_cache)
+  if not file_cache[filepath] then
+    if vim.fn.filereadable(filepath) == 1 then
+      file_cache[filepath] = vim.fn.readfile(filepath)
+    else
+      file_cache[filepath] = {}
+    end
+  end
+  local lines = file_cache[filepath]
+  local raw_line = lines and lines[line + 1] or ""
+  return clean_signature_line(raw_line, symbol)
+end
+
 local function important_score(file)
   local name = file.name or vim.fn.fnamemodify(file.path or "", ":t")
   local score = IMPORTANT_PRIORITY[name] or 50
@@ -213,6 +264,95 @@ function M.render(current_file, project_root, scan_result, opts)
     symbols = symbols_rendered,
     important_files = important_files_rendered,
     ranked_symbols = symbol_count,
+    rank = rank_meta and {
+      tags = rank_meta.tags,
+      files_scanned = rank_meta.files_scanned,
+      nodes = rank_meta.nodes,
+      ranked = rank_meta.ranked,
+    } or nil,
+  }
+end
+
+---Render an Aider-style Unified Context Map combining the project tree with inline/indented symbol signatures
+---@param current_file string
+---@param project_root string
+---@param scan_result table
+---@param opts? table {max_tokens?: number, max_symbols_per_file?: number, style?: "inline"|"indent", mentioned_idents?: table}
+---@return string tree_text
+---@return table metadata
+function M.render_unified_map(current_file, project_root, scan_result, opts)
+  opts = opts or {}
+  project_root = project_root or project_scanner.get_project_root(current_file)
+  scan_result = scan_result or project_scanner.scan_project({ root = project_root })
+
+  local max_tokens = opts.max_tokens or 1500
+  if max_tokens <= 0 then
+    return "", { tokens = 0, files = 0, symbols = 0, important_files = 0 }
+  end
+
+  local current_rel = rel_path(current_file, project_root)
+  local ranked_files = opts.ranked_files
+  local rank_meta = opts.rank_meta
+  if not ranked_files or not rank_meta then
+    ranked_files, rank_meta = repo_rank.rank_project(current_file, project_root, scan_result, {
+      mentioned_idents = opts.mentioned_idents,
+      mentioned_files = opts.mentioned_files,
+      top_files = opts.max_files or M.config.max_files,
+      top_symbols = opts.max_symbols or M.config.max_symbols,
+    })
+  end
+
+  local file_cache = {}
+  local symbols_by_file = {}
+  local symbol_count = 0
+  local max_per_file = opts.max_symbols_per_file or 4
+
+  for _, symbol in ipairs((rank_meta and rank_meta.ranked_symbols) or {}) do
+    if symbol.rel_path ~= current_rel then
+      local bucket = symbols_by_file[symbol.rel_path]
+      if not bucket then
+        bucket = {}
+        symbols_by_file[symbol.rel_path] = bucket
+      end
+      if #bucket < max_per_file then
+        local abs_filepath = project_root .. "/" .. symbol.rel_path
+        local signature = get_symbol_signature(abs_filepath, symbol.line, symbol, file_cache)
+        table.insert(bucket, signature)
+        symbol_count = symbol_count + 1
+      end
+    end
+  end
+
+  local important_files_list = collect_important_files(scan_result, current_rel, opts.max_important_files or M.config.max_important_files)
+  local important_files_map = {}
+  for _, f in ipairs(important_files_list) do
+    important_files_map[f.path] = true
+  end
+
+  local tree_text = project_scanner.build_tree_structure(project_root, scan_result.files, scan_result.folders, {
+    symbols_by_file = symbols_by_file,
+    important_files = important_files_map,
+    max_symbols_per_file = max_per_file,
+    style = opts.style or "inline",
+  })
+
+  -- Truncate tree if it exceeds max_tokens budget
+  local est_tokens = project_scanner.estimate_tokens(tree_text)
+  if est_tokens > max_tokens then
+    local tree_lines = vim.split(tree_text, "\n")
+    local max_lines = math.floor(#tree_lines * (max_tokens / est_tokens))
+    if max_lines < #tree_lines then
+      tree_lines = vim.list_slice(tree_lines, 1, math.max(5, max_lines))
+      tree_text = table.concat(tree_lines, "\n") .. "\n... (remaining tree truncated to fit budget)"
+      est_tokens = project_scanner.estimate_tokens(tree_text)
+    end
+  end
+
+  return tree_text, {
+    tokens = est_tokens,
+    symbols = symbol_count,
+    files_with_symbols = vim.tbl_count(symbols_by_file),
+    important_files = #important_files_list,
     rank = rank_meta and {
       tags = rank_meta.tags,
       files_scanned = rank_meta.files_scanned,
