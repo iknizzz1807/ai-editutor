@@ -729,76 +729,149 @@ end
 -- Ollama Streaming & Chat Execution
 -- =============================================================================
 
----Stream multi-turn chat messages to Ollama
+---Stream multi-turn chat messages to LLM (DeepSeek or Ollama)
 ---@param messages table[]
 ---@param on_token function Callback(token)
 ---@param on_finish function Callback(completed_process)
-local function stream_ollama_chat(messages, on_token, on_finish)
+local function stream_llm_chat(messages, on_token, on_finish)
   local ws_config = (config.options and config.options.web_search) or {}
-  local ollama_url = ws_config.ollama_url or "http://localhost:11434"
-  local model = ws_config.model or "qwen2.5-coder:3b"
-  local num_ctx = ws_config.num_ctx or 32768
+  local deepseek_key = os.getenv("DEEPSEEK_API_KEY")
+  local provider = ws_config.provider or (deepseek_key and "deepseek" or "ollama")
 
-  local payload = vim.json.encode({
-    model = model,
-    messages = messages,
-    stream = true,
-    options = {
-      num_ctx = num_ctx,
+  if provider == "deepseek" and deepseek_key and #deepseek_key > 0 then
+    local model = ws_config.model or "deepseek-flash"
+    local max_tokens = ws_config.max_output_tokens or 4096
+    local payload = vim.json.encode({
+      model = model,
+      messages = messages,
+      stream = true,
+      max_tokens = max_tokens,
       temperature = 0.2,
-      num_predict = 1800,
-      repeat_penalty = 1.15,
-      frequency_penalty = 0.1,
-      presence_penalty = 0.1,
-    },
-  })
+      thinking = { type = "disabled" },
+    })
 
-  local stdout_buffer = ""
-  state.is_streaming = true
+    local stdout_buffer = ""
+    state.is_streaming = true
 
-  local job = vim.system({
-    "curl",
-    "-s",
-    "-N",
-    ollama_url .. "/api/chat",
-    "-H",
-    "Content-Type: application/json",
-    "-d",
-    payload,
-  }, {
-    stdout = function(_, data)
-      if data then
-        stdout_buffer = stdout_buffer .. data
-        while true do
-          local line, rest = stdout_buffer:match("^(.-)\n(.*)$")
-          if not line then
-            break
-          end
-          stdout_buffer = rest
-          if line ~= "" then
-            local ok, json = pcall(vim.json.decode, line)
-            if ok and json and json.message and json.message.content then
-              local token = json.message.content
-              vim.schedule(function()
-                on_token(token)
-              end)
+    local job = vim.system({
+      "curl",
+      "-s",
+      "-N",
+      "https://api.deepseek.com/chat/completions",
+      "-H",
+      "Content-Type: application/json",
+      "-H",
+      "Authorization: Bearer " .. deepseek_key,
+      "-d",
+      payload,
+    }, {
+      stdout = function(_, data)
+        if data then
+          stdout_buffer = stdout_buffer .. data
+          while true do
+            local line, rest = stdout_buffer:match("^(.-)\n(.*)$")
+            if not line then
+              break
+            end
+            stdout_buffer = rest
+            line = line:gsub("^%s+", ""):gsub("%s+$", "")
+            if line:sub(1, 6) == "data: " then
+              local json_str = line:sub(7)
+              if json_str ~= "[DONE]" then
+                local ok, json = pcall(vim.json.decode, json_str)
+                if ok and json and json.choices and json.choices[1] and json.choices[1].delta then
+                  local token = json.choices[1].delta.content
+                  if token and token ~= "" then
+                    vim.schedule(function()
+                      on_token(token)
+                    end)
+                  end
+                end
+              end
             end
           end
         end
-      end
-    end,
-  }, function(completed)
-    vim.schedule(function()
-      state.is_streaming = false
-      state.current_job = nil
-      if on_finish then
-        on_finish(completed)
-      end
+      end,
+    }, function(completed)
+      vim.schedule(function()
+        state.is_streaming = false
+        state.current_job = nil
+        if on_finish then
+          on_finish(completed)
+        end
+      end)
     end)
-  end)
 
-  state.current_job = job
+    state.current_job = job
+  else
+    local ollama_url = ws_config.ollama_url or "http://localhost:11434"
+    local model = ws_config.model or "qwen2.5-coder:3b"
+    local num_ctx = ws_config.num_ctx or 32768
+
+    local payload = vim.json.encode({
+      model = model,
+      messages = messages,
+      stream = true,
+      options = {
+        num_ctx = num_ctx,
+        temperature = 0.2,
+        num_predict = 1800,
+        repeat_penalty = 1.15,
+        frequency_penalty = 0.1,
+        presence_penalty = 0.1,
+      },
+    })
+
+    local stdout_buffer = ""
+    state.is_streaming = true
+
+    local job = vim.system({
+      "curl",
+      "-s",
+      "-N",
+      ollama_url .. "/api/chat",
+      "-H",
+      "Content-Type: application/json",
+      "-d",
+      payload,
+    }, {
+      stdout = function(_, data)
+        if data then
+          stdout_buffer = stdout_buffer .. data
+          while true do
+            local line, rest = stdout_buffer:match("^(.-)\n(.*)$")
+            if not line then
+              break
+            end
+            stdout_buffer = rest
+            if line ~= "" then
+              local ok, json = pcall(vim.json.decode, line)
+              if ok and json and json.message and json.message.content then
+                local token = json.message.content
+                vim.schedule(function()
+                  on_token(token)
+                end)
+              end
+            end
+          end
+        end
+      end,
+    }, function(completed)
+      vim.schedule(function()
+        state.is_streaming = false
+        state.current_job = nil
+        if on_finish then
+          on_finish(completed)
+        end
+      end)
+    end)
+
+    state.current_job = job
+  end
 end
+
+-- Backward compatibility alias
+local stream_ollama_chat = stream_llm_chat
 
 -- =============================================================================
 -- Smart Diagnostics & Context Extraction (LSP + Annotated Code)

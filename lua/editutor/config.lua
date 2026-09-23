@@ -50,14 +50,15 @@ M.defaults = {
   -- Web Search & Smart Fix
   web_search = {
     brave_api_key = "BSAfRh0OSD0I4F3GArtd6MWVz8bLYMM", -- Brave Search API key
+    provider = "deepseek", -- "deepseek" | "ollama"
+    model = "deepseek-flash", -- "deepseek-flash" | "qwen2.5-coder:3b"
     ollama_url = "http://localhost:11434",
-    model = "qwen2.5-coder:3b",
     num_ctx = 32768,
-    knapsack_max_chars = 14000,
+    knapsack_max_chars = 30000, -- Sweet spot: 30k chars (~7.5k tokens)
     section1_cap_pct = 0.35,
     panel_width_pct = 0.40,
-    max_search_results = 3,
-    max_deep_docs = 2,
+    max_search_results = 5, -- Sweet spot: 5 search results
+    max_deep_docs = 3, -- Sweet spot: 3 deep docs
   },
 
   -- Keymaps
