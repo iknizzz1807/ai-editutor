@@ -19,10 +19,11 @@ local M = {}
 ---@field execute string Execute all pending code requests
 
 ---@class EditutorContextConfig
----@field token_budget number Max tokens for context (default 100000)
----@field library_info_budget number Max tokens for library API info (default 2000)
----@field diagnostics_budget number Max tokens for LSP diagnostics (default 2000)
----@field library_scan_radius number Lines before/after question to scan (default 50)
+---@field token_budget number Max tokens for context (default 52000)
+---@field library_info_budget number Max tokens for library API info (default 3500)
+---@field diagnostics_budget number Max tokens for LSP diagnostics (default 2500)
+---@field references_budget number Max tokens for LSP references (default 4000)
+---@field library_scan_radius number Lines before/after question to scan (default 60)
 
 ---@class EditutorProvider
 ---@field name string Provider name
@@ -38,13 +39,15 @@ M.defaults = {
   -- LLM Provider
   provider = "deepseek",
   model = "deepseek-flash",
+  max_output_tokens = 8192, -- DeepSeek-Flash 8k output tokens (52k in + 8k out = 60k max ping)
 
   -- Context extraction
   context = {
     token_budget = 52000, -- 52k tokens max for total context input (~50k-60k max total ping)
-    library_info_budget = 3000, -- 3k tokens max for library API info
-    diagnostics_budget = 2000, -- 2k tokens max for LSP diagnostics
-    library_scan_radius = 50, -- Lines before/after question to scan for library usage
+    library_info_budget = 3500, -- 3.5k tokens max for library API info / hover docs
+    diagnostics_budget = 2500, -- 2.5k tokens max for LSP diagnostics
+    references_budget = 4000, -- 4k tokens max for LSP references / call sites
+    library_scan_radius = 60, -- Lines before/after question to scan for library usage
   },
 
   -- Web Search & Smart Fix
@@ -54,11 +57,14 @@ M.defaults = {
     model = "deepseek-flash", -- "deepseek-flash" | "qwen2.5-coder:3b"
     ollama_url = "http://localhost:11434",
     num_ctx = 32768,
-    knapsack_max_chars = 30000, -- Sweet spot: 30k chars (~7.5k tokens)
+    knapsack_max_chars = 36000, -- Sweet spot: 36k chars (~9k tokens)
     section1_cap_pct = 0.35,
     panel_width_pct = 0.40,
     max_search_results = 5, -- Sweet spot: 5 search results
     max_deep_docs = 3, -- Sweet spot: 3 deep docs
+    max_code_lines = 120, -- Up from 35 lines
+    max_code_chars = 16000, -- Up from 4000 chars (~4k tokens)
+    max_diag_count = 8,
   },
 
   -- Keymaps

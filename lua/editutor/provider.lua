@@ -382,9 +382,10 @@ function M.query_async(system_prompt, user_message, callback)
 		url = provider.build_url(provider.url, model, api_key)
 	end
 
+	local output_tokens = config.options.max_output_tokens or (provider and provider.max_tokens) or 8192
 	local request_body = provider.format_request({
 		model = model,
-		max_tokens = 4096,
+		max_tokens = output_tokens,
 		system = system_prompt,
 		message = user_message,
 	})
@@ -425,9 +426,10 @@ function M.query(system_prompt, user_message)
 		url = provider.build_url(provider.url, model, api_key)
 	end
 
+	local output_tokens = config.options.max_output_tokens or (provider and provider.max_tokens) or 8192
 	local request_body = provider.format_request({
 		model = model,
-		max_tokens = 4096,
+		max_tokens = output_tokens,
 		system = system_prompt,
 		message = user_message,
 	})
@@ -570,9 +572,10 @@ function M.query_stream(system_prompt, user_message, on_chunk, on_done, opts)
 		url = prov.url
 	end
 
+	local output_tokens = config.options.max_output_tokens or (prov and prov.max_tokens) or 8192
 	local request_body = prov.format_request({
 		model = model,
-		max_tokens = 4096,
+		max_tokens = output_tokens,
 		system = system_prompt,
 		message = user_message,
 	})

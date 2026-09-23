@@ -10,8 +10,8 @@ local project_scanner = require("editutor.project_scanner")
 -- Configuration
 -- =============================================================================
 
-M.DEFAULT_THRESHOLD = 300 -- Lines threshold for chunking
-M.DEFAULT_MAX_TOKENS = 2000 -- Max tokens per file when chunking
+M.DEFAULT_THRESHOLD = 800 -- Lines threshold for chunking
+M.DEFAULT_MAX_TOKENS = 4000 -- Max tokens per file when chunking
 
 -- =============================================================================
 -- Language-specific Tree-sitter Queries

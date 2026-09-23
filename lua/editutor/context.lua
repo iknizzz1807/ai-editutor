@@ -17,9 +17,10 @@ local async = require("editutor.async")
 -- Token Budget
 -- =============================================================================
 
-local TOKEN_BUDGET = 100000 -- 100k tokens max
-local LIBRARY_INFO_BUDGET = 2000 -- 2k tokens for library API info
-local DIAGNOSTICS_BUDGET = 2000 -- 2k tokens for LSP diagnostics
+local TOKEN_BUDGET = 52000 -- 52k tokens max (~50k-60k max total ping)
+local LIBRARY_INFO_BUDGET = 3500 -- 3.5k tokens for library API info
+local DIAGNOSTICS_BUDGET = 2500 -- 2.5k tokens for LSP diagnostics
+local REFERENCES_BUDGET = 4000 -- 4k tokens for LSP references / call sites
 
 ---Get token budget from config or default
 ---@return number
@@ -39,10 +40,16 @@ function M.get_diagnostics_budget()
   return config.options.context and config.options.context.diagnostics_budget or DIAGNOSTICS_BUDGET
 end
 
+---Get references budget from config or default
+---@return number
+function M.get_references_budget()
+  return config.options.context and config.options.context.references_budget or REFERENCES_BUDGET
+end
+
 ---Get library scan radius from config or default
 ---@return number
 function M.get_library_scan_radius()
-  return config.options.context and config.options.context.library_scan_radius or 50
+  return config.options.context and config.options.context.library_scan_radius or 60
 end
 
 -- =============================================================================
@@ -184,8 +191,10 @@ function M.detect_mode(project_root)
   -- Use source_tokens (source code only) for mode decision,
   -- so non-source files don't push us into adaptive mode when actual code fits.
   local project_tokens = scan_result.source_tokens or scan_result.total_tokens
+  local reserved = M.get_library_info_budget() + M.get_diagnostics_budget() + M.get_references_budget() + 2000
+  local effective_budget = math.max(10000, budget - reserved)
 
-  if project_tokens <= budget then
+  if project_tokens <= effective_budget then
     return {
       mode = "full_project",
       project_tokens = project_tokens,
@@ -326,8 +335,8 @@ end
 ---@return string|nil context, table metadata
 function M.build_adaptive_context_async(current_file, opts)
   opts = opts or {}
-  -- Reserve space for library info and diagnostics (added after strategy returns)
-  local code_budget = M.get_token_budget() - M.get_library_info_budget() - M.get_diagnostics_budget()
+  -- Reserve space for library info, diagnostics, and references (added after strategy returns)
+  local code_budget = M.get_token_budget() - M.get_library_info_budget() - M.get_diagnostics_budget() - M.get_references_budget()
 
   -- Call async version directly (no nested async.run)
   local context, metadata = context_strategy.build_context_with_strategy_async(current_file, {

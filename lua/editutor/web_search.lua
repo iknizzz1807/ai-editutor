@@ -179,7 +179,7 @@ end
 ---@return string
 local function smart_knapsack_pack(markdown_text, query, max_chars)
   local ws_config = (config.options and config.options.web_search) or {}
-  max_chars = max_chars or ws_config.knapsack_max_chars or 14000
+  max_chars = max_chars or ws_config.knapsack_max_chars or 36000
   local section1_cap_pct = ws_config.section1_cap_pct or 0.35
 
   if not markdown_text then
@@ -594,7 +594,7 @@ local function scrape_deep_docs(urls, query, on_complete)
 
   local ws_config = (config.options and config.options.web_search) or {}
   local max_deep = ws_config.max_deep_docs or 2
-  local total_budget = ws_config.knapsack_max_chars or 14000
+  local total_budget = ws_config.knapsack_max_chars or 36000
 
   local valid_urls = {}
   for _, u in ipairs(urls) do
@@ -892,9 +892,10 @@ local stream_ollama_chat = stream_llm_chat
 ---@return number cur_line
 local function get_smart_diagnostics_and_context(buf, opts)
   opts = opts or {}
-  local max_code_lines = opts.max_code_lines or 35
-  local max_code_chars = opts.max_code_chars or 4000
-  local max_diag_count = opts.max_diag_count or 5
+  local ws_config = (config.options and config.options.web_search) or {}
+  local max_code_lines = opts.max_code_lines or ws_config.max_code_lines or 120
+  local max_code_chars = opts.max_code_chars or ws_config.max_code_chars or 16000
+  local max_diag_count = opts.max_diag_count or ws_config.max_diag_count or 8
 
   if not buf or not vim.api.nvim_buf_is_valid(buf) then
     return "", {}, "text", "", 1
@@ -1099,40 +1100,76 @@ local function formulate_search_query(code_context, top_diags, filetype, user_in
   }, "\n")
 
   local ws_config = (config.options and config.options.web_search) or {}
-  local ollama_url = ws_config.ollama_url or "http://localhost:11434"
-  local model = ws_config.model or "qwen2.5-coder:3b"
+  local deepseek_key = os.getenv("DEEPSEEK_API_KEY")
+  local provider = ws_config.provider or (deepseek_key and "deepseek" or "ollama")
+  local model = ws_config.model or (provider == "deepseek" and "deepseek-flash" or "qwen2.5-coder:3b")
 
-  local payload = vim.json.encode({
-    model = model,
-    messages = {
-      { role = "user", content = formulator_prompt },
-    },
-    stream = false,
-    options = {
-      num_ctx = 4096,
+  local cmd
+  if provider == "deepseek" and deepseek_key and #deepseek_key > 0 then
+    local payload = vim.json.encode({
+      model = model,
+      messages = {
+        { role = "user", content = formulator_prompt },
+      },
+      stream = false,
+      max_tokens = 35,
       temperature = 0.1,
-      num_predict = 35,
-    },
-  })
-
-  local cmd = {
-    "curl",
-    "-s",
-    "--max-time",
-    "8",
-    ollama_url .. "/api/chat",
-    "-H",
-    "Content-Type: application/json",
-    "-d",
-    payload,
-  }
+      thinking = { type = "disabled" },
+    })
+    cmd = {
+      "curl",
+      "-s",
+      "--max-time",
+      "8",
+      "https://api.deepseek.com/chat/completions",
+      "-H",
+      "Content-Type: application/json",
+      "-H",
+      "Authorization: Bearer " .. deepseek_key,
+      "-d",
+      payload,
+    }
+  else
+    local ollama_url = ws_config.ollama_url or "http://localhost:11434"
+    local payload = vim.json.encode({
+      model = model,
+      messages = {
+        { role = "user", content = formulator_prompt },
+      },
+      stream = false,
+      options = {
+        num_ctx = 4096,
+        temperature = 0.1,
+        num_predict = 35,
+      },
+    })
+    cmd = {
+      "curl",
+      "-s",
+      "--max-time",
+      "8",
+      ollama_url .. "/api/chat",
+      "-H",
+      "Content-Type: application/json",
+      "-d",
+      payload,
+    }
+  end
 
   vim.system(cmd, { text = true }, function(res)
     local generated_query = nil
     if res.code == 0 and res.stdout and #res.stdout > 0 then
       local ok, data = pcall(vim.json.decode, res.stdout)
-      if ok and data and data.message and data.message.content then
-        local raw = vim.trim(data.message.content)
+      local content = nil
+      if ok and data then
+        if data.choices and data.choices[1] and data.choices[1].message then
+          content = data.choices[1].message.content
+        elseif data.message and data.message.content then
+          content = data.message.content
+        end
+      end
+      if content then
+        local raw = vim.trim(content)
         raw = raw:gsub("`", ""):gsub('^["\']', ""):gsub('["\']$', ""):gsub("^[Qq]uery:%s*", "")
         raw = raw:gsub("\n.*$", "")
         raw = vim.trim(raw)

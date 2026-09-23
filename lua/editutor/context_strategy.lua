@@ -19,7 +19,7 @@ local repo_map = require("editutor.repo_map")
 -- Configuration
 -- =============================================================================
 
-M.DEFAULT_BUDGET = 100000
+M.DEFAULT_BUDGET = 52000
 
 -- Backtracking levels - from maximum context to minimal
 -- Each level reduces context until it fits budget
@@ -33,7 +33,8 @@ M.LEVELS = {
     max_import_files = 50,
     max_lsp_files = 30,
     chunking_threshold = 9999, -- Never chunk (full files)
-    repo_map_tokens = 1200,
+    repo_map_tokens = 4000,
+    max_file_tokens = 6000,
   },
   {
     name = "semantic_all",
@@ -43,8 +44,9 @@ M.LEVELS = {
     chunking = "semantic",
     max_import_files = 50,
     max_lsp_files = 30,
-    chunking_threshold = 300,
-    repo_map_tokens = 1800,
+    chunking_threshold = 800,
+    repo_map_tokens = 4000,
+    max_file_tokens = 4000,
   },
   {
     name = "depth1_with_lsp",
@@ -54,8 +56,9 @@ M.LEVELS = {
     chunking = "semantic",
     max_import_files = 30,
     max_lsp_files = 20,
-    chunking_threshold = 200,
-    repo_map_tokens = 2200,
+    chunking_threshold = 500,
+    repo_map_tokens = 3500,
+    max_file_tokens = 4000,
   },
   {
     name = "depth1_no_lsp",
@@ -285,7 +288,7 @@ local function get_file_content_for_level(filepath, level)
   return semantic_chunking.get_file_content(filepath, {
     threshold = threshold,
     mode = chunking_mode,
-    max_tokens = 2000,
+    max_tokens = level.max_file_tokens or 4000,
   })
 end
 
@@ -469,7 +472,7 @@ local function build_context_for_level(current_file, project_root, level, budget
   local display_current = get_display_path(current_file, project_root)
 
   -- Reserve tree budget upfront (used for truncation check)
-  local tree_budget = math.min(budget * 0.05, 1000)
+  local tree_budget = math.min(math.floor(budget * 0.08), 4000)
   local effective_budget = budget - tree_budget
 
   -- 1. Current file (always full)

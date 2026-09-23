@@ -31,7 +31,7 @@ M.SCORES = {
   test_file = -2,
   generated_file = -3,
   vendor_file = -5,
-  large_file = -1, -- > 500 lines
+  large_file = -1, -- > 1500 lines (only truly massive files)
 }
 
 -- =============================================================================
@@ -240,7 +240,7 @@ function M.score_file(filepath, current_file, relationship)
   if line_count > 0 and line_count < 200 then
     score = score + M.SCORES.small_file
     breakdown.small_file = M.SCORES.small_file
-  elseif line_count > 500 then
+  elseif line_count > 1500 then
     score = score + M.SCORES.large_file
     breakdown.large_file = M.SCORES.large_file
   end

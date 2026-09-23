@@ -8,12 +8,12 @@ local project_scanner = require("editutor.project_scanner")
 local lsp_context = require("editutor.lsp_context")
 
 M.config = {
-  lookahead_lines = 25,
-  max_symbols = 2,
+  lookahead_lines = 40,
+  max_symbols = 4,
   max_refs_per_symbol = 8,
-  max_total_refs = 12,
-  snippet_radius = 4,
-  max_tokens = 3000,
+  max_total_refs = 16,
+  snippet_radius = 8,
+  max_tokens = 4000,
   timeout_ms = 5000,
 }
 

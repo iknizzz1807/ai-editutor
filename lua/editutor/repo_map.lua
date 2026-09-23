@@ -7,11 +7,11 @@ local project_scanner = require("editutor.project_scanner")
 local repo_rank = require("editutor.repo_rank")
 
 M.config = {
-  max_tokens = 2000,
-  max_files = 30,
-  max_symbols = 120,
-  max_symbols_per_file = 8,
-  max_important_files = 8,
+  max_tokens = 4000,
+  max_files = 80,
+  max_symbols = 300,
+  max_symbols_per_file = 12,
+  max_important_files = 12,
 }
 
 local IMPORTANT_PRIORITY = {
@@ -285,7 +285,7 @@ function M.render_unified_map(current_file, project_root, scan_result, opts)
   project_root = project_root or project_scanner.get_project_root(current_file)
   scan_result = scan_result or project_scanner.scan_project({ root = project_root })
 
-  local max_tokens = opts.max_tokens or 1500
+  local max_tokens = opts.max_tokens or M.config.max_tokens
   if max_tokens <= 0 then
     return "", { tokens = 0, files = 0, symbols = 0, important_files = 0 }
   end
@@ -305,7 +305,7 @@ function M.render_unified_map(current_file, project_root, scan_result, opts)
   local file_cache = {}
   local symbols_by_file = {}
   local symbol_count = 0
-  local max_per_file = opts.max_symbols_per_file or 4
+  local max_per_file = opts.max_symbols_per_file or M.config.max_symbols_per_file
 
   for _, symbol in ipairs((rank_meta and rank_meta.ranked_symbols) or {}) do
     if symbol.rel_path ~= current_rel then
