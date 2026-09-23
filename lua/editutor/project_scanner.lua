@@ -37,6 +37,77 @@ M.EXCLUDE_FOLDERS = {
   "test-results", "playwright-report",
 }
 
+-- Folders typically containing generated data, benchmarks, artifacts, or datasets
+-- Data/config files (json, yaml, csv, etc.) in these folders are treated as data, not source
+M.DATA_FOLDERS = {
+  "results", "result",
+  "reports", "report",
+  "artifacts", "artifact",
+  "checkpoints", "checkpoint",
+  "runs", "run",
+  "data", "dataset", "datasets",
+  "outputs",
+  "benchmarks", "benchmark",
+  "metrics",
+  "fixtures_data", "testdata",
+}
+
+---Check if folder name matches known data folder
+---@param folder_name string
+---@return boolean
+local function is_data_folder_name(folder_name)
+  local lower = folder_name:lower()
+  for _, df in ipairs(M.DATA_FOLDERS) do
+    if lower == df then
+      return true
+    end
+  end
+  return false
+end
+
+---Check if path is inside a core source directory (src/, lib/, pkg/, app/, etc.)
+---@param path string
+---@return boolean
+local function is_under_core_source_dir(path)
+  if not path or path == "" then return false end
+  local normalized = path:gsub("\\", "/")
+  local core_patterns = {
+    "^src/", "^source/", "^lib/", "^app/", "^core/", "^pkg/", "^internal/", "^lua/",
+    "/src/", "/source/", "/lib/", "/app/", "/core/", "/pkg/", "/internal/", "/lua/",
+  }
+  for _, pat in ipairs(core_patterns) do
+    if normalized:match(pat) then
+      return true
+    end
+  end
+  return false
+end
+
+---Check if path is inside a dedicated data folder (outside core source tree)
+---@param path string Relative or absolute path
+---@return boolean
+local function is_in_data_folder(path)
+  if not path or path == "" then return false end
+  -- Any folder within src/, lib/, etc. is source code, never a data dump
+  if is_under_core_source_dir(path) then
+    return false
+  end
+
+  local normalized = path:gsub("\\", "/")
+  local parts = vim.split(normalized, "/")
+  -- Check directory components (excluding filename)
+  for i = 1, #parts - 1 do
+    if is_data_folder_name(parts[i]) then
+      return true
+    end
+  end
+  -- Also check if the path itself is a top-level directory
+  if #parts == 1 and is_data_folder_name(parts[1]) then
+    return true
+  end
+  return false
+end
+
 -- Source code file extensions
 M.SOURCE_EXTENSIONS = {
   -- Web
@@ -521,41 +592,58 @@ end
 ---@param filename string Just the filename
 ---@return string "source"|"config"|"data"|"unknown"
 local function classify_file(filepath, filename)
-  -- Check for excluded files first (not useful for code understanding)
-  if is_excluded_file(filename) then
-    return "data"  -- Treat as data so it won't be included
+  -- Get extension
+  local ext = filename:match("%.([^.]+)$")
+  local ext_lower = ext and ext:lower() or ""
+
+  -- 1. Source code extensions ALWAYS take highest priority (never dropped by doc regexes)
+  if is_source_extension(ext_lower) then
+    -- Check for minified files or lockfiles
+    if filename:match("%.min%.[a-z]+$") or filename:match("%.bundle%.js$") or filename:match("%.chunk%.js$") or is_lock_file(filename) then
+      return "data"
+    end
+    return "source"
   end
 
-  -- Check config files (exact match)
+  -- 2. Config files (exact match)
   if is_config_file(filename) then
     return "config"
   end
 
-  -- Check for lock files (these are data, not useful for context)
+  -- 3. Check for lock files (these are data, not useful for context)
   if is_lock_file(filename) then
     return "data"
   end
 
-  -- Get extension
-  local ext = filename:match("%.([^.]+)$")
-
-  -- Check for minified files
+  -- 4. Check for minified files
   if filename:match("%.min%.js$") or filename:match("%.min%.css$")
     or filename:match("%.bundle%.js$") or filename:match("%.chunk%.js$") then
     return "data"
   end
 
-  -- Check data extensions
-  if is_data_extension(ext) then
+  -- 5. Excluded doc/changelog files (only applies to non-code files)
+  if is_excluded_file(filename) then
     return "data"
   end
 
-  -- Check source extensions
-  if is_source_extension(ext) then
-    return "source"
+  -- 6. Check data extensions
+  if is_data_extension(ext_lower) then
+    return "data"
   end
 
-  -- Files starting with . that aren't config are usually hidden/system
+  -- 7. In dedicated data folders (e.g. data/, results/), data/config extensions are data, not source
+  if is_in_data_folder(filepath) and ext_lower ~= "" then
+    local data_exts = {
+      json = true, jsonc = true, yaml = true, yml = true, toml = true,
+      xml = true, sql = true, csv = true, tsv = true, txt = true,
+      log = true, md = true, markdown = true, rst = true,
+    }
+    if data_exts[ext_lower] then
+      return "data"
+    end
+  end
+
+  -- 8. Files starting with . that aren't config are usually hidden/system
   if filename:match("^%.") and not is_config_file(filename) then
     return "unknown"
   end
@@ -589,48 +677,77 @@ end
 ---@field source_tokens number Estimated tokens for source code only
 ---@field tree_structure string Formatted tree structure
 
+local _root_cache = {}
+
 ---Get project root from a specific file path (or current buffer)
+---Uses vim.fs.root for zero-fork in-memory detection with fallback
 ---@param filepath? string File path to find project root for
 ---@return string
 function M.get_project_root(filepath)
-  -- If filepath provided, find git root from that directory
-  if filepath and filepath ~= "" then
-    local dir = vim.fn.fnamemodify(filepath, ":h")
-    if vim.fn.isdirectory(dir) == 1 then
-      local git_root = vim.fn.systemlist("git -C " .. vim.fn.shellescape(dir) .. " rev-parse --show-toplevel 2>/dev/null")[1]
-      if git_root and git_root ~= "" and vim.fn.isdirectory(git_root) == 1 then
-        return git_root
-      end
-      -- Fallback: return the directory containing the file
-      return dir
+  local target_path = filepath
+  if not target_path or target_path == "" then
+    local current_file = vim.api.nvim_buf_get_name(0)
+    if current_file and current_file ~= "" then
+      target_path = current_file
     end
   end
-  
-  -- Fallback to current buffer's file
-  local current_file = vim.api.nvim_buf_get_name(0)
-  if current_file and current_file ~= "" then
-    local dir = vim.fn.fnamemodify(current_file, ":h")
-    if vim.fn.isdirectory(dir) == 1 then
-      local git_root = vim.fn.systemlist("git -C " .. vim.fn.shellescape(dir) .. " rev-parse --show-toplevel 2>/dev/null")[1]
-      if git_root and git_root ~= "" and vim.fn.isdirectory(git_root) == 1 then
-        return git_root
-      end
+
+  local dir
+  if target_path and target_path ~= "" then
+    dir = vim.fn.fnamemodify(target_path, ":p:h")
+  else
+    dir = vim.fn.getcwd()
+  end
+
+  if _root_cache[dir] then
+    return _root_cache[dir]
+  end
+
+  -- Fast path: use vim.fs.root (Neovim >= 0.10, zero subprocess fork)
+  if vim.fs and vim.fs.root then
+    local root = vim.fs.root(dir, {
+      ".git",
+      "pnpm-workspace.yaml",
+      "lerna.json",
+      "turbo.json",
+      "Cargo.toml",
+      "pyproject.toml",
+      "package.json",
+      "go.mod",
+      "Makefile",
+    })
+    if root and root ~= "" then
+      _root_cache[dir] = root
+      return root
     end
   end
-  
-  -- Last fallback: CWD
-  local git_root = vim.fn.systemlist("git rev-parse --show-toplevel 2>/dev/null")[1]
+
+  -- Fallback to git rev-parse if vim.fs.root did not find a marker
+  local git_root = vim.fn.systemlist("git -C " .. vim.fn.shellescape(dir) .. " rev-parse --show-toplevel 2>/dev/null")[1]
   if git_root and git_root ~= "" and vim.fn.isdirectory(git_root) == 1 then
+    _root_cache[dir] = git_root
     return git_root
   end
-  return vim.fn.getcwd()
+
+  _root_cache[dir] = dir
+  return dir
 end
 
----Estimate tokens from text (rough: 1 token ~ 4 chars)
+---Estimate tokens with calibration for code symbols and multi-byte UTF-8
 ---@param text string
 ---@return number
 function M.estimate_tokens(text)
-  return math.ceil(#text / 4)
+  if not text or text == "" then return 0 end
+  local bytes = #text
+  local chars = vim.fn.strchars(text)
+  local multibyte_count = bytes - chars
+
+  -- Code and symbols average ~3.2 chars per token
+  -- Non-ASCII multi-byte characters (Vietnamese, CJK) average ~1.2 tokens per character
+  local base_tokens = chars / 3.2
+  local unicode_penalty = multibyte_count * 0.6
+
+  return math.ceil(base_tokens + unicode_penalty)
 end
 
 ---Get language identifier for syntax highlighting
@@ -694,6 +811,91 @@ function M.get_language_for_ext(ext)
   return lang_map[ext] or ext
 end
 
+---Score core folder priority (src, lib, app, core, etc.)
+---@param name string
+---@return number
+local function core_folder_score(name)
+  local lower = name:lower()
+  if lower == "src" or lower == "source" then return 100 end
+  if lower == "lib" then return 95 end
+  if lower == "app" or lower == "core" or lower == "pkg" or lower == "internal" then return 90 end
+  if lower == "lua" or lower == "packages" or lower == "modules" then return 85 end
+  return 0
+end
+
+---Get display priority for a folder
+---@param folder ProjectFolder
+---@return number
+local function get_folder_priority(folder)
+  local name = folder.name:lower()
+
+  -- Tier 1: Core Source Folders (Top Priority - always rendered first)
+  local core_score = core_folder_score(name)
+  if core_score > 0 then
+    return core_score
+  end
+
+  -- Tier 2: Any folder that contains source code
+  if folder.has_source then
+    -- Secondary source / test / doc folders
+    if name:match("^test") or name:match("^spec") or name == "__tests__" then
+      return 50
+    elseif name == "docs" or name == "doc" or name == "examples" or name == "scripts" or name == "tools" then
+      return 45
+    else
+      return 70 -- Standard source component (e.g. models, utils, api, controllers)
+    end
+  end
+
+  -- Tier 3: Non-source utility folders
+  if name == "docs" or name == "doc" or name == "scripts" or name == "tools" or name == "config" then
+    return 30
+  end
+
+  -- Tier 4: Data / Output / Benchmark folders (Lowest priority)
+  if is_data_folder_name(name) then
+    return 10
+  end
+
+  -- Default for other folders without source
+  return 20
+end
+
+---Get display priority for a file
+---@param file ProjectFile
+---@return number
+local function get_file_priority(file)
+  local name = file.name:lower()
+
+  -- Tier 1: Key Entry Points (always show first)
+  local entry_points = {
+    ["main.py"] = 100, ["app.py"] = 98, ["index.ts"] = 98, ["index.js"] = 98,
+    ["init.lua"] = 98, ["lib.rs"] = 98, ["main.rs"] = 98, ["main.go"] = 98,
+    ["__init__.py"] = 95, ["mod.rs"] = 95,
+  }
+  if entry_points[name] then
+    return entry_points[name]
+  end
+
+  -- Tier 2: Source Code Files
+  if file.type == "source" then
+    return 75
+  end
+
+  -- Tier 3: Project Configuration / Manifest
+  if file.type == "config" then
+    return 60
+  end
+
+  -- Tier 4: Documentation (README, etc.)
+  if name:match("^readme") or name:match("%.md$") then
+    return 40
+  end
+
+  -- Tier 5: Data / Other files
+  return 20
+end
+
 ---Scan project and return structured result
 ---@param opts? table {root?: string, max_file_lines?: number}
 ---@return ProjectScanResult
@@ -709,131 +911,193 @@ function M.scan_project(opts)
   local folders = {}
   local folder_stats = {} -- Track stats per folder
 
+  local MAX_SCAN_DEPTH = 12
+  local MAX_SUBDIRS_PER_FOLDER = 50
+  local MAX_TOTAL_FOLDERS = 800
+  local total_folders_scanned = 0
+  local seen_inodes = {}
+
   ---Scan directory recursively
   ---@param dir string
   ---@param rel_path string
-  local function scan_dir(dir, rel_path)
+  ---@param depth? number
+  local function scan_dir(dir, rel_path, depth)
+    depth = depth or 0
+    if depth > MAX_SCAN_DEPTH or total_folders_scanned >= MAX_TOTAL_FOLDERS then
+      return
+    end
+    total_folders_scanned = total_folders_scanned + 1
+
     local handle = vim.loop.fs_scandir(dir)
     if not handle then return end
 
-    local items = {}
+    local dir_items = {}
+    local file_items = {}
     while true do
       local name, type = vim.loop.fs_scandir_next(handle)
       if not name then break end
-      table.insert(items, { name = name, type = type })
+      -- Resolve directory symlinks
+      if type == "link" then
+        local stat = vim.loop.fs_stat(dir .. "/" .. name)
+        if stat then
+          type = stat.type
+        end
+      end
+      if type == "directory" then
+        table.insert(dir_items, name)
+      else
+        table.insert(file_items, name)
+      end
     end
 
-    -- Sort: folders first, then alphabetically
-    table.sort(items, function(a, b)
-      if a.type == "directory" and b.type ~= "directory" then return true end
-      if a.type ~= "directory" and b.type == "directory" then return false end
-      return a.name < b.name
-    end)
+    -- If inside a dedicated data folder (outside core source tree), stop recursing into deep subdirs
+    local is_data_dir = is_in_data_folder(rel_path)
+    if is_data_dir and depth > 0 then
+      if folder_stats[rel_path] then
+        folder_stats[rel_path].files = #file_items + #dir_items
+        folder_stats[rel_path].has_source = false
+      end
+      return
+    end
+
+    -- Filter out excluded and gitignored directories
+    local valid_dirs = {}
+    for _, name in ipairs(dir_items) do
+      local item_rel_path = rel_path == "" and name or (rel_path .. "/" .. name)
+      if not is_excluded_folder(name) and not matches_gitignore(item_rel_path, gitignore_patterns, true) then
+        table.insert(valid_dirs, name)
+      end
+    end
+
+    -- If folder has too many subdirectories (e.g. 10,000 subfolders), cap and sort by core priority
+    local excess_dirs_count = 0
+    if #valid_dirs > MAX_SUBDIRS_PER_FOLDER then
+      excess_dirs_count = #valid_dirs - MAX_SUBDIRS_PER_FOLDER
+      table.sort(valid_dirs, function(a, b)
+        local pa = core_folder_score(a)
+        local pb = core_folder_score(b)
+        if pa ~= pb then return pa > pb end
+        return a < b
+      end)
+      valid_dirs = vim.list_slice(valid_dirs, 1, MAX_SUBDIRS_PER_FOLDER)
+    else
+      table.sort(valid_dirs, function(a, b)
+        local pa = core_folder_score(a)
+        local pb = core_folder_score(b)
+        if pa ~= pb then return pa > pb end
+        return a < b
+      end)
+    end
 
     local source_count = 0
     local total_count = 0
 
-    for _, item in ipairs(items) do
-      local name = item.name
-      local item_type = item.type
+    for _, name in ipairs(valid_dirs) do
       local full_path = dir .. "/" .. name
       local item_rel_path = rel_path == "" and name or (rel_path .. "/" .. name)
 
-      -- Skip excluded folders
-      if item_type == "directory" and is_excluded_folder(name) then
-        goto continue
+      -- Prevent cyclic symlinks via inode tracking
+      local stat = vim.loop.fs_stat(full_path)
+      if stat and stat.dev and stat.ino then
+        local ino_key = stat.dev .. ":" .. stat.ino
+        if seen_inodes[ino_key] then
+          goto continue_dir
+        end
+        seen_inodes[ino_key] = true
       end
+
+      -- Initialize folder stats
+      folder_stats[item_rel_path] = { files = 0, has_source = false }
+
+      -- Recurse
+      scan_dir(full_path, item_rel_path, depth + 1)
+
+      -- Get folder info
+      local stats = folder_stats[item_rel_path]
+      local truncated = stats.files > 50
+
+      table.insert(folders, {
+        path = item_rel_path,
+        name = name,
+        file_count = stats.files,
+        has_source = stats.has_source,
+        truncated = truncated,
+      })
+
+      -- Propagate stats to parent
+      if rel_path ~= "" and folder_stats[rel_path] then
+        folder_stats[rel_path].files = folder_stats[rel_path].files + stats.files
+        folder_stats[rel_path].has_source = folder_stats[rel_path].has_source or stats.has_source
+      end
+
+      ::continue_dir::
+    end
+
+    if excess_dirs_count > 0 and rel_path ~= "" and folder_stats[rel_path] then
+      folder_stats[rel_path].files = folder_stats[rel_path].files + excess_dirs_count
+    end
+
+    for _, name in ipairs(file_items) do
+      local full_path = dir .. "/" .. name
+      local item_rel_path = rel_path == "" and name or (rel_path .. "/" .. name)
 
       -- Skip gitignored
-      local is_dir = (item_type == "directory")
-      if matches_gitignore(item_rel_path, gitignore_patterns, is_dir) then
-        goto continue
+      if matches_gitignore(item_rel_path, gitignore_patterns, false) then
+        goto continue_file
       end
 
-      if item_type == "directory" then
-        -- Initialize folder stats
-        folder_stats[item_rel_path] = { files = 0, has_source = false }
+      total_count = total_count + 1
 
-        -- Recurse
-        scan_dir(full_path, item_rel_path)
+      -- Classify file
+      local file_type = classify_file(full_path, name)
 
-        -- Get folder info
-        local stats = folder_stats[item_rel_path]
-        local truncated = stats.files > 50
+      -- Update folder stats
+      if rel_path ~= "" and folder_stats[rel_path] then
+        folder_stats[rel_path].files = folder_stats[rel_path].files + 1
+        if file_type == "source" or file_type == "config" then
+          folder_stats[rel_path].has_source = true
+        end
+      end
 
-        table.insert(folders, {
+      -- Only include source and config files
+      if file_type == "source" or file_type == "config" then
+        local stat = vim.loop.fs_stat(full_path)
+        local size = stat and stat.size or 0
+
+        -- Skip very large files (likely test fixtures, generated data, etc.)
+        local max_file_size = 100 * 1024  -- 100KB
+        local in_test_dir = item_rel_path:match("test") or item_rel_path:match("spec")
+                        or item_rel_path:match("fixture") or item_rel_path:match("__snapshots__")
+        if in_test_dir then
+          max_file_size = 50 * 1024  -- 50KB for test files
+        end
+
+        if size > max_file_size then
+          goto continue_file
+        end
+
+        source_count = source_count + 1
+        local lines = nil
+
+        local ok, content = pcall(vim.fn.readfile, full_path)
+        if ok then
+          lines = #content
+        end
+
+        table.insert(files, {
           path = item_rel_path,
           name = name,
-          file_count = stats.files,
-          has_source = stats.has_source,
-          truncated = truncated,
+          type = file_type,
+          size = size,
+          lines = lines,
         })
-
-        -- Propagate stats to parent
-        if rel_path ~= "" and folder_stats[rel_path] then
-          folder_stats[rel_path].files = folder_stats[rel_path].files + stats.files
-          folder_stats[rel_path].has_source = folder_stats[rel_path].has_source or stats.has_source
-        end
-
-      elseif item_type == "file" then
-        total_count = total_count + 1
-
-        -- Classify file
-        local file_type = classify_file(full_path, name)
-
-        -- Update folder stats
-        if rel_path ~= "" and folder_stats[rel_path] then
-          folder_stats[rel_path].files = folder_stats[rel_path].files + 1
-          if file_type == "source" or file_type == "config" then
-            folder_stats[rel_path].has_source = true
-          end
-        end
-
-        -- Only include source and config files
-        if file_type == "source" or file_type == "config" then
-          local stat = vim.loop.fs_stat(full_path)
-          local size = stat and stat.size or 0
-
-          -- Skip very large files (likely test fixtures, generated data, etc.)
-          -- 100KB is generous for most source files
-          local max_file_size = 100 * 1024  -- 100KB
-
-          -- Allow larger files for main source (not in test directories)
-          local in_test_dir = item_rel_path:match("test") or item_rel_path:match("spec")
-                          or item_rel_path:match("fixture") or item_rel_path:match("__snapshots__")
-          if in_test_dir then
-            max_file_size = 50 * 1024  -- 50KB for test files
-          end
-
-          if size > max_file_size then
-            -- Skip large files (likely generated/fixture data)
-            goto continue
-          end
-
-          source_count = source_count + 1
-          local lines = nil
-
-          -- Read line count for source/config
-          local ok, content = pcall(vim.fn.readfile, full_path)
-          if ok then
-            lines = #content
-          end
-
-          table.insert(files, {
-            path = item_rel_path,
-            name = name,
-            type = file_type,
-            size = size,
-            lines = lines,
-          })
-        end
       end
 
-      ::continue::
+      ::continue_file::
     end
   end
 
-  scan_dir(root, "")
+  scan_dir(root, "", 0)
 
   -- Build tree structure
   local tree = M.build_tree_structure(root, files, folders)
@@ -876,13 +1140,18 @@ function M.build_tree_structure(root, files, folders)
   local root_name = vim.fn.fnamemodify(root, ":t")
   table.insert(lines, root_name .. "/")
 
-  -- Build folder lookup
-  local folder_lookup = {}
+  -- Build folder lookup by parent folder in O(N)
+  local folders_by_parent = { [""] = {} }
   for _, folder in ipairs(folders) do
-    folder_lookup[folder.path] = folder
+    local parent = vim.fn.fnamemodify(folder.path, ":h")
+    if parent == "." then parent = "" end
+    if not folders_by_parent[parent] then
+      folders_by_parent[parent] = {}
+    end
+    table.insert(folders_by_parent[parent], folder)
   end
 
-  -- Build file lookup by parent folder
+  -- Build file lookup by parent folder in O(N)
   local files_by_folder = { [""] = {} }
   for _, file in ipairs(files) do
     local parent = vim.fn.fnamemodify(file.path, ":h")
@@ -893,22 +1162,30 @@ function M.build_tree_structure(root, files, folders)
     table.insert(files_by_folder[parent], file)
   end
 
-  -- Get direct children of a folder path
+  -- Get direct children of a folder path in O(1)
   local function get_children(parent_path)
-    local children_folders = {}
+    local children_folders = folders_by_parent[parent_path] or {}
     local children_files = files_by_folder[parent_path] or {}
 
-    for _, folder in ipairs(folders) do
-      local folder_parent = vim.fn.fnamemodify(folder.path, ":h")
-      if folder_parent == "." then folder_parent = "" end
-      if folder_parent == parent_path then
-        table.insert(children_folders, folder)
+    -- Sort folders with priority: Core source (src, lib) first, then source folders, data folders last
+    table.sort(children_folders, function(a, b)
+      local pa = get_folder_priority(a)
+      local pb = get_folder_priority(b)
+      if pa ~= pb then
+        return pa > pb
       end
-    end
+      return a.name < b.name
+    end)
 
-    -- Sort alphabetically
-    table.sort(children_folders, function(a, b) return a.name < b.name end)
-    table.sort(children_files, function(a, b) return a.name < b.name end)
+    -- Sort files with priority: entry points first, source files next, config/data last
+    table.sort(children_files, function(a, b)
+      local pa = get_file_priority(a)
+      local pb = get_file_priority(b)
+      if pa ~= pb then
+        return pa > pb
+      end
+      return a.name < b.name
+    end)
 
     return children_folders, children_files
   end
@@ -917,13 +1194,35 @@ function M.build_tree_structure(root, files, folders)
   local function build_subtree(parent_path, prefix)
     local child_folders, child_files = get_children(parent_path)
 
+    -- Limit folders per directory to prevent 10,000 subfolders explosion
+    local max_folders_per_dir = 20
+    local extra_folders = 0
+    if #child_folders > max_folders_per_dir then
+      extra_folders = #child_folders - max_folders_per_dir
+      child_folders = vim.list_slice(child_folders, 1, max_folders_per_dir)
+    end
+
+    -- Limit files per folder to prevent huge directories from dominating the tree
+    local max_files_per_dir = 25
+    local extra_files = 0
+    if #child_files > max_files_per_dir then
+      extra_files = #child_files - max_files_per_dir
+      child_files = vim.list_slice(child_files, 1, max_files_per_dir)
+    end
+
     -- Combine into one list for proper last-item detection
     local items = {}
     for _, folder in ipairs(child_folders) do
       table.insert(items, { type = "folder", data = folder })
     end
+    if extra_folders > 0 then
+      table.insert(items, { type = "more_folders", count = extra_folders })
+    end
     for _, file in ipairs(child_files) do
       table.insert(items, { type = "file", data = file })
+    end
+    if extra_files > 0 then
+      table.insert(items, { type = "more_files", count = extra_files })
     end
 
     for i, item in ipairs(items) do
@@ -931,7 +1230,11 @@ function M.build_tree_structure(root, files, folders)
       local connector = is_last and "`-- " or "|-- "
       local child_prefix = prefix .. (is_last and "    " or "|   ")
 
-      if item.type == "folder" then
+      if item.type == "more_folders" then
+        table.insert(lines, prefix .. connector .. string.format("... (%d more directories)", item.count))
+      elseif item.type == "more_files" then
+        table.insert(lines, prefix .. connector .. string.format("... (%d more files)", item.count))
+      elseif item.type == "folder" then
         local folder = item.data
         if folder.has_source then
           -- Source folder: show in detail

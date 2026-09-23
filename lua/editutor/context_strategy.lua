@@ -1015,7 +1015,7 @@ function M.estimate_level(current_file, budget)
       import_count = #import_files,
       estimated_total = total_estimate,
       budget = budget,
-      project_files = scan_result.source_files,
+      project_files = scan_result and scan_result.files and #scan_result.files or 0,
     }
 end
 

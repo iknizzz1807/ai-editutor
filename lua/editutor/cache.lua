@@ -36,11 +36,21 @@ M.SOURCE_EXTENSIONS = {
   "ex", "exs",
 }
 
----Check if file is a source file that should invalidate cache
+---Check if file is a source or config file that should invalidate cache
 ---@param filepath string
 ---@return boolean
 local function is_source_file(filepath)
   local ext = filepath:match("%.([^.]+)$")
+  local filename = vim.fn.fnamemodify(filepath, ":t")
+  local ok, ps = pcall(require, "editutor.project_scanner")
+  if ok and ps then
+    if ext and ps.is_source_extension and ps.is_source_extension(ext:lower()) then
+      return true
+    end
+    if ps.is_config_file and ps.is_config_file(filename) then
+      return true
+    end
+  end
   if not ext then return false end
   ext = ext:lower()
   for _, source_ext in ipairs(M.SOURCE_EXTENSIONS) do

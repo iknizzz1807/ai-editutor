@@ -183,27 +183,38 @@ local function looks_like_library_hover(hover_text, lang)
   return false
 end
 
+---Traverse down to the rightmost leaf node (e.g. the method/attribute identifier in a member expression)
+---@param node TSNode
+---@return TSNode
+local function get_rightmost_leaf(node)
+  local current = node
+  while current:named_child_count() > 0 do
+    local child = current:named_child(current:named_child_count() - 1)
+    if not child then break end
+    current = child
+  end
+  return current
+end
+
 ---Extract identifiers from lines using tree-sitter
 ---@param bufnr number
 ---@param start_line number 0-indexed
 ---@param end_line number 0-indexed
 ---@return table[] List of {name, line, col}
 function M.extract_identifiers_in_range(bufnr, start_line, end_line)
-  local identifiers = {}
-  local seen = {}
   local debug_log = require("editutor.debug_log")
 
   -- Get parser
   local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
   if not ok or not parser then
     debug_log.log("[LSP_LIB] Tree-sitter parser not available", "DEBUG")
-    return identifiers
+    return {}
   end
 
   local tree = parser:parse()[1]
   if not tree then
     debug_log.log("[LSP_LIB] Tree-sitter parse failed", "DEBUG")
-    return identifiers
+    return {}
   end
 
   local root = tree:root()
@@ -231,25 +242,52 @@ function M.extract_identifiers_in_range(bufnr, start_line, end_line)
   local ok_query, query = pcall(vim.treesitter.query.parse, lang, query_string)
   if not ok_query or not query then
     debug_log.log(string.format("[LSP_LIB] Query parse failed for %s: %s", lang, query_string), "DEBUG")
-    return identifiers
+    return {}
   end
 
-  for _, node in query:iter_captures(root, bufnr, start_line, end_line + 1) do
-    local row, col = node:start()
+  local by_pos = {}
 
-    -- Only include nodes in our range
-    if row >= start_line and row <= end_line then
+  for _, node in query:iter_captures(root, bufnr, start_line, end_line + 1) do
+    local leaf = get_rightmost_leaf(node)
+    local leaf_row, leaf_col = leaf:start()
+
+    -- Only include nodes whose leaf is in our range
+    if leaf_row >= start_line and leaf_row <= end_line then
       local name = vim.treesitter.get_node_text(node, bufnr)
 
-      -- Skip short names and duplicates
-      if name and #name > 1 and not seen[name] then
-        seen[name] = true
-        table.insert(identifiers, {
-          name = name,
-          line = row,
-          col = col,
-        })
+      -- Skip short names or pure numeric identifiers
+      if name and #name > 1 and not name:match("^%d+$") then
+        local pos_key = string.format("%d:%d", leaf_row, leaf_col)
+        local existing = by_pos[pos_key]
+        -- Keep or upgrade to longer qualified name (e.g. torch.cuda.is_available > is_available)
+        if not existing or #name > #existing.name then
+          by_pos[pos_key] = {
+            name = name,
+            line = leaf_row,
+            col = leaf_col,
+          }
+        end
       end
+    end
+  end
+
+  -- Sort positions top-to-bottom, left-to-right
+  local sorted_items = {}
+  for _, item in pairs(by_pos) do
+    table.insert(sorted_items, item)
+  end
+  table.sort(sorted_items, function(a, b)
+    if a.line == b.line then return a.col < b.col end
+    return a.line < b.line
+  end)
+
+  -- Deduplicate by identifier name across different occurrences
+  local identifiers = {}
+  local seen_names = {}
+  for _, item in ipairs(sorted_items) do
+    if not seen_names[item.name] then
+      seen_names[item.name] = true
+      table.insert(identifiers, item)
     end
   end
 
@@ -513,14 +551,19 @@ function M.extract_library_info_async(bufnr, question_start_line, question_end_l
     table.insert(result.errors, "Library info extraction timeout")
   end
 
-  -- Collect results respecting token budget
+  -- Collect results respecting token budget and deduplicating hover docs
   local lib_found = 0
+  local seen_hover = {}
   for _, info in pairs(results) do
     if info and info.hover then
-      lib_found = lib_found + 1
-      if result.total_tokens + info.tokens <= M.config.max_tokens then
-        result.total_tokens = result.total_tokens + info.tokens
-        table.insert(result.items, info)
+      local hover_sig = info.hover:gsub("%s+", " "):sub(1, 150)
+      if not seen_hover[hover_sig] then
+        seen_hover[hover_sig] = true
+        lib_found = lib_found + 1
+        if result.total_tokens + info.tokens <= M.config.max_tokens then
+          result.total_tokens = result.total_tokens + info.tokens
+          table.insert(result.items, info)
+        end
       end
     end
   end
