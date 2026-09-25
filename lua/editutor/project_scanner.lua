@@ -1360,6 +1360,13 @@ end
 ---Ensure editutor log files are in .gitignore
 ---@param project_root string
 function M.ensure_gitignore_entry(project_root)
+  if not project_root or project_root == "" then
+    return
+  end
+  -- Generic guard: never touch locations we cannot write to
+  if vim.fn.filewritable(project_root) ~= 2 then
+    return
+  end
   local gitignore_path = project_root .. "/.gitignore"
   local entry = ".editutor/editutor.log*"
 
@@ -1379,7 +1386,7 @@ function M.ensure_gitignore_entry(project_root)
 
   -- Add entry
   table.insert(lines, entry)
-  vim.fn.writefile(lines, gitignore_path)
+  pcall(vim.fn.writefile, lines, gitignore_path)
 end
 
 return M

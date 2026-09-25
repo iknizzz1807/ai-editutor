@@ -102,7 +102,7 @@ function M.setup(opts)
   cache.setup()
 
   vim.schedule(function()
-    debug_log.ensure_gitignore()
+    pcall(debug_log.ensure_gitignore)
   end)
 
   debug_log.setup_error_hook()

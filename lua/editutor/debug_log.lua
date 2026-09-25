@@ -6,6 +6,7 @@
 local M = {}
 
 local project_scanner = require("editutor.project_scanner")
+local config = require("editutor.config")
 
 -- Error log (global, not per-project)
 M.ERROR_LOG = vim.fn.stdpath("data") .. "/editutor_errors.log"
@@ -15,21 +16,77 @@ M.MAX_LOG_SIZE = 1024 * 1024 -- 1MB max log size
 M.MAX_ERROR_LOG_SIZE = 512 * 1024 -- 512KB max error log size
 M.MAX_BACKUP_COUNT = 2 -- Keep up to 2 backup files
 
----Get log file path
+---Normalize an allowed-root entry: expand ~, absolutize, strip trailing slash
+---@param p string
 ---@return string
-function M.get_log_path()
+local function normalize_root(p)
+  local expanded = vim.fn.expand(p)
+  local abs = vim.fn.fnamemodify(expanded, ":p")
+  if #abs > 1 then
+    abs = abs:gsub("/+$", "")
+  end
+  return abs
+end
+
+---Check whether per-project logging is allowed for the current buffer.
+---Opt-in via `log = { enabled, only_in }`: disabled by default, and when
+---enabled the project root must sit inside one of only_in roots (subtree
+---match, so subfolders of /work match too). Always silent (no notify).
+---@return string|nil project_root nil when logging is not allowed
+local function allowed_project_root()
+  local log_cfg = config.options.log or {}
+  if not log_cfg.enabled then
+    return nil
+  end
+  -- Never touch special buffers (Tutor: buftype=nowrite/filetype=tutor)
+  if vim.bo.buftype ~= "" then
+    return nil
+  end
+  if vim.bo.filetype == "tutor" or vim.bo.filetype == "help" then
+    return nil
+  end
   local project_root = project_scanner.get_project_root()
+  if not project_root or project_root == "" then
+    return nil
+  end
+  local only_in = log_cfg.only_in or {}
+  if #only_in == 0 then
+    return project_root -- enabled with no roots = legacy allow-all
+  end
+  local root_abs = vim.fn.fnamemodify(project_root, ":p"):gsub("/+$", "")
+  for _, entry in ipairs(only_in) do
+    local allowed = normalize_root(entry)
+    if root_abs == allowed or root_abs:sub(1, #allowed + 1) == allowed .. "/" then
+      return project_root
+    end
+  end
+  return nil
+end
+
+---Get log file path
+---@return string|nil nil when per-project logging is not allowed here
+function M.get_log_path()
+  local project_root = allowed_project_root()
+  if project_root == nil then
+    return nil
+  end
   return project_root .. "/.editutor/editutor.log"
 end
 
 ---Ensure the per-project editutor directory exists
----@return string dir_path
+---@return string|nil dir_path nil when per-project logging is not allowed here
 local function ensure_project_dir()
-  local project_root = project_scanner.get_project_root()
+  local project_root = allowed_project_root()
+  if project_root == nil then
+    return nil
+  end
   local dir_path = project_root .. "/.editutor"
 
   if vim.fn.isdirectory(dir_path) ~= 1 then
-    vim.fn.mkdir(dir_path, "p")
+    local ok = pcall(vim.fn.mkdir, dir_path, "p")
+    if not ok then
+      return nil
+    end
   end
 
   return dir_path
@@ -66,10 +123,21 @@ local function rotate_log_if_needed(log_path, max_size)
 end
 
 ---Ensure editutor log files are in .gitignore
+---Silent no-op when per-project logging is not allowed here.
+---@return boolean ok
 function M.ensure_gitignore()
-  ensure_project_dir()
-  local project_root = project_scanner.get_project_root()
-  project_scanner.ensure_gitignore_entry(project_root)
+  local ok, result = pcall(function()
+    if ensure_project_dir() == nil then
+      return false
+    end
+    local project_root = project_scanner.get_project_root()
+    project_scanner.ensure_gitignore_entry(project_root)
+    return true
+  end)
+  if not ok then
+    return false
+  end
+  return result
 end
 
 ---Format timestamp
@@ -114,6 +182,9 @@ function M.log_request(request)
   M.ensure_gitignore()
 
   local log_path = M.get_log_path()
+  if log_path == nil then
+    return false -- per-project logging not allowed here
+  end
 
   -- Rotate log if needed
   rotate_log_if_needed(log_path, M.MAX_LOG_SIZE)
@@ -240,6 +311,9 @@ end
 ---@param response LogResponse
 function M.log_response(response)
   local log_path = M.get_log_path()
+  if log_path == nil then
+    return -- per-project logging not allowed here
+  end
 
   if vim.fn.filereadable(log_path) ~= 1 then
     return -- No log file yet
@@ -279,6 +353,9 @@ end
 ---Clear log file
 function M.clear()
   local log_path = M.get_log_path()
+  if log_path == nil then
+    return
+  end
   if vim.fn.filereadable(log_path) == 1 then
     vim.fn.delete(log_path)
   end
@@ -383,6 +460,9 @@ end
 ---@return number bytes
 function M.get_size()
   local log_path = M.get_log_path()
+  if log_path == nil then
+    return 0
+  end
   local stat = vim.loop.fs_stat(log_path)
   return stat and stat.size or 0
 end
@@ -390,6 +470,10 @@ end
 ---Open log file in a new buffer
 function M.open()
   local log_path = M.get_log_path()
+  if log_path == nil then
+    vim.notify("[ai-editutor] Per-project logging is not enabled for this location", vim.log.levels.INFO)
+    return
+  end
   if vim.fn.filereadable(log_path) == 1 then
     vim.cmd("edit " .. log_path)
   else
@@ -407,6 +491,9 @@ function M.log(message)
   M.ensure_gitignore()
 
   local log_path = M.get_log_path()
+  if log_path == nil then
+    return false -- per-project logging not allowed here
+  end
   local line = string.format("[%s] %s", timestamp(), message)
   
   -- Read existing content

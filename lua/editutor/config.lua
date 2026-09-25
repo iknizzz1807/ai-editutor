@@ -9,6 +9,7 @@ local M = {}
 ---@field api_key string|function API key or function returning key
 ---@field model string Model identifier
 ---@field keymaps EditutorKeymaps Keymap configuration
+---@field log EditutorLogConfig Per-project log folder config
 ---@field context EditutorContextConfig Context extraction config
 ---@field providers table<string, EditutorProvider> Provider configurations
 
@@ -24,6 +25,11 @@ local M = {}
 ---@field diagnostics_budget number Max tokens for LSP diagnostics (default 2500)
 ---@field references_budget number Max tokens for LSP references (default 4000)
 ---@field library_scan_radius number Lines before/after question to scan (default 60)
+
+---@class EditutorLogConfig
+---@field enabled boolean Master switch for per-project .editutor/ logs (default false)
+---@field only_in string[] Allowed roots; project must be inside one of them.
+--- Empty + enabled=true means allow-all (legacy behavior). Subtree match.
 
 ---@class EditutorProvider
 ---@field name string Provider name
@@ -82,6 +88,15 @@ M.defaults = {
   -- Custom provider overrides (built-in providers are in provider.lua)
   -- Users can add custom providers here or override built-in ones
   providers = {},
+
+  -- Per-project log folder (.editutor/)
+  -- Opt-in: nothing spawns unless enabled=true AND the current project
+  -- is inside one of only_in roots (subtree match). Example for ~/Work only:
+  --   require("editutor").setup({ log = { enabled = true, only_in = { "~/Work" } } })
+  log = {
+    enabled = false,
+    only_in = {},
+  },
 }
 
 M.options = vim.deepcopy(M.defaults)
